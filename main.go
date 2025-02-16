@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
 	"syscall"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/joho/godotenv"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -24,36 +26,47 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 			return
 		}
 
-        msgTime := v.Info.Timestamp
-        now := time.Now()
+		msgTime := v.Info.Timestamp
+		now := time.Now()
 
-        if now.Sub(msgTime).Seconds() > 10 {
-            return
-        }
+		if now.Sub(msgTime).Seconds() > 10 {
+			return
+		}
+
+		spew.Config.Indent = "\n"
+		// spew.Config.MaxDepth = 2
+		// spew.Printf("messageContextInfo: %#v\n\n", v.Message)
 
 		var messageText string
 		if v.Message.ExtendedTextMessage != nil && v.Message.ExtendedTextMessage.Text != nil {
 			messageText = *v.Message.ExtendedTextMessage.Text
+		} else if v.Message.ImageMessage != nil {
+			messageText = *v.Message.ImageMessage.Caption
 		} else {
 			messageText = v.Message.GetConversation()
 		}
 
 		senderJID := v.Info.Sender.ToNonAD()
 
+		fmt.Println(senderJID.UserInt(), "=>", messageText)
+
 		commandList := []string{
-			"!check", 
-			"!listgroups", 
+			"!check",
+			"!listgroups",
 			"!token",
+			"!sticker",
 		}
 
 		if contains(commandList, messageText) {
 			userState.Lock()
-			_, exists := userState.pending[senderJID.String()];
+			_, exists := userState.pending[senderJID.String()]
 			if exists {
 				delete(userState.pending, senderJID.String())
 			}
 			userState.Unlock()
 		}
+
+		stickerRegex := regexp.MustCompile(`^!sticker(\s+\S+)*$`)
 
 		if messageText == "!check" {
 			checkHandler(client, senderJID)
@@ -61,12 +74,13 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 			listgroupsHandler(client, senderJID)
 		} else if messageText == "!token" {
 			tokenHandler(client, senderJID)
+		} else if stickerRegex.MatchString(messageText) {
+			stickerHandler(client, senderJID, v.Message, messageText)
 		} else {
 			getNameHandler(client, senderJID, messageText)
 		}
 	}
 }
-
 
 func main() {
 	err := godotenv.Load()
@@ -111,6 +125,7 @@ func main() {
 		}
 	} else {
 		err = client.Connect()
+		fmt.Println("Successfully authenticated")
 		if err != nil {
 			panic(err)
 		}
