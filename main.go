@@ -42,6 +42,8 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 			messageText = *v.Message.ExtendedTextMessage.Text
 		} else if v.Message.ImageMessage != nil {
 			messageText = *v.Message.ImageMessage.Caption
+		} else if v.Message.VideoMessage != nil {
+			messageText = *v.Message.VideoMessage.Caption
 		} else {
 			messageText = v.Message.GetConversation()
 		}

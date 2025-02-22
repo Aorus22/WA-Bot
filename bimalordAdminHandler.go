@@ -97,7 +97,8 @@ func getNameHandler(client *whatsmeow.Client, senderJID waTypes.JID, messageText
 		return
 	}
 
-	var validNameRegex = regexp.MustCompile(`^[a-zA-Z']+$`)
+	var validNameRegex = regexp.MustCompile(`^[a-zA-Z' ]+$`)
+	fmt.Println(messageText)
 	if !validNameRegex.MatchString(messageText) {
 		_, err := client.SendMessage(context.Background(), senderJID, &waProto.Message{
 			Conversation: proto.String("⚠️ Nama Invalid"),

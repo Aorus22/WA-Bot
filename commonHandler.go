@@ -65,14 +65,16 @@ func stickerHandler(
 	crop := strings.Contains(strings.ToLower(messageText), "crop")
 
 	if vMessage.GetImageMessage() != nil {
-		convertToStickerSubHandler(client, senderJID, vMessage.GetImageMessage(), crop)
+		convertImageToStickerSubHandler(client, senderJID, vMessage.GetImageMessage(), crop)
+	} else if vMessage.GetVideoMessage() != nil {
+		convertVideoToStickerSubHandler(client, senderJID, vMessage.GetVideoMessage(), crop)
 	} else {
 		linkToStickerSubHandler(client, senderJID, messageText, crop)
 	}
 
 }
 
-func convertToStickerSubHandler(
+func convertImageToStickerSubHandler(
 	client *whatsmeow.Client, 
 	senderJID waTypes.JID, 
 	waImageMessage *waE2E.ImageMessage, 
@@ -84,14 +86,36 @@ func convertToStickerSubHandler(
 		return
 	}
 	
-	imagePath := fmt.Sprintf("images/image_%d.jpg", time.Now().UnixMilli())
+	imagePath := fmt.Sprintf("media/%d.jpg", time.Now().UnixMilli())
 	err = os.WriteFile(imagePath, data, 0644)
 	if err != nil {
-		fmt.Println("Gagal menyimpan gambar:", err)
+		fmt.Println("Failed to save image:", err)
 		return
 	}
 
-	convertImageToSticker(client, senderJID, imagePath, crop)
+	convertMediaToSticker(client, senderJID, imagePath, crop, false)
+}
+
+func convertVideoToStickerSubHandler(
+	client *whatsmeow.Client, 
+	senderJID waTypes.JID, 
+	waVideoMessage *waE2E.VideoMessage, 
+	crop bool,
+){
+	data, err := client.Download(waVideoMessage)
+	if err != nil {
+		fmt.Println("Failed to download video:", err)
+		return
+	}
+	
+	videoPath := fmt.Sprintf("media/%d.mp4", time.Now().UnixMilli())
+	err = os.WriteFile(videoPath, data, 0644)
+	if err != nil {
+		fmt.Println("Failed to save image:", err)
+		return
+	}
+
+	convertMediaToSticker(client, senderJID, videoPath, crop, true)
 }
 
 func linkToStickerSubHandler(
@@ -99,16 +123,28 @@ func linkToStickerSubHandler(
 	senderJID waTypes.JID, 
 	messageText string,
 	crop bool,
-	){
+) {
 	url, err := getLinkFromString(messageText)
 	if err != nil {
 		return
 	}
 
-	imagePath, err := downloadImageFromURL(url)
+	mediaPath, err := downloadMediaFromURL(url)
 	if err != nil {
 		return
 	}
 
-	convertImageToSticker(client, senderJID, imagePath, crop)
+	mimeType, err := getMimeType(mediaPath)
+	if err != nil {
+		return
+	}
+
+	isVideo := true
+	if strings.HasPrefix(mimeType, "image/") {
+		isVideo = false
+	} else if strings.HasPrefix(mimeType, "video/") {
+		isVideo = true
+	}
+
+	convertMediaToSticker(client, senderJID, mediaPath, crop, isVideo)
 }

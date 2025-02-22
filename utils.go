@@ -31,7 +31,7 @@ func getLinkFromString(input string) (string, error) {
 	return "", errors.New("no link found")
 }
 
-func downloadImageFromURL(url string) (string, error) {
+func downloadMediaFromURL(url string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -39,11 +39,11 @@ func downloadImageFromURL(url string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch image, status: %d", resp.StatusCode)
+		return "", fmt.Errorf("failed to fetch media, status: %d", resp.StatusCode)
 	}
 
-	imagePath := "images/image_" + fmt.Sprintf("%d", time.Now().UnixMilli()) + ".jpg"
-	file, err := os.Create(imagePath)
+	mediaPath := "media/" + fmt.Sprintf("%d", time.Now().UnixMilli())
+	file, err := os.Create(mediaPath)
 	if err != nil {
 		return "", err
 	}
@@ -54,5 +54,22 @@ func downloadImageFromURL(url string) (string, error) {
 		return "", err
 	}
 
-	return imagePath, nil
+	return mediaPath, nil
+}
+
+func getMimeType(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	buffer := make([]byte, 512)
+	_, err = file.Read(buffer)
+	if err != nil {
+		return "", err
+	}
+
+	mimeType := http.DetectContentType(buffer)
+	return mimeType, nil
 }
