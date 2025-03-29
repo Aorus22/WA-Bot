@@ -1,4 +1,4 @@
-package utils
+package main
 
 import (
     "database/sql"
@@ -8,14 +8,13 @@ import (
 
     "github.com/robfig/cron/v3"
     _ "github.com/mattn/go-sqlite3"
-    "go.mau.fi/whatsmeow"
 )
 
-func clearChatHistory(dbPath string, client *whatsmeow.Client) error {
-    client.Disconnect()
+func clearChatHistory() error {
+    waClient.Disconnect()
     fmt.Println("Client disconnected for cron job")
 
-    db, err := sql.Open("sqlite3", dbPath)
+    db, err := sql.Open("sqlite3", dbUrl)
     if err != nil {
         return fmt.Errorf("failed to open database: %v", err)
     }
@@ -45,7 +44,7 @@ func clearChatHistory(dbPath string, client *whatsmeow.Client) error {
         return fmt.Errorf("failed to commit transaction: %v", err)
     }
 
-    err = client.Connect()
+    err = waClient.Connect()
     if err != nil {
         return fmt.Errorf("failed to reconnect client: %v", err)
     }
@@ -54,7 +53,7 @@ func clearChatHistory(dbPath string, client *whatsmeow.Client) error {
     return nil
 }
 
-func SetupCron(dbPath string, client *whatsmeow.Client) {
+func setupCron() {
     schedule := os.Getenv("CRON_SCHEDULE")
     if schedule == "" {
         panic("CRON_SCHEDULE environment variable is not set")
@@ -63,7 +62,7 @@ func SetupCron(dbPath string, client *whatsmeow.Client) {
     c := cron.New()
 
     _, err := c.AddFunc(schedule, func() {
-        err := clearChatHistory(dbPath, client)
+        err := clearChatHistory()
         if err != nil {
             fmt.Printf("Error while clearing messages via cron: %v\n", err)
         }

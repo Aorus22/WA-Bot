@@ -63,13 +63,6 @@ jobs:
           docker tag "${{ secrets.DOCKER_IMAGE }}" "${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}"
           docker push "${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}"
 
-      - name: Notify Deployment Server
-        if: steps.confirm.outputs.should-deploy == 'true'
-        run: |
-          curl -X POST "${{ secrets.WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d '{"secret": "${{ secrets.WEBHOOK_SECRET }}"}'
-
       - name: Optional Reset .deploy-confirm
         if: steps.confirm.outputs.should-deploy == 'true' && github.event_name == 'push'
         run: echo "NO" > .deploy-confirm

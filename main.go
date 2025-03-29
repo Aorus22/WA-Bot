@@ -26,6 +26,11 @@ import (
 	"wa-bot/state"
 )
 
+var (
+	dbUrl = "file:wa-bot-session.db?_foreign_keys=on"
+	waClient *whatsmeow.Client
+)
+
 func eventHandler(evt any, client *whatsmeow.Client) {
 	switch v := evt.(type) {
 	case *events.Message:
@@ -181,19 +186,21 @@ func getAuth(client *whatsmeow.Client) {
 	}
 }
 
-func main() {
+func init() {
 	err := godotenv.Load()
 	if err != nil {
 		fmt.Println("Error loading .env file")
 	}
+}
 
+func main() {
 	logLevel := os.Getenv("LOG_LEVEL")
 	if logLevel == "" {
 		logLevel = "DEBUG"
 	}
 
 	dbLog := waLog.Stdout("Database", logLevel, true)
-	container, err := sqlstore.New("sqlite3", "file:wa-bot-session.db?_foreign_keys=on", dbLog)
+	container, err := sqlstore.New("sqlite3", dbUrl, dbLog)
 	if err != nil {
 		panic(err)
 	}
@@ -204,17 +211,17 @@ func main() {
 	}
 
 	clientLog := waLog.Stdout("Client", logLevel, true)
-	client := whatsmeow.NewClient(deviceStore, clientLog)
-	client.AddEventHandler(func(evt any) {
-		eventHandler(evt, client)
+	waClient = whatsmeow.NewClient(deviceStore, clientLog)
+	waClient.AddEventHandler(func(evt any) {
+		eventHandler(evt, waClient)
 	})
 
-	utils.SetupCron("file:wa-bot-session.db?_foreign_keys=on", client)
+	setupCron()
 
-	if client.Store.ID == nil {
-		getAuth(client)
+	if waClient.Store.ID == nil {
+		getAuth(waClient)
 	} else {
-		err = client.Connect()
+		err = waClient.Connect()
 		fmt.Println("Successfully authenticated")
 		if err != nil {
 			panic(err)
@@ -225,5 +232,5 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
 
-	client.Disconnect()
+	waClient.Disconnect()
 }
