@@ -3,6 +3,7 @@ module wa-bot
 go 1.24.2
 
 require (
+	github.com/aorus22/instagramdl v0.0.0-20250413042826-610b92f59faf
 	github.com/gabriel-vasile/mimetype v1.4.8
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.27
@@ -14,7 +15,6 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/aorus22/instagramdl v0.0.0-20250413042826-610b92f59faf // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect

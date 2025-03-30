@@ -98,6 +98,7 @@ func ConvertToWebp(ctx context.Context, mediaPath string, opt *StickerOptions) (
 
 	args = append(args,
 		"-quality", fmt.Sprintf("%d", opt.Quality),
+		"-pix_fmt", "rgba",
 		"-y", webpPath,
 	)
 

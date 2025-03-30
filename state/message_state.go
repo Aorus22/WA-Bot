@@ -110,14 +110,12 @@ func (s *MessageState) SendStickerMessage(ctx context.Context, uploadedData *wha
 	return err
 }
 
-func (s *MessageState) ReplyNoCancelError(ctx context.Context, err error, msg string) bool {
+func (s *MessageState) ReplyNoCancelError(ctx context.Context, err error, msg string) {
     if err != nil {
         if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
             s.Reply(msg)
         }
-        return true
     }
-    return false
 }
 
 func (s *MessageState) AddUserToState(status string, cancel func()) {
