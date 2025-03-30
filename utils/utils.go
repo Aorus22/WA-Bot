@@ -1,7 +1,7 @@
 package utils
 
 import (
-	goctx "context"
+	"context"
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
@@ -34,11 +34,11 @@ func GetLinkFromString(input string) (string, error) {
 			return word, nil
 		}
 	}
-	return "", errors.New("no link found")
+	return "", fmt.Errorf("no link found / invalid link")
 }
 
-func DownloadMediaFromURL(procCtx goctx.Context, url string) (string, error) {
-	req, err := http.NewRequestWithContext(procCtx, "GET", url, nil)
+func DownloadMediaFromURL(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +107,7 @@ func GetFFMPEGExecutable() (string, error){
 	}
 }
 
-func WriteWebpExifFile(procCtx goctx.Context, inputPath string, packName, author string) (string, error) {
+func WriteWebpExifFile(ctx context.Context, inputPath string, packName, author string) (string, error) {
 	timestamp := time.Now().Unix()
 	filenameBase := fmt.Sprintf("%d_convert", timestamp)
 
@@ -141,7 +141,7 @@ func WriteWebpExifFile(procCtx goctx.Context, inputPath string, packName, author
 		return "", err
 	}
 
-	cmd := exec.CommandContext(procCtx, "webpmux", "-set", "exif", exifPath, inputPath, "-o", outputPath)
+	cmd := exec.CommandContext(ctx, "webpmux", "-set", "exif", exifPath, inputPath, "-o", outputPath)
 	if err := cmd.Run(); err != nil {
 		return "", err
 	}
@@ -149,11 +149,21 @@ func WriteWebpExifFile(procCtx goctx.Context, inputPath string, packName, author
 	return outputPath, nil
 }
 
-func IsCanceledGoroutine(ctx goctx.Context) bool {
+func IsCanceledGoroutine(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
 		return true
 	default:
 		return false
 	}
+}
+
+func LogNoCancelErr(ctx context.Context, err error, msg string) bool {
+    if err != nil {
+        if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+            fmt.Println(msg, err)
+        }
+        return true
+    }
+    return false
 }

@@ -1,7 +1,7 @@
 package adminHandlers
 
 import (
-	goctx "context"
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -9,31 +9,33 @@ import (
 	"strings"
 	"time"
 
-	"wa-bot/context"
+	"wa-bot/state"
 	"wa-bot/utils"
 )
 
-func TokenHandler(ctx *context.MessageContext) {
-	isAllowed := ctx.UserRole == "ADMIN" || ctx.UserRole == "OWNER" || ctx.UserRole == "USER"
-	isFromGroup := ctx.IsFromGroup
+func TokenHandler(s *state.MessageState) {
+	isAllowed := s.UserRole == "ADMIN" || s.UserRole == "OWNER" || s.UserRole == "USER"
+	isFromGroup := s.IsFromGroup
 
 	if !isAllowed || isFromGroup {
-		ctx.Reply("Invalid Command")
+		s.Reply("Invalid Command")
 		return
 	}
 
-	ctx.AddUserToState("PendingToken", func() {});
-	ctx.Reply("Silakan masukkan nama lengkap Anda.")
+	s.AddUserToState("PendingToken", func() {});
+	s.Reply("Silakan masukkan nama lengkap Anda.")
 }
 
-func GetNameHandler(ctx *context.MessageContext) {
-	ctx.Reply("⏳ Loading...")
+func GetNameHandler(s *state.MessageState) {
+	s.Reply("⏳ Loading...")
 
-	procCtx, cancel := goctx.WithCancel(goctx.Background())
-	ctx.UpdateUserProcess(cancel)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.UpdateUserProcess(cancel)
 
 	go func() {
-		defer ctx.ClearUserState()
+		defer s.ClearUserState()
+		defer cancel()
+
 		timeoutStr := os.Getenv("TIMEOUT_NAMA")
 
 		timeout, err := strconv.Atoi(timeoutStr)
@@ -41,31 +43,31 @@ func GetNameHandler(ctx *context.MessageContext) {
 			timeout = 2
 		}
 
-		startTime, err := ctx.GetUserPendingStartTime()
-
+		startTime, err := s.GetUserPendingStartTime()
 		if err != nil {
-			fmt.Println("User not Found in State", err)
+			fmt.Println("Error getting start time:", err)
 			return
 		}
 
 		if time.Since(startTime) > time.Duration(timeout)*time.Minute {
-			ctx.Reply("⏳ Waktu habis! Silakan ketik *!token* lagi.")
+			s.Reply("⏳ Waktu habis! Silakan ketik *!token* lagi.")
 			return
 		}
 
 		var validNameRegex = regexp.MustCompile(`^[a-zA-Z' ]+$`)
 
-		if !validNameRegex.MatchString(ctx.MessageText) {
-			ctx.Reply("⚠️ Nama Invalid")
+		if !validNameRegex.MatchString(s.MessageText) {
+			s.Reply("⚠️ Nama Invalid")
 			return
 		}
 
-		nis := strings.Split(ctx.SenderJID.String(), "@")[0]
-		nama := ctx.MessageText
+		nis := strings.Split(s.SenderJID.String(), "@")[0]
+		nama := s.MessageText
 
-		status, token, err := utils.FetchTokenData(procCtx, nama, nis)
+		status, token, err := utils.FetchTokenData(ctx, nama, nis)
 		if err != nil {
-			fmt.Println("Failed to fetch token:", err)
+			utils.LogNoCancelErr(ctx, err, "Error fetching token data:")
+			s.ReplyNoCancelError(ctx, err, "Gagal mendapatkan token.")
 			return
 		}
 
@@ -74,13 +76,11 @@ func GetNameHandler(ctx *context.MessageContext) {
 			responseText = "✅ Token baru Anda adalah:"
 		} else if status == "update" {
 			responseText = "Token lama telah tidak berlaku. Ini token baru anda:"
-		} else {
-			responseText = "Gagal mendapatkan token."
 		}
 
-		if utils.IsCanceledGoroutine(procCtx) { return }
+		if utils.IsCanceledGoroutine(ctx) { return }
 
-		ctx.Reply(responseText)
-		ctx.Reply(token)
+		s.Reply(responseText)
+		s.Reply(token)
 	}()
 }

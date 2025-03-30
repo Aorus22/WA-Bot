@@ -1,4 +1,4 @@
-package context
+package state
 
 import (
 	"fmt"
@@ -58,7 +58,7 @@ func (us *UserStateType) CancelUser(senderJID string) error {
 
 	data, exists := us.Data[senderJID]
 	if !exists || data.Cancel == nil {
-		return fmt.Errorf("User not found or no cancel function available")
+		return fmt.Errorf("user not found or no cancel function available")
 	}
 
 	data.Cancel()

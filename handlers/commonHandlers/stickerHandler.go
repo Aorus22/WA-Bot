@@ -1,33 +1,34 @@
 package commonHandlers
 
 import (
-	goctx "context"
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"wa-bot/context"
+	"wa-bot/state"
 	"wa-bot/utils"
 )
 
-func StickerHandler(ctx *context.MessageContext) {
-	isAllowed := ctx.UserRole == "OWNER" || ctx.UserRole == "COMMON"
+func StickerHandler(s *state.MessageState) {
+	isAllowed := s.UserRole == "OWNER" || s.UserRole == "COMMON"
 
 	if !isAllowed {
-		ctx.Reply("Invalid Command")
+		s.Reply("Invalid Command")
 		return
 	}
 
-	ctx.Reply("⏳ Loading...")
+	s.Reply("⏳ Loading...")
 
-	procCtx, cancel := goctx.WithCancel(goctx.Background())
-	ctx.AddUserToState("processing", cancel)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.AddUserToState("processing", cancel)
 
 	go func() {
-		defer ctx.ClearUserState()
+		defer s.ClearUserState()
+		defer cancel()
 
-		nocrop := strings.Contains(strings.ToLower(ctx.MessageText), "nocrop")
+		nocrop := strings.Contains(strings.ToLower(s.MessageText), "nocrop")
 
 		var (
 			mediaPath string
@@ -36,31 +37,29 @@ func StickerHandler(ctx *context.MessageContext) {
 		)
 
 		switch {
-		case ctx.VMessage.GetImageMessage() != nil:
-			mediaPath, isVideo, err = getWaMedia(ctx, false)
-		case ctx.VMessage.GetVideoMessage() != nil:
-			mediaPath, isVideo, err = getWaMedia(ctx, true)
+		case s.VMessage.GetImageMessage() != nil:
+			mediaPath, isVideo, err = getWaMedia(s, false)
+		case s.VMessage.GetVideoMessage() != nil:
+			mediaPath, isVideo, err = getWaMedia(s, true)
 		default:
-			mediaPath, isVideo, err = getMediaFromUrl(procCtx, ctx.MessageText)
+			mediaPath, isVideo, err = getMediaFromUrl(ctx, s.MessageText)
 		}
-
 		if err != nil {
-			ctx.Reply("Failed to process media")
-			return
+			utils.LogNoCancelErr(ctx, err, "Error getting media:")
+			s.ReplyNoCancelError(ctx, err, "Failed to convert sticker")
 		}
 		defer os.Remove(mediaPath)
 
-		if utils.IsCanceledGoroutine(procCtx) { return }
+		if utils.IsCanceledGoroutine(ctx) { return }
 
-		sendMediaAsSticker(procCtx, ctx, mediaPath, nocrop, isVideo)
+		sendMediaAsSticker(ctx, s, mediaPath, nocrop, isVideo)
 	}()
 }
 
-func getWaMedia(ctx *context.MessageContext, isVideo bool) (string, bool, error) {
-	data, err := ctx.GetDownloadableMedia(isVideo)
-
+func getWaMedia(s *state.MessageState, isVideo bool) (string, bool, error) {
+	data, err := s.GetDownloadableMedia(isVideo)
 	if err != nil {
-		return "", false, fmt.Errorf("download failed: %w", err)
+		return "", false, err
 	}
 
 	ext := ".jpg"
@@ -77,57 +76,65 @@ func getWaMedia(ctx *context.MessageContext, isVideo bool) (string, bool, error)
 	return mediaPath, isVideo, nil
 }
 
-func getMediaFromUrl(procCtx goctx.Context, messageText string) (string, bool, error) {
+func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, error) {
 	url, err := utils.GetLinkFromString(messageText)
 	if err != nil {
-		return "", false, fmt.Errorf("invalid URL: %w", err)
+		return "", false, err
 	}
 
-	mediaPath, err := utils.DownloadMediaFromURL(procCtx, url)
+	mediaPath, err := utils.DownloadMediaFromURL(ctx, url)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to download from URL: %w", err)
+		return "", false, err
 	}
 
 	mimeType, err := utils.GetMimeType(mediaPath)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to get MIME type: %w", err)
+		return "", false, err
 	}
 
 	isVideo := strings.HasPrefix(mimeType, "video/")
 	return mediaPath, isVideo, nil
 }
 
-func sendMediaAsSticker(procCtx goctx.Context, ctx *context.MessageContext, mediaPath string, nocrop bool, isAnimated bool) {
+func sendMediaAsSticker(ctx context.Context, s *state.MessageState, mediaPath string, nocrop bool, isAnimated bool) {
 	var err error
 
-	webpPath, err := utils.ConvertToWebp(procCtx, mediaPath, nocrop)
+	webpPath, err := utils.ConvertToWebp(ctx, mediaPath, nocrop)
+	defer os.Remove(webpPath)
 	if err != nil {
+		utils.LogNoCancelErr(ctx, err, "Error converting to WebP:")
+		s.ReplyNoCancelError(ctx, err,"Failed to convert media to WebP")
 		return
 	}
-	defer os.Remove(webpPath)
 
 	author := os.Getenv("APP_NAME")
-	finalWebpPath, err := utils.WriteWebpExifFile(procCtx, webpPath, "+62 812-3436-3620", author)
+	finalWebpPath, err := utils.WriteWebpExifFile(ctx, webpPath, "+62 812-3436-3620", author)
 	if err != nil {
-		ctx.Reply("Failed to embed metadata")
+		utils.LogNoCancelErr(ctx, err, "Error writing EXIF data:")
+		s.ReplyNoCancelError(ctx, err, "Failed to convert sticker")
 		return
 	}
 	defer os.Remove(finalWebpPath)
 
 	webpData, err := os.ReadFile(finalWebpPath)
+	if utils.IsCanceledGoroutine(ctx) { return }
 	if err != nil {
-		fmt.Println("Failed to read WebP file with metadata:", err)
+		utils.LogNoCancelErr(ctx, err, "Error reading WebP file:")
+		s.ReplyNoCancelError(ctx, err, "Failed to convert sticker")
 		return
 	}
 
-	uploaded, err := ctx.UploadToWhatsapp(procCtx, webpData, "image")
+	uploaded, err := s.UploadToWhatsapp(ctx, webpData, "image")
 	if err != nil {
-		fmt.Println("Failed to upload sticker:", err)
+		utils.LogNoCancelErr(ctx, err, "Error uploading WebP file:")
+		s.ReplyNoCancelError(ctx, err, "Failed to convert sticker")
 		return
 	}
 
-	err = ctx.SendStickerMessage(uploaded, isAnimated)
+	err = s.SendStickerMessage(ctx, uploaded, isAnimated)
 	if err != nil {
-		ctx.Reply("Failed to send sticker")
+		utils.LogNoCancelErr(ctx, err, "Error sending sticker message:")
+		s.ReplyNoCancelError(ctx, err, "Failed to convert sticker")
+		return
 	}
 }

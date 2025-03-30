@@ -1,19 +1,20 @@
 package adminHandlers
 
 import (
+	"context"
 	"fmt"
 
-	"wa-bot/context"
+	"wa-bot/state"
 	"wa-bot/utils"
 )
 
-func ListgroupsHandler(ctx *context.MessageContext){
-	if ctx.UserRole != "OWNER" {
-		ctx.Reply("Invalid Command")
+func ListgroupsHandler(s *state.MessageState){
+	if s.UserRole != "OWNER" {
+		s.Reply("Invalid Command")
 		return
 	}
 
-	groups, err := ctx.Client.GetJoinedGroups()
+	groups, err := s.Client.GetJoinedGroups()
 	if err != nil {
 		fmt.Println("Error fetching joined groups:", err)
 		return
@@ -23,18 +24,18 @@ func ListgroupsHandler(ctx *context.MessageContext){
 	for _, group := range groups {
 		responseText += fmt.Sprintf("📂 *%s*\n📎 ID: %s\n", group.Name, group.JID.String())
 
-		_, err :=  ctx.Client.GetGroupInfo(group.JID)
+		_, err :=  s.Client.GetGroupInfo(group.JID)
 		if err != nil {
 			fmt.Println("Failed to get group info for", group.JID.String(), ":", err)
 			continue
 		}
 	}
 
-	ctx.Reply(responseText)
+	s.Reply(responseText)
 }
 
-func ListMapelHandler(ctx *context.MessageContext) {
-	isAllowed := ctx.UserRole == "ADMIN" || ctx.UserRole == "OWNER"
+func ListMapelHandler(s *state.MessageState) {
+	isAllowed := s.UserRole == "ADMIN" || s.UserRole == "OWNER"
 
 	if !isAllowed {
 		return
@@ -42,8 +43,8 @@ func ListMapelHandler(ctx *context.MessageContext) {
 
 	listMapel, err := utils.FetchMapel()
 	if err != nil {
-		fmt.Println("Failed to fetch mapel:", err)
-		return
+		utils.LogNoCancelErr(context.Background(), err, "Error fetching mapel:")
+		s.ReplyNoCancelError(context.Background(), err, "Gagal mengambil daftar mapel.")
 	}
 
 	var listMapelString string
@@ -51,5 +52,5 @@ func ListMapelHandler(ctx *context.MessageContext) {
 		listMapelString += fmt.Sprintf("%d. %s\n", i+1, mapel)
 	}
 
-	ctx.Reply(listMapelString)
+	s.Reply(listMapelString)
 }

@@ -1,7 +1,7 @@
 package utils
 
 import (
-	goctx "context"
+	"context"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 )
 
-func FetchTokenData(procCtx goctx.Context, nama, nis string) (string, string, error) {
+func FetchTokenData(ctx context.Context, nama, nis string) (string, string, error) {
 	apiURL := os.Getenv("API_URL")
 	payload := map[string]string{
 		"nama": nama,
@@ -23,7 +23,7 @@ func FetchTokenData(procCtx goctx.Context, nama, nis string) (string, string, er
 		return "", "", err
 	}
 
-	req, err := http.NewRequestWithContext(procCtx, "POST", apiURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", "", err
 	}
@@ -53,7 +53,7 @@ func FetchTokenData(procCtx goctx.Context, nama, nis string) (string, string, er
 	return result.Status, result.Token, nil
 }
 
-func FetchPDF(ctx goctx.Context, mapel string, dataKunci ...map[string]string) (string, error) {
+func FetchPDF(ctx context.Context, mapel string, dataKunci ...map[string]string) (string, error) {
 	pdfURL := os.Getenv("PDF_URL")
 
 	url := fmt.Sprintf("%s/pdf/%s", pdfURL, mapel)

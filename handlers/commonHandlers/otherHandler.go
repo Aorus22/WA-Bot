@@ -2,15 +2,15 @@ package commonHandlers
 
 import (
 	"strings"
-	"wa-bot/context"
+	"wa-bot/state"
 )
 
-func CheckHandler(ctx *context.MessageContext) {
-	ctx.Reply("Hello, World!")
+func CheckHandler(s *state.MessageState) {
+	s.Reply("Hello, World!")
 }
 
-func GetCommandListHandler(ctx *context.MessageContext) {
-	role := ctx.UserRole
+func GetCommandListHandler(s *state.MessageState) {
+	role := s.UserRole
 	var message string
 
 	switch role {
@@ -71,20 +71,20 @@ func GetCommandListHandler(ctx *context.MessageContext) {
 	}
 	message = strings.Join(lines, "\n")
 
-	ctx.Reply(message)
+	s.Reply(message)
 }
 
-func CancelHandler(ctx *context.MessageContext) {
-	state := ctx.CheckUserState()
+func CancelHandler(s *state.MessageState) {
+	state := s.CheckUserState()
 	if state == "" {
-		ctx.Reply("❌ There is no running process")
+		s.Reply("❌ There is no running process")
 		return
 	}
 
-	err := ctx.CancelCurrentProcess()
+	err := s.CancelCurrentProcess()
 	if err != nil {
-		ctx.Reply("⚠️ Failed to cancel process")
+		s.Reply("⚠️ Failed to cancel process")
 	}
 
-	ctx.Reply("✅ Process successfully cancelled")
+	s.Reply("✅ Process successfully cancelled")
 }

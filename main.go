@@ -23,8 +23,7 @@ import (
 	Admin "wa-bot/handlers/adminHandlers"
 	Common "wa-bot/handlers/commonHandlers"
 	"wa-bot/utils"
-
-	ctx "wa-bot/context"
+	"wa-bot/state"
 )
 
 func eventHandler(evt any, client *whatsmeow.Client) {
@@ -32,7 +31,7 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 	case *events.Message:
 
 		if v.Info.IsGroup {
-			allowed :=ctx.FromAllowedGroups(&v.Info)
+			allowed :=utils.IsFromAllowedGroups(&v.Info)
 			if !allowed { return }
 		}
 
@@ -60,26 +59,26 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 			messageText = v.Message.GetConversation()
 		}
 
-		message_ctx := ctx.NewMessageContext(client, v.Message, senderJID, messageText, isFromGroup)
+		message_state := state.NewMessageContext(client, v.Message, senderJID, messageText, isFromGroup)
 
 		fmt.Printf("%s [%s] %d => %s\n",
 			func() string {
-				if message_ctx.IsFromGroup {
+				if message_state.IsFromGroup {
 					return "[Group]"
 				}
 				return ""
 			}(),
-			message_ctx.UserRole,
-			message_ctx.SenderJID.UserInt(),
-			message_ctx.MessageText,
+			message_state.UserRole,
+			message_state.SenderJID.UserInt(),
+			message_state.MessageText,
 		)
 
-		if message_ctx.CheckUserState() != "" {
+		if message_state.CheckUserState() != "" {
 			if strings.HasPrefix(messageText, "!cancel") {
-				Common.CancelHandler(message_ctx)
+				Common.CancelHandler(message_state)
 				return
 			} else if strings.HasPrefix(messageText, "!") {
-				message_ctx.Reply("There is another process, !cancel to cancel it")
+				message_state.Reply("There is another process, !cancel to cancel it")
 				return
 			}
 		}
@@ -89,42 +88,42 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 		answerPdfRegex := regexp.MustCompile(`^!answer(\s+\S+)*$`)
 
 		switch {
-		case message_ctx.MessageText == "!check":
-			Common.CheckHandler(message_ctx)
+		case message_state.MessageText == "!check":
+			Common.CheckHandler(message_state)
 
-		case message_ctx.MessageText == "!listgroups":
-			Admin.ListgroupsHandler(message_ctx)
+		case message_state.MessageText == "!listgroups":
+			Admin.ListgroupsHandler(message_state)
 
-		case message_ctx.MessageText == "!token":
-			Admin.TokenHandler(message_ctx)
+		case message_state.MessageText == "!token":
+			Admin.TokenHandler(message_state)
 
-		case message_ctx.MessageText == "!listmapel":
-			Admin.ListMapelHandler(message_ctx)
+		case message_state.MessageText == "!listmapel":
+			Admin.ListMapelHandler(message_state)
 
-		case pdfRegex.MatchString(message_ctx.MessageText), answerPdfRegex.MatchString(message_ctx.MessageText):
-			Admin.SendPDFHandler(message_ctx)
+		case pdfRegex.MatchString(message_state.MessageText), answerPdfRegex.MatchString(message_state.MessageText):
+			Admin.SendPDFHandler(message_state)
 
-		case stickerRegex.MatchString(message_ctx.MessageText):
-			Common.StickerHandler(message_ctx)
+		case stickerRegex.MatchString(message_state.MessageText):
+			Common.StickerHandler(message_state)
 
-		case message_ctx.MessageText == "!help":
-			Common.GetCommandListHandler(message_ctx)
+		case message_state.MessageText == "!help":
+			Common.GetCommandListHandler(message_state)
 
 		default:
-			if message_ctx.CheckUserState() == "PendingToken" {
-				Admin.GetNameHandler(message_ctx)
+			if message_state.CheckUserState() == "PendingToken" {
+				Admin.GetNameHandler(message_state)
 				return
 			}
 
-			if strings.HasPrefix(message_ctx.MessageText, "!") {
-				message_ctx.Reply("Invalid Command")
+			if strings.HasPrefix(message_state.MessageText, "!") {
+				message_state.Reply("Invalid Command")
 				return
 			}
 
-			if message_ctx.UserRole == "COMMON" {
-				message_ctx.Reply("!help to see the command list")
-			} else if message_ctx.UserRole == "USER" {
-				message_ctx.Reply("!help untuk melihat list command")
+			if message_state.UserRole == "COMMON" {
+				message_state.Reply("!help to see the command list")
+			} else if message_state.UserRole == "USER" {
+				message_state.Reply("!help untuk melihat list command")
 			}
 		}
 	}

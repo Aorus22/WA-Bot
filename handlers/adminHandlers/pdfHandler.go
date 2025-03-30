@@ -1,27 +1,26 @@
 package adminHandlers
 
 import (
-	goctx "context"
-	"fmt"
+	"context"
 	"os"
 	"strconv"
 	"strings"
 
-	"wa-bot/context"
+	"wa-bot/state"
 	"wa-bot/utils"
 )
 
-func SendPDFHandler(ctx *context.MessageContext) {
-	isAllowed := ctx.UserRole == "ADMIN" || ctx.UserRole == "OWNER"
+func SendPDFHandler(s *state.MessageState) {
+	isAllowed := s.UserRole == "ADMIN" || s.UserRole == "OWNER"
 
 	if !isAllowed {
-		ctx.Reply("Invalid Command")
+		s.Reply("Invalid Command")
 		return
 	}
 
-	messageArray := strings.Split(ctx.MessageText, " ")
+	messageArray := strings.Split(s.MessageText, " ")
 	if len(messageArray) < 2 || len(messageArray) > 3 {
-		ctx.Reply("Format perintah salah")
+		s.Reply("Format perintah salah")
 		return
 	}
 
@@ -31,11 +30,12 @@ func SendPDFHandler(ctx *context.MessageContext) {
 		answer = messageArray[2]
 	}
 
-	ctx.Reply("⏳ Loading...")
+	s.Reply("⏳ Loading...")
 
 	listMapel, err := utils.FetchMapel()
 	if err != nil {
-		ctx.Reply("Gagal mengambil daftar mapel.")
+		utils.LogNoCancelErr(context.Background(), err, "Error fetching mapel:")
+		s.Reply("Gagal mengambil daftar mapel.")
 		return
 	}
 
@@ -43,53 +43,53 @@ func SendPDFHandler(ctx *context.MessageContext) {
 		if index > 0 && index <= len(listMapel) {
 			mapel = listMapel[index-1]
 		} else {
-			ctx.Reply("Nomor mapel tidak valid.")
+			s.Reply("Nomor mapel tidak valid.")
 			return
 		}
 	} else if !utils.Contains(listMapel, mapel) {
-		ctx.Reply("Mapel tidak valid.")
+		s.Reply("Mapel tidak valid.")
 		return
 	}
 
-	procCtx, cancel := goctx.WithCancel(goctx.Background())
-	ctx.AddUserToState("processing", cancel)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.AddUserToState("processing", cancel)
 
 	go func() {
-		defer ctx.ClearUserState()
+		defer s.ClearUserState()
+		defer cancel()
 
 		var pdfPath string
 		var err error
 
 		switch answer {
 		case "":
-			pdfPath, err = utils.FetchPDF(procCtx, mapel)
+			pdfPath, err = utils.FetchPDF(ctx, mapel)
 		default:
-			pdfPath, err = utils.FetchPDF(procCtx, mapel, convertToJSON(answer))
+			pdfPath, err = utils.FetchPDF(ctx, mapel, convertToJSON(answer))
+		}
+		if err != nil {
+			utils.LogNoCancelErr(ctx, err, "Error fetching PDF:")
+			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
 		}
 		defer os.Remove(pdfPath)
 
-		if err != nil {
-			fmt.Println("Failed to fetch PDF:", err)
-			return
-		}
-
 		fileData, err := os.ReadFile(pdfPath)
+		if utils.IsCanceledGoroutine(ctx) { return }
 		if err != nil {
-			fmt.Println("Failed to read PDF file:", err)
-			return
-		}
-		if utils.IsCanceledGoroutine(procCtx) { return }
-
-		uploaded, err := ctx.UploadToWhatsapp(procCtx, fileData, "document")
-		if err != nil {
-			fmt.Println("Failed to upload PDF:", err)
-			return
+			utils.LogNoCancelErr(ctx, err, "Error reading file:")
+			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
 		}
 
-		err = ctx.SendDocumentMessage(procCtx, uploaded, mapel)
+		uploaded, err := s.UploadToWhatsapp(ctx, fileData, "document")
 		if err != nil {
-			fmt.Println("Failed to send PDF:", err)
-			return
+			utils.LogNoCancelErr(ctx, err, "Error uploading file:")
+			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
+		}
+
+		err = s.SendDocumentMessage(ctx, uploaded, mapel)
+		if err != nil {
+			utils.LogNoCancelErr(ctx, err, "Error sending document message:")
+			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
 		}
 	}()
 }
