@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -117,6 +118,10 @@ func StickerHandler(s *state.MessageState) {
 				s.ReplyNoCancelError(ctx, err, "Link not supported")
 			} else if errors.Is(err, ErrorNoLinkProvided) {
 				s.ReplyNoCancelError(ctx, err, "No Link Provided")
+			} else if errors.Is(err, utils.ErrorPageNumberExceeded){
+				s.ReplyNoCancelError(ctx, err, "Page Number Exceed the Available Pages")
+			} else if errors.Is(err, utils.ErrorPageNumberNotGiven) {
+				s.ReplyNoCancelError(ctx, err, "No Page Number Given, type page=<number>")
 			} else {
 				s.ReplyNoCancelError(ctx, err, "Invalid Media / Link")
 			}
@@ -187,6 +192,28 @@ func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, err
 	url, err := utils.GetLinkFromString(messageText)
 	if err != nil {
 		return "", false, ErrorNoLinkProvided
+	}
+
+	page := func() int {
+		re := regexp.MustCompile(`\s+page=(\d+)(\s+|$)`)
+		matches := re.FindStringSubmatch(messageText)
+
+		if len(matches) < 2 {
+			return 0
+		}
+		num, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return 0
+		}
+		return num
+	}
+
+	if strings.Contains(url, "instagram.com") {
+		igpage := page()
+		url, err = utils.GetInstagramDirectURL(url, igpage)
+		if err != nil {
+			return "", false, err
+		}
 	}
 
 	mediaPath, err := utils.DownloadMediaFromURL(ctx, url)

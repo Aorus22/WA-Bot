@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/aorus22/instagramdl"
 )
 
 func Contains(slice []string, item string) bool {
@@ -200,4 +201,26 @@ func ParseTimeFromString (t string) float64 {
 	min, _ := strconv.Atoi(parts[0])
 	sec, _ := strconv.Atoi(parts[1])
 	return float64(min*60 + sec)
+}
+
+var ErrorPageNumberExceeded = errors.New("given page exceeded")
+var ErrorPageNumberNotGiven = errors.New("no instagram page number given")
+
+func GetInstagramDirectURL(url string, page int) (string, error) {
+	urls, err := instagramdl.GetInstagramMediaURLs(url)
+	if err != nil || len(urls) == 0 {
+		return "", fmt.Errorf("failed to get direct url")
+	}
+
+	if len(urls) > 1 {
+		if page <= 0 {
+			return "", ErrorPageNumberNotGiven
+		}
+		if page > len(urls) {
+			return "", ErrorPageNumberExceeded
+		}
+		return urls[page-1], nil
+	}
+
+	return urls[0], nil
 }
