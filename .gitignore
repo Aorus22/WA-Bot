@@ -1,4 +1,3 @@
-bimalord-bot-session.db
-bimalord-bot
-bimalord-bot.exe
 .env
+docker-compose
+wa-bot-session.db

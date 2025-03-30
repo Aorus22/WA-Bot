@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 )
 
-func fetchTokenData(nama, nis string) (string, string, error) {
+func FetchTokenData(nama, nis string) (string, string, error) {
 	apiURL := os.Getenv("API_URL")
 	payload := map[string]string{
 		"nama": nama,
@@ -52,25 +52,9 @@ func fetchTokenData(nama, nis string) (string, string, error) {
 	return result.Status, result.Token, nil
 }
 
-// func fetchSoal() (string, error) {
-// 	url := "http://localhost:3000/soal/12_GEOGRAFI_ASAJ25"
-// 	resp, err := http.Get(url)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	defer resp.Body.Close()
-
-// 	body, err := io.ReadAll(resp.Body)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	return string(body), nil
-// }
-
-func fetchPDF(mapel string, dataKunci ...map[string]string) (string, error) {
+func FetchPDF(mapel string, dataKunci ...map[string]string) (string, error) {
 	pdfURL := os.Getenv("PDF_URL")
-	
+
 	url := fmt.Sprintf("%s/pdf/%s", pdfURL, mapel)
 
 	mediaFolder := "media"
@@ -129,19 +113,19 @@ func fetchPDF(mapel string, dataKunci ...map[string]string) (string, error) {
 	return filePath, nil
 }
 
-func fetchMapel() (string, error) {
+func FetchMapel() ([]string, error) {
     pdfURL := os.Getenv("PDF_URL")
     url := fmt.Sprintf("%s/listmapel", pdfURL)
 
     resp, err := http.Get(url)
     if err != nil {
-        return "", err
+        return nil, err
     }
     defer resp.Body.Close()
 
     body, err := io.ReadAll(resp.Body)
     if err != nil {
-        return "", err
+        return nil, err
     }
 
     var result struct {
@@ -150,13 +134,8 @@ func fetchMapel() (string, error) {
 
     err = json.Unmarshal(body, &result)
     if err != nil {
-        return "", err
+        return nil, err
     }
 
-    var output string
-    for i, mapel := range result.MapelList {
-        output += fmt.Sprintf("%d. %s\n", i+1, mapel)
-    }
-
-    return output, nil
+    return result.MapelList, nil
 }

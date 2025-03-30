@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal"
@@ -20,24 +19,26 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+
+	Admin "wa-bot/handlers/adminHandlers"
+	Common "wa-bot/handlers/commonHandlers"
+	"wa-bot/utils"
+
+	ctx "wa-bot/context"
 )
 
-func eventHandler(evt interface{}, client *whatsmeow.Client) {
+func eventHandler(evt any, client *whatsmeow.Client) {
 	switch v := evt.(type) {
 	case *events.Message:
-		adminGroupsEnv := os.Getenv("ADMIN_GROUPS")
+		adminGroupsEnv := os.Getenv("ADMIN_GROUPS_JID")
 		adminGroups := strings.Split(adminGroupsEnv, ",")
 
 		if v.Info.IsGroup {
 			groupJID := v.Info.Chat.String()
-			if !contains(adminGroups, groupJID) {
+			if !utils.Contains(adminGroups, groupJID) {
 				return
 			}
 		}
-
-		// if v.Info.IsGroup {
-		// 	return
-		// }
 
 		msgTime := v.Info.Timestamp
 		now := time.Now()
@@ -45,10 +46,6 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 		if now.Sub(msgTime).Seconds() > 10 {
 			return
 		}
-
-		spew.Config.Indent = "\n"
-		// spew.Config.MaxDepth = 2
-		// spew.Printf("messageContextInfo: %#v\n\n", v.Message)
 
 		var senderJID types.JID
 		isFromGroup := false
@@ -71,45 +68,68 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 			messageText = v.Message.GetConversation()
 		}
 
-		fmt.Println(senderJID.UserInt(), "=>", messageText)
+		message_ctx := ctx.NewMessageContext(client, v.Message, senderJID, messageText, isFromGroup)
 
-		commandList := []string{
-			"!check",
-			"!listgroups",
-			"!token",
-			"!sticker",
-			"!pdf",
-		}
-
-		if contains(commandList, messageText) {
-			userState.Lock()
-			_, exists := userState.pending[senderJID.String()]
-			if exists {
-				delete(userState.pending, senderJID.String())
+		if message_ctx.CheckUserState() != "" {
+			if strings.HasPrefix(messageText, "!") {
+				message_ctx.ClearUserState()
 			}
-			userState.Unlock()
 		}
+
+		fmt.Printf("%s [%s] %d => %s\n",
+			func() string {
+				if message_ctx.IsFromGroup {
+					return "[Group]"
+				}
+				return ""
+			}(),
+			message_ctx.UserRole,
+			message_ctx.SenderJID.UserInt(),
+			message_ctx.MessageText,
+		)
 
 		stickerRegex := regexp.MustCompile(`^!sticker(\s+\S+)*$`)
 		pdfRegex := regexp.MustCompile(`^!pdf\s+\S+$`)
 		answerPdfRegex := regexp.MustCompile(`^!answer(\s+\S+)*$`)
 
-		if messageText == "!check" {
-			checkHandler(client, senderJID)
-		} else if messageText == "!listgroups" {
-			listgroupsHandler(client, senderJID)
-		} else if messageText == "!token" {
-			tokenHandler(client, senderJID)
-		} else if messageText == "!listmapel" {
-			listMapelHandler(client, isFromGroup, senderJID)
-		} else if pdfRegex.MatchString(messageText) {
-			sendPDFHandler(client, isFromGroup, senderJID, v.Message, messageText)
-		} else if answerPdfRegex.MatchString(messageText) {
-			sendPDFHandler(client, isFromGroup, senderJID, v.Message, messageText)
-		} else if stickerRegex.MatchString(messageText) {
-			stickerHandler(client, senderJID, v.Message, messageText)
-		} else {
-			getNameHandler(client, senderJID, messageText)
+		switch {
+		case message_ctx.MessageText == "!check":
+			Common.CheckHandler(message_ctx)
+
+		case message_ctx.MessageText == "!listgroups":
+			Admin.ListgroupsHandler(message_ctx)
+
+		case message_ctx.MessageText == "!token":
+			Admin.TokenHandler(message_ctx)
+
+		case message_ctx.MessageText == "!listmapel":
+			Admin.ListMapelHandler(message_ctx)
+
+		case pdfRegex.MatchString(message_ctx.MessageText), answerPdfRegex.MatchString(message_ctx.MessageText):
+			Admin.SendPDFHandler(message_ctx)
+
+		case stickerRegex.MatchString(message_ctx.MessageText):
+			Common.StickerHandler(message_ctx)
+
+		case message_ctx.MessageText == "!help":
+			Common.GetCommandList(message_ctx)
+
+		default:
+			if message_ctx.CheckUserState() == "PendingToken" {
+				Admin.GetNameHandler(message_ctx)
+				return
+			}
+
+			if strings.HasPrefix(message_ctx.MessageText, "!") {
+				message_ctx.Reply("Invalid Command")
+				return
+			}
+
+			if message_ctx.UserRole == "COMMON" {
+				message_ctx.Reply("!help to see the command list")
+			} else if message_ctx.UserRole == "USER" {
+				message_ctx.Reply("!help untuk melihat list command")
+			}
 		}
 	}
 }
@@ -117,11 +137,11 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 func getAuth(client *whatsmeow.Client) {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Select login method:")
-    fmt.Println("1. QR Code")
-    fmt.Println("2. Pair Code")
-    fmt.Print("Choice: ")
+	fmt.Println("1. QR Code")
+	fmt.Println("2. Pair Code")
+	fmt.Print("Choice: ")
 	choice, _ := reader.ReadString('\n')
-    choice = strings.TrimSpace(choice)
+	choice = strings.TrimSpace(choice)
 
 	switch choice {
 	case "1":
@@ -153,14 +173,14 @@ func getAuth(client *whatsmeow.Client) {
 
 		pairCode, err := client.PairPhone(phoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
 		if err != nil {
-				panic(err)
-			}
-			
+			panic(err)
+		}
+
 		fmt.Println("Your Pair Code:", pairCode)
 
 	default:
-        fmt.Println("Invalid choice")
-        return
+		fmt.Println("Invalid choice")
+		return
 	}
 }
 
@@ -176,7 +196,7 @@ func main() {
 	}
 
 	dbLog := waLog.Stdout("Database", logLevel, true)
-	container, err := sqlstore.New("sqlite3", "file:bimalord-bot-session.db?_foreign_keys=on", dbLog)
+	container, err := sqlstore.New("sqlite3", "file:wa-bot-session.db?_foreign_keys=on", dbLog)
 	if err != nil {
 		panic(err)
 	}
@@ -188,7 +208,7 @@ func main() {
 
 	clientLog := waLog.Stdout("Client", logLevel, true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
-	client.AddEventHandler(func(evt interface{}) {
+	client.AddEventHandler(func(evt any) {
 		eventHandler(evt, client)
 	})
 

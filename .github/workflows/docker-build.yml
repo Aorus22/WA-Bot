@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type YES to proceed with build & deployment"
+        required: true
+        default: "NO"
 
 concurrency:
   group: build-main
@@ -17,19 +23,53 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Determine if deployment should run
+        id: confirm
+        run: |
+          SHOULD_DEPLOY=false
+
+          echo "🔍 Checking deployment condition..."
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "🔧 Triggered by manual dispatch."
+            if [ "${{ github.event.inputs.confirm }}" == "YES" ]; then
+              SHOULD_DEPLOY=true
+            fi
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "🔧 Triggered by push to main."
+            if [ -f .deploy-confirm ]; then
+              CONTENT=$(cat .deploy-confirm | tr -d '[:space:]')
+              if [ "$CONTENT" == "YES" ]; then
+                SHOULD_DEPLOY=true
+              fi
+            else
+              echo "⚠️ .deploy-confirm not found."
+            fi
+          fi
+
+          echo "should-deploy=$SHOULD_DEPLOY" >> "$GITHUB_OUTPUT"
+
       - name: Build Docker Image
+        if: steps.confirm.outputs.should-deploy == 'true'
         run: docker build -t "${{ secrets.DOCKER_IMAGE }}" --no-cache .
 
       - name: Login to Docker Hub
+        if: steps.confirm.outputs.should-deploy == 'true'
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
       - name: Push Image to Docker Hub
+        if: steps.confirm.outputs.should-deploy == 'true'
         run: |
-          docker tag "${{ secrets.DOCKER_IMAGE }}" "${{ secrets.DOCKER_USERNAME }}"/"${{ secrets.DOCKER_IMAGE }}"
-          docker push "${{ secrets.DOCKER_USERNAME }}"/"${{ secrets.DOCKER_IMAGE }}"
+          docker tag "${{ secrets.DOCKER_IMAGE }}" "${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}"
+          docker push "${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE }}"
 
       - name: Notify Deployment Server
+        if: steps.confirm.outputs.should-deploy == 'true'
         run: |
           curl -X POST "${{ secrets.WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
             -d '{"secret": "${{ secrets.WEBHOOK_SECRET }}"}'
+
+      - name: Optional Reset .deploy-confirm
+        if: steps.confirm.outputs.should-deploy == 'true' && github.event_name == 'push'
+        run: echo "NO" > .deploy-confirm
