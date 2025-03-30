@@ -21,10 +21,28 @@ func clearChatHistory(dbPath string, client *whatsmeow.Client) error {
     }
     defer db.Close()
 
-    query := "DELETE FROM whatsmeow_message_secrets"
-    _, err = db.Exec(query)
+    tx, err := db.Begin()
     if err != nil {
-        return fmt.Errorf("failed to delete message history: %v", err)
+        return fmt.Errorf("failed to begin transaction: %v", err)
+    }
+
+    query1 := "DELETE FROM whatsmeow_message_secrets"
+    _, err = tx.Exec(query1)
+    if err != nil {
+        tx.Rollback()
+        return fmt.Errorf("failed to delete message secrets: %v", err)
+    }
+
+    query2 := "DELETE FROM whatsmeow_app_state_mutation_macs"
+    _, err = tx.Exec(query2)
+    if err != nil {
+        tx.Rollback()
+        return fmt.Errorf("failed to delete app state mutation macs: %v", err)
+    }
+
+    err = tx.Commit()
+    if err != nil {
+        return fmt.Errorf("failed to commit transaction: %v", err)
     }
 
     err = client.Connect()
@@ -32,7 +50,7 @@ func clearChatHistory(dbPath string, client *whatsmeow.Client) error {
         return fmt.Errorf("failed to reconnect client: %v", err)
     }
 
-    fmt.Printf("Message history successfully cleared and client reconnected at %s\n", time.Now().Format(time.RFC1123))
+    fmt.Printf("Message history and app state mutation macs successfully cleared and client reconnected at %s\n", time.Now().Format(time.RFC1123))
     return nil
 }
 
