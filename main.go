@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/mdp/qrterminal"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -22,9 +25,19 @@ import (
 func eventHandler(evt interface{}, client *whatsmeow.Client) {
 	switch v := evt.(type) {
 	case *events.Message:
+		adminGroupsEnv := os.Getenv("ADMIN_GROUPS")
+		adminGroups := strings.Split(adminGroupsEnv, ",")
+
 		if v.Info.IsGroup {
-			return
+			groupJID := v.Info.Chat.String()
+			if !contains(adminGroups, groupJID) {
+				return
+			}
 		}
+
+		// if v.Info.IsGroup {
+		// 	return
+		// }
 
 		msgTime := v.Info.Timestamp
 		now := time.Now()
@@ -37,6 +50,16 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 		// spew.Config.MaxDepth = 2
 		// spew.Printf("messageContextInfo: %#v\n\n", v.Message)
 
+		var senderJID types.JID
+		isFromGroup := false
+
+		if v.Info.IsGroup {
+			senderJID = v.Info.Chat.ToNonAD()
+			isFromGroup = true
+		} else {
+			senderJID = v.Info.Sender.ToNonAD()
+		}
+
 		var messageText string
 		if v.Message.ExtendedTextMessage != nil && v.Message.ExtendedTextMessage.Text != nil {
 			messageText = *v.Message.ExtendedTextMessage.Text
@@ -48,8 +71,6 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 			messageText = v.Message.GetConversation()
 		}
 
-		senderJID := v.Info.Sender.ToNonAD()
-
 		fmt.Println(senderJID.UserInt(), "=>", messageText)
 
 		commandList := []string{
@@ -57,6 +78,7 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 			"!listgroups",
 			"!token",
 			"!sticker",
+			"!pdf",
 		}
 
 		if contains(commandList, messageText) {
@@ -69,6 +91,8 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 		}
 
 		stickerRegex := regexp.MustCompile(`^!sticker(\s+\S+)*$`)
+		pdfRegex := regexp.MustCompile(`^!pdf\s+\S+$`)
+		answerPdfRegex := regexp.MustCompile(`^!answer(\s+\S+)*$`)
 
 		if messageText == "!check" {
 			checkHandler(client, senderJID)
@@ -76,11 +100,67 @@ func eventHandler(evt interface{}, client *whatsmeow.Client) {
 			listgroupsHandler(client, senderJID)
 		} else if messageText == "!token" {
 			tokenHandler(client, senderJID)
+		} else if messageText == "!listmapel" {
+			listMapelHandler(client, isFromGroup, senderJID)
+		} else if pdfRegex.MatchString(messageText) {
+			sendPDFHandler(client, isFromGroup, senderJID, v.Message, messageText)
+		} else if answerPdfRegex.MatchString(messageText) {
+			sendPDFHandler(client, isFromGroup, senderJID, v.Message, messageText)
 		} else if stickerRegex.MatchString(messageText) {
 			stickerHandler(client, senderJID, v.Message, messageText)
 		} else {
 			getNameHandler(client, senderJID, messageText)
 		}
+	}
+}
+
+func getAuth(client *whatsmeow.Client) {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Select login method:")
+    fmt.Println("1. QR Code")
+    fmt.Println("2. Pair Code")
+    fmt.Print("Choice: ")
+	choice, _ := reader.ReadString('\n')
+    choice = strings.TrimSpace(choice)
+
+	switch choice {
+	case "1":
+		qrChan, _ := client.GetQRChannel(context.Background())
+		err := client.Connect()
+		if err != nil {
+			panic(err)
+		}
+		for evt := range qrChan {
+			if evt.Event == "code" {
+				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+			} else {
+				fmt.Println("Login event:", evt.Event)
+			}
+		}
+
+	case "2":
+		fmt.Print("Enter phone number: ")
+		phoneNumber, _ := reader.ReadString('\n')
+		phoneNumber = strings.TrimSpace(phoneNumber)
+		if !strings.HasPrefix(phoneNumber, "+") {
+			phoneNumber = "+" + phoneNumber
+		}
+
+		err := client.Connect()
+		if err != nil {
+			panic(err)
+		}
+
+		pairCode, err := client.PairPhone(phoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
+		if err != nil {
+				panic(err)
+			}
+			
+		fmt.Println("Your Pair Code:", pairCode)
+
+	default:
+        fmt.Println("Invalid choice")
+        return
 	}
 }
 
@@ -113,18 +193,7 @@ func main() {
 	})
 
 	if client.Store.ID == nil {
-		qrChan, _ := client.GetQRChannel(context.Background())
-		err = client.Connect()
-		if err != nil {
-			panic(err)
-		}
-		for evt := range qrChan {
-			if evt.Event == "code" {
-				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-			} else {
-				fmt.Println("Login event:", evt.Event)
-			}
-		}
+		getAuth(client)
 	} else {
 		err = client.Connect()
 		fmt.Println("Successfully authenticated")

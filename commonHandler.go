@@ -146,5 +146,6 @@ func linkToStickerSubHandler(
 		isVideo = true
 	}
 
+	fmt.Println("halo")
 	convertMediaToSticker(client, senderJID, mediaPath, crop, isVideo)
 }

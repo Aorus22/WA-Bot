@@ -73,3 +73,25 @@ func getMimeType(filePath string) (string, error) {
 	mimeType := http.DetectContentType(buffer)
 	return mimeType, nil
 }
+
+func convertToJSON(input string) (map[string]string, error) {
+	lines := strings.Split(input, "\n")
+
+	dataKunci := make(map[string]string)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line) 
+		if line == "-" || line == "" {
+			continue 
+		}
+
+		parts := strings.SplitN(line, ".", 2) 
+		if len(parts) == 2 {
+			nomor := strings.TrimSpace(parts[0])
+			jawaban := strings.TrimSpace(parts[1])
+			dataKunci[nomor] = strings.ToUpper(jawaban)
+		}
+	}
+
+	return dataKunci, nil
+}

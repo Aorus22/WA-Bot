@@ -150,3 +150,97 @@ func getNameHandler(client *whatsmeow.Client, senderJID waTypes.JID, messageText
 		fmt.Println("Failed to send message:", err)
 	}
 }
+
+func sendPDFHandler(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JID, vMessage *waProto.Message, messageText string){
+	groupJIDs := strings.Split(os.Getenv("GROUP_JIDS"), ",")
+
+	userRegistered := false
+
+	for _, groupJIDStr := range groupJIDs {
+		targetGroupJID, err := waTypes.ParseJID(groupJIDStr)
+		if err != nil {
+			fmt.Println("Invalid group JID:", err)
+			continue
+		}
+
+		groupInfo, err := client.GetGroupInfo(targetGroupJID)
+		if err != nil {
+			fmt.Println("Failed to get group info for", groupJIDStr, ":", err)
+			continue
+		}
+
+		for _, participant := range groupInfo.Participants {
+			if participant.JID.String() == senderJID.String() {
+				userRegistered = true
+				break
+			}
+		}
+
+		if userRegistered {
+			break
+		}
+	}
+
+	if !isFromGroup && !userRegistered {
+		return
+	}
+
+	messageArray := strings.Split(messageText, " ")
+	if len(messageArray) < 2 && len(messageArray) > 3 {
+		return
+	}
+
+	mapel := messageArray[1]
+
+	if len(messageArray) == 3 {
+		answer := messageArray[2]
+		sendPDFMessage(client, senderJID, mapel, answer)
+	}	else if len(messageArray) == 2 {
+		sendPDFMessage(client, senderJID, mapel, "")
+	}
+}
+
+func listMapelHandler(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JID){
+	groupJIDs := strings.Split(os.Getenv("GROUP_JIDS"), ",")
+
+	userRegistered := false
+
+	for _, groupJIDStr := range groupJIDs {
+		targetGroupJID, err := waTypes.ParseJID(groupJIDStr)
+		if err != nil {
+			fmt.Println("Invalid group JID:", err)
+			continue
+		}
+
+		groupInfo, err := client.GetGroupInfo(targetGroupJID)
+		if err != nil {
+			fmt.Println("Failed to get group info for", groupJIDStr, ":", err)
+			continue
+		}
+
+		for _, participant := range groupInfo.Participants {
+			if participant.JID.String() == senderJID.String() {
+				userRegistered = true
+				break
+			}
+		}
+
+		if userRegistered {
+			break
+		}
+	}
+
+	if !isFromGroup && !userRegistered {
+		return
+	}
+
+	listMapel, err := fetchMapel()
+	if err != nil {
+		fmt.Println("Failed to fetch mapel:", err)
+		return
+	}
+
+	client.SendMessage(context.Background(), senderJID, &waProto.Message{
+		Conversation: proto.String(listMapel),
+	})
+}
