@@ -34,9 +34,9 @@ func ListgroupsHandler(ctx *context.MessageContext){
 }
 
 func ListMapelHandler(ctx *context.MessageContext) {
-	isAdmin := ctx.UserRole == "ADMIN" || ctx.UserRole == "OWNER"
+	isAllowed := ctx.UserRole == "ADMIN" || ctx.UserRole == "OWNER"
 
-	if !ctx.IsFromGroup && !isAdmin {
+	if !isAllowed {
 		return
 	}
 

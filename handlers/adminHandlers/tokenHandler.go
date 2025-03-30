@@ -34,7 +34,6 @@ func GetNameHandler(ctx *context.MessageContext) {
 
 	go func() {
 		defer ctx.ClearUserState()
-
 		timeoutStr := os.Getenv("TIMEOUT_NAMA")
 
 		timeout, err := strconv.Atoi(timeoutStr)
@@ -50,7 +49,6 @@ func GetNameHandler(ctx *context.MessageContext) {
 		}
 
 		if time.Since(startTime) > time.Duration(timeout)*time.Minute {
-			ctx.ClearUserState()
 			ctx.Reply("⏳ Waktu habis! Silakan ketik *!token* lagi.")
 			return
 		}
@@ -59,13 +57,10 @@ func GetNameHandler(ctx *context.MessageContext) {
 
 		if !validNameRegex.MatchString(ctx.MessageText) {
 			ctx.Reply("⚠️ Nama Invalid")
-			ctx.ClearUserState()
 			return
 		}
 
-		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-			return
-		}
+		if utils.IsCanceledGoroutine(procCtx) { return }
 
 		nis := strings.Split(ctx.SenderJID.String(), "@")[0]
 		nama := ctx.MessageText
@@ -76,9 +71,7 @@ func GetNameHandler(ctx *context.MessageContext) {
 			return
 		}
 
-		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-			return
-		}
+		if utils.IsCanceledGoroutine(procCtx) { return }
 
 		var responseText string
 		if status == "new" {
@@ -89,12 +82,9 @@ func GetNameHandler(ctx *context.MessageContext) {
 			responseText = "Gagal mendapatkan token."
 		}
 
-		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-			return
-		}
+		if utils.IsCanceledGoroutine(procCtx) { return }
 
 		ctx.Reply(responseText)
 		ctx.Reply(token)
-
 	}()
 }

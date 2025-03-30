@@ -12,20 +12,22 @@ import (
 )
 
 func StickerHandler(ctx *context.MessageContext) {
-	if ctx.UserRole != "COMMON" && ctx.UserRole != "OWNER" {
+	isAllowed := ctx.UserRole == "OWNER" || ctx.UserRole == "COMMON"
+
+	if !isAllowed {
 		ctx.Reply("Invalid Command")
 		return
 	}
 
+	ctx.Reply("⏳ Loading...")
+
 	procCtx, cancel := goctx.WithCancel(goctx.Background())
 	ctx.AddUserToState("processing", cancel)
-
-	ctx.Reply("⏳ Loading...")
 
 	go func() {
 		defer ctx.ClearUserState()
 
-		crop := strings.Contains(strings.ToLower(ctx.MessageText), "crop")
+		nocrop := strings.Contains(strings.ToLower(ctx.MessageText), "nocrop")
 
 		var (
 			mediaPath string
@@ -48,14 +50,11 @@ func StickerHandler(ctx *context.MessageContext) {
 		}
 		defer os.Remove(mediaPath)
 
-		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-			return
-		}
+		if utils.IsCanceledGoroutine(procCtx) { return }
 
-		sendMediaAsSticker(procCtx, ctx, mediaPath, crop, isVideo)
+		sendMediaAsSticker(procCtx, ctx, mediaPath, nocrop, isVideo)
 	}()
 }
-
 
 func getWaMedia(ctx *context.MessageContext, isVideo bool) (string, bool, error) {
 	data, err := ctx.GetDownloadableMedia(isVideo)
@@ -98,22 +97,18 @@ func getMediaFromUrl(messageText string) (string, bool, error) {
 	return mediaPath, isVideo, nil
 }
 
-func sendMediaAsSticker(procCtx goctx.Context, ctx *context.MessageContext, mediaPath string, crop bool, isAnimated bool) {
+func sendMediaAsSticker(procCtx goctx.Context, ctx *context.MessageContext, mediaPath string, nocrop bool, isAnimated bool) {
 	var err error
 
-	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-		return
-	}
+	if utils.IsCanceledGoroutine(procCtx) { return }
 
-	webpPath, err := utils.ConvertToWebp(mediaPath, crop)
+	webpPath, err := utils.ConvertToWebp(mediaPath, nocrop)
 	if err != nil {
 		return
 	}
 	defer os.Remove(webpPath)
 
-	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-		return
-	}
+	if utils.IsCanceledGoroutine(procCtx) { return }
 
 	author := os.Getenv("APP_NAME")
 	finalWebpPath, err := utils.WriteWebpExifFile(webpPath, "+62 812-3436-3620", author)
@@ -123,9 +118,7 @@ func sendMediaAsSticker(procCtx goctx.Context, ctx *context.MessageContext, medi
 	}
 	defer os.Remove(finalWebpPath)
 
-	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-		return
-	}
+	if utils.IsCanceledGoroutine(procCtx) { return }
 
 	webpData, err := os.ReadFile(finalWebpPath)
 	if err != nil {

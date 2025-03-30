@@ -30,26 +30,18 @@ import (
 func eventHandler(evt any, client *whatsmeow.Client) {
 	switch v := evt.(type) {
 	case *events.Message:
-		adminGroupsEnv := os.Getenv("ADMIN_GROUPS_JID")
-		adminGroups := strings.Split(adminGroupsEnv, ",")
 
 		if v.Info.IsGroup {
-			groupJID := v.Info.Chat.String()
-			if !utils.Contains(adminGroups, groupJID) {
-				return
-			}
+			allowed :=ctx.FromAllowedGroups(&v.Info)
+			if !allowed { return }
 		}
 
 		msgTime := v.Info.Timestamp
 		now := time.Now()
-
-		if now.Sub(msgTime).Seconds() > 10 {
-			return
-		}
+		if now.Sub(msgTime).Seconds() > 10 { return }
 
 		var senderJID types.JID
 		isFromGroup := false
-
 		if v.Info.IsGroup {
 			senderJID = v.Info.Chat.ToNonAD()
 			isFromGroup = true
@@ -70,16 +62,6 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 
 		message_ctx := ctx.NewMessageContext(client, v.Message, senderJID, messageText, isFromGroup)
 
-		if message_ctx.CheckUserState() != "" {
-			if strings.HasPrefix(messageText, "!cancel") {
-				Common.CancelHandler(message_ctx)
-				return
-			} else if strings.HasPrefix(messageText, "!") {
-				message_ctx.Reply("There is another process, !cancel to cancel it")
-				return
-			}
-		}
-
 		fmt.Printf("%s [%s] %d => %s\n",
 			func() string {
 				if message_ctx.IsFromGroup {
@@ -91,6 +73,16 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 			message_ctx.SenderJID.UserInt(),
 			message_ctx.MessageText,
 		)
+
+		if message_ctx.CheckUserState() != "" {
+			if strings.HasPrefix(messageText, "!cancel") {
+				Common.CancelHandler(message_ctx)
+				return
+			} else if strings.HasPrefix(messageText, "!") {
+				message_ctx.Reply("There is another process, !cancel to cancel it")
+				return
+			}
+		}
 
 		stickerRegex := regexp.MustCompile(`^!sticker(\s+\S+)*$`)
 		pdfRegex := regexp.MustCompile(`^!pdf\s+\S+$`)
@@ -215,6 +207,8 @@ func main() {
 	client.AddEventHandler(func(evt any) {
 		eventHandler(evt, client)
 	})
+
+	utils.SetupCron("file:wa-bot-session.db?_foreign_keys=on", client)
 
 	if client.Store.ID == nil {
 		getAuth(client)

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func ConvertToWebp(mediaPath string, crop bool) (string, error) {
+func ConvertToWebp(mediaPath string, nocrop bool) (string, error) {
 	defer os.Remove(mediaPath)
 
 	ffmpegExec, err := GetFFMPEGExecutable()
@@ -23,11 +23,11 @@ func ConvertToWebp(mediaPath string, crop bool) (string, error) {
 	qualityLevels := []int{80, 60, 40, 20}
 
 	for _, quality := range qualityLevels {
-		if crop {
+		if nocrop {
 			cmd = exec.Command(
 				ffmpegExec,
 				"-i", mediaPath,
-				"-vf", "crop=min(iw\\,ih):min(iw\\,ih),scale=512:512",
+				"-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0",
 				"-quality", fmt.Sprintf("%d", quality),
 				"-pix_fmt", "rgba",
 				"-y", webpPath,
@@ -36,7 +36,7 @@ func ConvertToWebp(mediaPath string, crop bool) (string, error) {
 			cmd = exec.Command(
 				ffmpegExec,
 				"-i", mediaPath,
-				"-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0",
+				"-vf", "crop=min(iw\\,ih):min(iw\\,ih),scale=512:512",
 				"-quality", fmt.Sprintf("%d", quality),
 				"-pix_fmt", "rgba",
 				"-y", webpPath,

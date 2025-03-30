@@ -5,7 +5,7 @@ import (
 	"wa-bot/context"
 )
 
-func CheckHandler(ctx *context.MessageContext){
+func CheckHandler(ctx *context.MessageContext) {
 	ctx.Reply("Hello, World!")
 }
 
@@ -20,11 +20,11 @@ func GetCommandListHandler(ctx *context.MessageContext) {
 
 			From Url:
 			1. !sticker <video/gif/image URL>
-			2. !sticker !crop <video/gif/image URL>
+			2. !sticker nocrop <video/gif/image URL>
 
 			Send with image/video/gif:
 			1. !sticker
-			2. !sticker !crop
+			2. !sticker nocrop
 		`)
 	case "USER":
 		message = strings.TrimSpace(`
@@ -57,11 +57,11 @@ func GetCommandListHandler(ctx *context.MessageContext) {
 			# COMMON
 			From Url:
 			1. !sticker <video/gif/image URL>
-			2. !sticker !crop <video/gif/image URL>
+			2. !sticker !nocrop <video/gif/image URL>
 
 			Send with image/video/gif:
 			1. !sticker
-			2. !sticker !crop
+			2. !sticker !nocrop
 	`)
 	}
 
@@ -74,17 +74,17 @@ func GetCommandListHandler(ctx *context.MessageContext) {
 	ctx.Reply(message)
 }
 
-func CancelHandler(ctx *context.MessageContext){
+func CancelHandler(ctx *context.MessageContext) {
 	state := ctx.CheckUserState()
 	if state == "" {
 		ctx.Reply("❌ There is no running process")
 		return
 	}
 
-	cancelled := ctx.CancelCurrentProcess()
-	if cancelled {
-		ctx.Reply("✅ Process successfully cancelled")
-	} else {
+	err := ctx.CancelCurrentProcess()
+	if err != nil {
 		ctx.Reply("⚠️ Failed to cancel process")
 	}
+
+	ctx.Reply("✅ Process successfully cancelled")
 }

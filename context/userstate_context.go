@@ -1,6 +1,7 @@
 package context
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -51,18 +52,18 @@ func (us *UserStateType) GetUserStatus(senderJID string) (UserData, bool) {
 	return data, exists
 }
 
-func (us *UserStateType) CancelUser(senderJID string) bool {
+func (us *UserStateType) CancelUser(senderJID string) error {
 	us.Lock()
 	defer us.Unlock()
 
 	data, exists := us.Data[senderJID]
 	if !exists || data.Cancel == nil {
-		return false
+		return fmt.Errorf("User not found or no cancel function available")
 	}
 
 	data.Cancel()
 	delete(us.Data, senderJID)
-	return true
+	return nil
 }
 
 func (us *UserStateType) UpdateProcessContext (senderJID string, cancel func()) {

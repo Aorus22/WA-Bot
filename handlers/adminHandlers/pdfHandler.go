@@ -14,23 +14,25 @@ import (
 func SendPDFHandler(ctx *context.MessageContext) {
 	isAllowed := ctx.UserRole == "ADMIN" || ctx.UserRole == "OWNER"
 
-	if !ctx.IsFromGroup && !isAllowed {
+	if !isAllowed {
 		ctx.Reply("Invalid Command")
 		return
 	}
 
-	procCtx, cancel := goctx.WithCancel(goctx.Background())
-	ctx.AddUserToState("processing", cancel)
-
-	ctx.Reply("⏳ Loading...")
-
 	messageArray := strings.Split(ctx.MessageText, " ")
-	if len(messageArray) < 2 && len(messageArray) > 3 {
-		ctx.Reply("Format perintah salah. Gunakan: !answer <mapel> -<jawaban>")
+	if len(messageArray) < 2 || len(messageArray) > 3 {
+		ctx.Reply("Format perintah salah")
 		return
 	}
 
 	mapel := messageArray[1]
+	var answer string
+	if len(messageArray) == 3 {
+		answer = messageArray[2]
+	}
+
+	ctx.Reply("⏳ Loading...")
+
 	listMapel, err := utils.FetchMapel()
 	if err != nil {
 		ctx.Reply("Gagal mengambil daftar mapel.")
@@ -49,78 +51,58 @@ func SendPDFHandler(ctx *context.MessageContext) {
 		return
 	}
 
-	var answer string
-	if len(messageArray) == 3 {
-		answer = messageArray[2]
-	}
+	procCtx, cancel := goctx.WithCancel(goctx.Background())
+	ctx.AddUserToState("processing", cancel)
 
 	go func() {
-		sendPDFMessage(procCtx, ctx, mapel, answer)
-		ctx.ClearUserState()
+		defer ctx.ClearUserState()
+
+		var pdfPath string
+		var err error
+
+		if utils.IsCanceledGoroutine(procCtx) { return }
+
+		switch answer {
+		case "":
+			pdfPath, err = utils.FetchPDF(mapel)
+		default:
+			pdfPath, err = utils.FetchPDF(mapel, convertToJSON(answer))
+		}
+		defer os.Remove(pdfPath)
+
+		if err != nil {
+			fmt.Println("Failed to fetch PDF:", err)
+			ctx.Reply("Gagal mengambil PDF")
+			return
+		}
+
+		if utils.IsCanceledGoroutine(procCtx) { return }
+
+		fileData, err := os.ReadFile(pdfPath)
+		if err != nil {
+			fmt.Println("Failed to read PDF file:", err)
+			return
+		}
+
+		if utils.IsCanceledGoroutine(procCtx) { return }
+
+		uploaded, err := ctx.UploadToWhatsapp(fileData, "document")
+		if err != nil {
+			fmt.Println("Failed to upload PDF:", err)
+			return
+		}
+
+		if utils.IsCanceledGoroutine(procCtx) { return }
+
+		err = ctx.SendDocumentMessage(uploaded, mapel)
+		if err != nil {
+			fmt.Println("Failed to send PDF:", err)
+			return
+		}
 	}()
 }
 
-func sendPDFMessage(procCtx goctx.Context, ctx *context.MessageContext, mapel string, answer string){
-	var pdfPath string
-	var err error
-
-	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-		return
-	}
-
-	switch answer {
-	case "":
-		pdfPath, err = utils.FetchPDF(mapel)
-	default:
-		var jsonAnswer map[string]string
-
-		jsonAnswer, err = convertToJSON(answer)
-		if err != nil {
-			ctx.Reply("Format Jawaban Salah")
-			return
-		}
-		pdfPath, err = utils.FetchPDF(mapel, jsonAnswer)
-	}
-
-	defer os.Remove(pdfPath)
-	if err != nil {
-		fmt.Println("Failed to fetch PDF:", err)
-		ctx.Reply("Gagal mengambil PDF")
-		return
-	}
-
-	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-		return
-	}
-
-	fileData, err := os.ReadFile(pdfPath)
-	if err != nil {
-		fmt.Println("Failed to read PDF file:", err)
-		return
-	}
-
-	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-		return
-	}
-
-	uploaded, err := ctx.UploadToWhatsapp(fileData, "document")
-	if err != nil {
-		fmt.Println("Failed to upload PDF:", err)
-		return
-	}
-
-	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
-		return
-	}
-
-	err = ctx.SendDocumentMessage(uploaded, mapel)
-	if err != nil {
-		fmt.Println("Failed to send PDF:", err)
-		return
-	}
-}
-
-func convertToJSON(input string) (map[string]string, error) {
+func convertToJSON(input string) map[string]string {
 	lines := strings.Split(input, "\n")
 
 	dataKunci := make(map[string]string)
@@ -139,5 +121,5 @@ func convertToJSON(input string) (map[string]string, error) {
 		}
 	}
 
-	return dataKunci, nil
+	return dataKunci
 }

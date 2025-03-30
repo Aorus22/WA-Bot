@@ -10,6 +10,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/types"
 	waTypes "go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -41,14 +42,17 @@ func getUserRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.J
 	}
 
 	adminGroups := strings.Split(os.Getenv("ADMIN_GROUPS_JID"), ",")
-	isAdmin := false
+	userGroups := strings.Split(os.Getenv("USER_GROUPS_JID"), ",")
 
 	if isFromGroup {
 		if utils.Contains(adminGroups, senderJID.String()) {
 			return "ADMIN"
+		} else if utils.Contains(adminGroups, senderJID.String()) {
+			return "USER"
 		}
 	}
 
+	isAdmin := false
 	for _, adminGroup := range adminGroups {
 		targetGroupJID, err := waTypes.ParseJID(adminGroup)
 		if err != nil {
@@ -74,9 +78,7 @@ func getUserRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.J
 		}
 	}
 
-	userGroups := strings.Split(os.Getenv("USER_GROUPS_JID"), ",")
 	isUser := false
-
 	for _, userGroup := range userGroups {
 		targetGroupJID, err := waTypes.ParseJID(userGroup)
 		if err != nil {
@@ -103,6 +105,13 @@ func getUserRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.J
 	}
 
 	return "COMMON"
+}
+
+func FromAllowedGroups(vInfo *types.MessageInfo) bool {
+	adminGroups := strings.Split(os.Getenv("ADMIN_GROUPS_JID"), ",")
+	groupJID := vInfo.Chat.String()
+
+	return utils.Contains(adminGroups, groupJID)
 }
 
 func (ctx *MessageContext) Reply(text string) {
@@ -206,6 +215,6 @@ func (ctx *MessageContext) UpdateUserProcess(cancel func()) {
 	UserState.UpdateProcessContext(ctx.SenderJID.String(), cancel)
 }
 
-func (ctx *MessageContext) CancelCurrentProcess() bool {
+func (ctx *MessageContext) CancelCurrentProcess() error {
 	return UserState.CancelUser(ctx.SenderJID.String())
 }

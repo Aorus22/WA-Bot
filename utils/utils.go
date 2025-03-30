@@ -143,11 +143,11 @@ func WriteWebpExifFile(inputPath string, packName, author string) (string, error
 	return outputPath, nil
 }
 
-func CheckCanceledGoroutine(ctx goctx.Context) error {
+func IsCanceledGoroutine(ctx goctx.Context) bool {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return true
 	default:
-		return nil
+		return false
 	}
 }
