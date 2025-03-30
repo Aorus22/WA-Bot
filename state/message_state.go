@@ -68,24 +68,29 @@ func (s *MessageState) SendDocumentMessage(ctx context.Context, uploadedData *wh
 	return err
 }
 
-func (s *MessageState) GetDownloadableMedia(isVideo bool) ([]byte, error) {
+func (s *MessageState) GetDownloadableMedia() ([]byte, bool, error) {
 	var downloadableMedia whatsmeow.DownloadableMessage
-	if isVideo {
+	var isVideo bool
+
+	if s.VMessage.GetVideoMessage() != nil {
 		downloadableMedia = s.VMessage.GetVideoMessage()
-	} else {
+		isVideo = true
+
+	} else if s.VMessage.GetImageMessage() != nil {
 		downloadableMedia = s.VMessage.GetImageMessage()
+		isVideo = false
 	}
 
 	if downloadableMedia == nil {
-		return nil, fmt.Errorf("no downloadable media found")
+		return nil, isVideo, fmt.Errorf("no downloadable media found")
 	}
 
 	data, err := s.Client.Download(downloadableMedia)
 	if err != nil {
-		return nil, fmt.Errorf("download failed: %w", err)
+		return nil, isVideo, fmt.Errorf("download failed: %w", err)
 	}
 
-	return data, nil
+	return data, isVideo, nil
 }
 
 func (s *MessageState) SendStickerMessage(ctx context.Context, uploadedData *whatsmeow.UploadResponse, isAnimated bool) (error) {

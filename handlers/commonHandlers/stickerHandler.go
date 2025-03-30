@@ -31,18 +31,43 @@ func StickerHandler(s *state.MessageState) {
 
 		nocrop := strings.Contains(strings.ToLower(s.MessageText), "nocrop")
 
+		var startTime, endTime string
+		parts := strings.Fields(s.MessageText)
+		for _, part := range parts {
+			if strings.HasPrefix(part, "start=") {
+				startTime = strings.TrimPrefix(part, "start=")
+			}
+			if strings.HasPrefix(part, "end=") {
+				endTime = strings.TrimPrefix(part, "end=")
+			}
+		}
+
+		if startTime == "" && endTime != "" {
+			s.Reply("End Time given, but Start Time not")
+			return
+		}
+
+		if (startTime != "" && !utils.IsValidTimeFormat(startTime)) || (endTime != "" && !utils.IsValidTimeFormat(endTime)) {
+			s.Reply("Invalid time format. Use MM:SS, e.g., start=00:10 end=00:20")
+			return
+		}
+
+		if startTime != "" && endTime != "" {
+			if utils.ParseTimeFromString(startTime) >= utils.ParseTimeFromString(endTime) {
+				s.Reply("Start time must be earlier than end time")
+				return
+			}
+		}
+
 		var (
 			mediaPath string
 			isVideo   bool
 			err       error
 		)
 
-		switch {
-		case s.VMessage.GetImageMessage() != nil:
-			mediaPath, isVideo, err = getWaMedia(s, false)
-		case s.VMessage.GetVideoMessage() != nil:
-			mediaPath, isVideo, err = getWaMedia(s, true)
-		default:
+		if s.VMessage.GetImageMessage() != nil || s.VMessage.GetVideoMessage() != nil {
+			mediaPath, isVideo, err = getWaMedia(s)
+		} else {
 			mediaPath, isVideo, err = getMediaFromUrl(ctx, s.MessageText)
 		}
 		defer os.Remove(mediaPath)
@@ -60,7 +85,34 @@ func StickerHandler(s *state.MessageState) {
 
 		if utils.IsCanceledGoroutine(ctx) { return }
 
-		err = sendMediaAsSticker(ctx, s, mediaPath, nocrop, isVideo)
+		if startTime != "" {
+			duration, err := utils.GetMediaDuration(mediaPath)
+			if err != nil {
+				if errors.Is(err, utils.ErrorNotVideo) {
+					s.ReplyNoCancelError(ctx, err, "Not a video but given start time")
+				} else {
+					s.ReplyNoCancelError(ctx, err, "Server error: failed to convert sticker")
+				}
+				utils.LogNoCancelErr(ctx, err, "error:")
+
+				return
+			}
+
+			startTimeInSecond :=  utils.ParseTimeFromString(startTime)
+			endTimeInSecond := utils.ParseTimeFromString(endTime)
+
+			if startTimeInSecond > duration {
+				s.Reply(fmt.Sprintf("Start Time (%.0fs) exceeds media duration (%.0fs)", startTimeInSecond, duration))
+				return
+			}
+
+			if endTime != "" && utils.ParseTimeFromString(endTime) > duration {
+				s.Reply(fmt.Sprintf("End Time (%.0fs) exceeds media duration (%.0fs)", endTimeInSecond, duration))
+				return
+			}
+		}
+
+		err = sendMediaAsSticker(ctx, s, isVideo, mediaPath, nocrop, isVideo, startTime, endTime)
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "error:")
 			s.ReplyNoCancelError(ctx, err, "Server error: failed to convert sticker")
@@ -68,17 +120,13 @@ func StickerHandler(s *state.MessageState) {
 	}()
 }
 
-func getWaMedia(s *state.MessageState, isVideo bool) (string, bool, error) {
-	data, err := s.GetDownloadableMedia(isVideo)
+func getWaMedia(s *state.MessageState) (string, bool, error) {
+	data, isVideo, err := s.GetDownloadableMedia()
 	if err != nil {
 		return "", false, err
 	}
 
-	ext := ".jpg"
-	if isVideo {
-		ext = ".mp4"
-	}
-	mediaPath := fmt.Sprintf("media/%d%s", time.Now().UnixMilli(), ext)
+	mediaPath := fmt.Sprintf("media/%d", time.Now().UnixMilli())
 
 	err = os.WriteFile(mediaPath, data, 0644)
 	if err != nil {
@@ -106,7 +154,6 @@ func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, err
 	if err != nil {
 		return mediaPath, false, err
 	}
-	fmt.Println(mimeType)
 
 	if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") {
 		return mediaPath, false, ErrorNotSupportedLink
@@ -116,10 +163,10 @@ func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, err
 	return mediaPath, isVideo, nil
 }
 
-func sendMediaAsSticker(ctx context.Context, s *state.MessageState, mediaPath string, nocrop bool, isAnimated bool) error {
+func sendMediaAsSticker(ctx context.Context, s *state.MessageState, isVideo bool, mediaPath string, nocrop bool, isAnimated bool, startTime string, endTime string) error {
 	var err error
 
-	webpPath, err := utils.ConvertToWebp(ctx, mediaPath, nocrop)
+	webpPath, err := utils.ConvertToWebp(ctx, isVideo, mediaPath, nocrop, startTime, endTime)
 	defer os.Remove(webpPath)
 	if err != nil {
 		return fmt.Errorf("convert to WebP: %w", err)

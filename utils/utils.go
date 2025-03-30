@@ -1,8 +1,8 @@
 package utils
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,27 +103,6 @@ func GetMimeType(filePath string) (string, error) {
 	return mime.String(), nil
 }
 
-func GetFFMPEGExecutable() (string, error){
-	if os.Getenv("ENV") == "PRODUCTION" {
-		exePath, err := os.Executable()
-		if err != nil {
-			return "", fmt.Errorf("failed to get executable path: %w", err)
-		}
-		exeDir := filepath.Dir(exePath)
-
-		ffmpegPath := filepath.Join(exeDir, "ffmpeg")
-		if _, err := os.Stat(ffmpegPath); os.IsNotExist(err) {
-			return "", fmt.Errorf("ffmpeg not found")
-		}
-		_ = os.Chmod(ffmpegPath, 0755)
-
-		return ffmpegPath, nil
-
-	} else {
-		return "ffmpeg", nil
-	}
-}
-
 func WriteWebpExifFile(ctx context.Context, inputPath string, packName, author string) (string, error) {
 	timestamp := time.Now().Unix()
 	filenameBase := fmt.Sprintf("%d_convert", timestamp)
@@ -182,4 +162,44 @@ func LogNoCancelErr(ctx context.Context, err error, msg string) bool {
         return true
     }
     return false
+}
+
+func IsValidTimeFormat (t string) bool {
+	re := regexp.MustCompile(`^\d{1,2}:\d{2}$`)
+	if !re.MatchString(t) {
+		return false
+	}
+	split := strings.Split(t, ":")
+	sec, _ := strconv.Atoi(split[1])
+	return sec <= 59
+}
+
+var ErrorNotVideo = errors.New("not video")
+
+func GetMediaDuration(filePath string) (float64, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1", filePath)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	durationStr := strings.TrimSpace(string(output))
+	duration, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		return 0, ErrorNotVideo
+	}
+
+	return duration, nil
+}
+
+func ParseTimeFromString (t string) float64 {
+	if t == "" {
+		return 0
+	}
+	parts := strings.Split(t, ":")
+	min, _ := strconv.Atoi(parts[0])
+	sec, _ := strconv.Atoi(parts[1])
+	return float64(min*60 + sec)
 }
