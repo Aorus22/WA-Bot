@@ -37,8 +37,14 @@ func GetLinkFromString(input string) (string, error) {
 	return "", errors.New("no link found")
 }
 
-func DownloadMediaFromURL(url string) (string, error) {
-	resp, err := http.Get(url)
+func DownloadMediaFromURL(procCtx goctx.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(procCtx, "GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -101,7 +107,7 @@ func GetFFMPEGExecutable() (string, error){
 	}
 }
 
-func WriteWebpExifFile(inputPath string, packName, author string) (string, error) {
+func WriteWebpExifFile(procCtx goctx.Context, inputPath string, packName, author string) (string, error) {
 	timestamp := time.Now().Unix()
 	filenameBase := fmt.Sprintf("%d_convert", timestamp)
 
@@ -135,7 +141,7 @@ func WriteWebpExifFile(inputPath string, packName, author string) (string, error
 		return "", err
 	}
 
-	cmd := exec.Command("webpmux", "-set", "exif", exifPath, inputPath, "-o", outputPath)
+	cmd := exec.CommandContext(procCtx, "webpmux", "-set", "exif", exifPath, inputPath, "-o", outputPath)
 	if err := cmd.Run(); err != nil {
 		return "", err
 	}

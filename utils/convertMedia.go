@@ -1,6 +1,7 @@
 package utils
 
 import (
+	goctx "context"
 	"bytes"
 	"fmt"
 	"os"
@@ -9,7 +10,7 @@ import (
 	"time"
 )
 
-func ConvertToWebp(mediaPath string, nocrop bool) (string, error) {
+func ConvertToWebp(procCtx goctx.Context, mediaPath string, nocrop bool) (string, error) {
 	defer os.Remove(mediaPath)
 
 	ffmpegExec, err := GetFFMPEGExecutable()
@@ -24,7 +25,8 @@ func ConvertToWebp(mediaPath string, nocrop bool) (string, error) {
 
 	for _, quality := range qualityLevels {
 		if nocrop {
-			cmd = exec.Command(
+			cmd = exec.CommandContext(
+				procCtx,
 				ffmpegExec,
 				"-i", mediaPath,
 				"-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0",
@@ -33,7 +35,8 @@ func ConvertToWebp(mediaPath string, nocrop bool) (string, error) {
 				"-y", webpPath,
 			)
 		} else {
-			cmd = exec.Command(
+			cmd = exec.CommandContext(
+				procCtx,
 				ffmpegExec,
 				"-i", mediaPath,
 				"-vf", "crop=min(iw\\,ih):min(iw\\,ih),scale=512:512",

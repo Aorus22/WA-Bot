@@ -41,7 +41,7 @@ func StickerHandler(ctx *context.MessageContext) {
 		case ctx.VMessage.GetVideoMessage() != nil:
 			mediaPath, isVideo, err = getWaMedia(ctx, true)
 		default:
-			mediaPath, isVideo, err = getMediaFromUrl(ctx.MessageText)
+			mediaPath, isVideo, err = getMediaFromUrl(procCtx, ctx.MessageText)
 		}
 
 		if err != nil {
@@ -77,13 +77,13 @@ func getWaMedia(ctx *context.MessageContext, isVideo bool) (string, bool, error)
 	return mediaPath, isVideo, nil
 }
 
-func getMediaFromUrl(messageText string) (string, bool, error) {
+func getMediaFromUrl(procCtx goctx.Context, messageText string) (string, bool, error) {
 	url, err := utils.GetLinkFromString(messageText)
 	if err != nil {
 		return "", false, fmt.Errorf("invalid URL: %w", err)
 	}
 
-	mediaPath, err := utils.DownloadMediaFromURL(url)
+	mediaPath, err := utils.DownloadMediaFromURL(procCtx, url)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to download from URL: %w", err)
 	}
@@ -100,25 +100,19 @@ func getMediaFromUrl(messageText string) (string, bool, error) {
 func sendMediaAsSticker(procCtx goctx.Context, ctx *context.MessageContext, mediaPath string, nocrop bool, isAnimated bool) {
 	var err error
 
-	if utils.IsCanceledGoroutine(procCtx) { return }
-
-	webpPath, err := utils.ConvertToWebp(mediaPath, nocrop)
+	webpPath, err := utils.ConvertToWebp(procCtx, mediaPath, nocrop)
 	if err != nil {
 		return
 	}
 	defer os.Remove(webpPath)
 
-	if utils.IsCanceledGoroutine(procCtx) { return }
-
 	author := os.Getenv("APP_NAME")
-	finalWebpPath, err := utils.WriteWebpExifFile(webpPath, "+62 812-3436-3620", author)
+	finalWebpPath, err := utils.WriteWebpExifFile(procCtx, webpPath, "+62 812-3436-3620", author)
 	if err != nil {
 		ctx.Reply("Failed to embed metadata")
 		return
 	}
 	defer os.Remove(finalWebpPath)
-
-	if utils.IsCanceledGoroutine(procCtx) { return }
 
 	webpData, err := os.ReadFile(finalWebpPath)
 	if err != nil {
@@ -126,7 +120,7 @@ func sendMediaAsSticker(procCtx goctx.Context, ctx *context.MessageContext, medi
 		return
 	}
 
-	uploaded, err := ctx.UploadToWhatsapp(webpData, "image")
+	uploaded, err := ctx.UploadToWhatsapp(procCtx, webpData, "image")
 	if err != nil {
 		fmt.Println("Failed to upload sticker:", err)
 		return

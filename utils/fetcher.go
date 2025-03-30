@@ -1,6 +1,7 @@
 package utils
 
 import (
+	goctx "context"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -11,7 +12,7 @@ import (
 	"path/filepath"
 )
 
-func FetchTokenData(nama, nis string) (string, string, error) {
+func FetchTokenData(procCtx goctx.Context, nama, nis string) (string, string, error) {
 	apiURL := os.Getenv("API_URL")
 	payload := map[string]string{
 		"nama": nama,
@@ -22,7 +23,7 @@ func FetchTokenData(nama, nis string) (string, string, error) {
 		return "", "", err
 	}
 
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(procCtx, "POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", "", err
 	}
@@ -52,7 +53,7 @@ func FetchTokenData(nama, nis string) (string, string, error) {
 	return result.Status, result.Token, nil
 }
 
-func FetchPDF(mapel string, dataKunci ...map[string]string) (string, error) {
+func FetchPDF(ctx goctx.Context, mapel string, dataKunci ...map[string]string) (string, error) {
 	pdfURL := os.Getenv("PDF_URL")
 
 	url := fmt.Sprintf("%s/pdf/%s", pdfURL, mapel)
@@ -80,13 +81,13 @@ func FetchPDF(mapel string, dataKunci ...map[string]string) (string, error) {
 			return "", err
 		}
 
-		req, err = http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
 		if err != nil {
 			return "", err
 		}
 		req.Header.Set("Content-Type", "application/json")
 	} else {
-		req, err = http.NewRequest("GET", url, nil)
+		req, err = http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return "", err
 		}
@@ -117,7 +118,13 @@ func FetchMapel() ([]string, error) {
     pdfURL := os.Getenv("PDF_URL")
     url := fmt.Sprintf("%s/listmapel", pdfURL)
 
-    resp, err := http.Get(url)
+    req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+        return nil, err
+    }
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
     if err != nil {
         return nil, err
     }

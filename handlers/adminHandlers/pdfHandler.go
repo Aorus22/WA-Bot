@@ -60,41 +60,33 @@ func SendPDFHandler(ctx *context.MessageContext) {
 		var pdfPath string
 		var err error
 
-		if utils.IsCanceledGoroutine(procCtx) { return }
-
 		switch answer {
 		case "":
-			pdfPath, err = utils.FetchPDF(mapel)
+			pdfPath, err = utils.FetchPDF(procCtx, mapel)
 		default:
-			pdfPath, err = utils.FetchPDF(mapel, convertToJSON(answer))
+			pdfPath, err = utils.FetchPDF(procCtx, mapel, convertToJSON(answer))
 		}
 		defer os.Remove(pdfPath)
 
 		if err != nil {
 			fmt.Println("Failed to fetch PDF:", err)
-			ctx.Reply("Gagal mengambil PDF")
 			return
 		}
-
-		if utils.IsCanceledGoroutine(procCtx) { return }
 
 		fileData, err := os.ReadFile(pdfPath)
 		if err != nil {
 			fmt.Println("Failed to read PDF file:", err)
 			return
 		}
-
 		if utils.IsCanceledGoroutine(procCtx) { return }
 
-		uploaded, err := ctx.UploadToWhatsapp(fileData, "document")
+		uploaded, err := ctx.UploadToWhatsapp(procCtx, fileData, "document")
 		if err != nil {
 			fmt.Println("Failed to upload PDF:", err)
 			return
 		}
 
-		if utils.IsCanceledGoroutine(procCtx) { return }
-
-		err = ctx.SendDocumentMessage(uploaded, mapel)
+		err = ctx.SendDocumentMessage(procCtx, uploaded, mapel)
 		if err != nil {
 			fmt.Println("Failed to send PDF:", err)
 			return

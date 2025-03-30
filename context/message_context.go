@@ -120,7 +120,7 @@ func (ctx *MessageContext) Reply(text string) {
 	})
 }
 
-func (ctx *MessageContext) UploadToWhatsapp(filedata []byte, dataType string) (*whatsmeow.UploadResponse, error) {
+func (ctx *MessageContext) UploadToWhatsapp(procCtx goctx.Context, filedata []byte, dataType string) (*whatsmeow.UploadResponse, error) {
 	var mediaType whatsmeow.MediaType
 	switch dataType {
 	case "image":
@@ -129,12 +129,12 @@ func (ctx *MessageContext) UploadToWhatsapp(filedata []byte, dataType string) (*
 		mediaType = whatsmeow.MediaDocument
 	}
 
-	uploaded, err := ctx.Client.Upload(goctx.Background(), filedata, mediaType)
+	uploaded, err := ctx.Client.Upload(procCtx, filedata, mediaType)
 	return &uploaded, err
 }
 
-func (ctx *MessageContext) SendDocumentMessage(uploadedData *whatsmeow.UploadResponse, documentTitle string) (error) {
-	_, err := ctx.Client.SendMessage(goctx.Background(), ctx.SenderJID, &waProto.Message{
+func (ctx *MessageContext) SendDocumentMessage(procCtx goctx.Context, uploadedData *whatsmeow.UploadResponse, documentTitle string) (error) {
+	_, err := ctx.Client.SendMessage(procCtx, ctx.SenderJID, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:        proto.String(documentTitle),
 			Mimetype:     proto.String("application/pdf"),

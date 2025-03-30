@@ -60,18 +60,14 @@ func GetNameHandler(ctx *context.MessageContext) {
 			return
 		}
 
-		if utils.IsCanceledGoroutine(procCtx) { return }
-
 		nis := strings.Split(ctx.SenderJID.String(), "@")[0]
 		nama := ctx.MessageText
 
-		status, token, err := utils.FetchTokenData(nama, nis)
+		status, token, err := utils.FetchTokenData(procCtx, nama, nis)
 		if err != nil {
 			fmt.Println("Failed to fetch token:", err)
 			return
 		}
-
-		if utils.IsCanceledGoroutine(procCtx) { return }
 
 		var responseText string
 		if status == "new" {
