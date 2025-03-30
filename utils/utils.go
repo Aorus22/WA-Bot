@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gabriel-vasile/mimetype"
 )
 
 func Contains(slice []string, item string) bool {
@@ -92,36 +94,12 @@ func DownloadMediaFromURL(ctx context.Context, url string) (string, error) {
     return mediaPath, nil
 }
 
-// func GetMimeType(filePath string) (string, error) {
-// 	file, err := os.Open(filePath)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	defer file.Close()
-
-// 	buffer := make([]byte, 512)
-// 	_, err = file.Read(buffer)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	mimeType := http.DetectContentType(buffer)
-// 	return mimeType, nil
-// }
-
 func GetMimeType(filePath string) (string, error) {
-	cmd := exec.Command("file", "--mime-type", "-b", filePath)
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-
-	err := cmd.Run()
+	mime, err := mimetype.DetectFile(filePath)
 	if err != nil {
 		return "", err
 	}
-
-	mimeType := strings.TrimSpace(out.String())
-	return mimeType, nil
+	return mime.String(), nil
 }
 
 func GetFFMPEGExecutable() (string, error){

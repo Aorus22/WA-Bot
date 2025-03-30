@@ -106,6 +106,7 @@ func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, err
 	if err != nil {
 		return mediaPath, false, err
 	}
+	fmt.Println(mimeType)
 
 	if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") {
 		return mediaPath, false, ErrorNotSupportedLink

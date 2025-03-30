@@ -48,6 +48,8 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 			senderJID = v.Info.Sender.ToNonAD()
 		}
 
+		if senderJID.UserInt() == 13135550002 { return }
+
 		var messageText string
 		if v.Message.ExtendedTextMessage != nil && v.Message.ExtendedTextMessage.Text != nil {
 			messageText = *v.Message.ExtendedTextMessage.Text
