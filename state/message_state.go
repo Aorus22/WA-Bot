@@ -19,17 +19,17 @@ type MessageState struct {
 	SenderJID   waTypes.JID
 	MessageText string
 	IsFromGroup bool
-	UserRole 	string
+	UserRole    string
 }
 
 func NewMessageContext(client *whatsmeow.Client, vMessage *waProto.Message, senderJID waTypes.JID, messageText string, isFromGroup bool) *MessageState {
 	return &MessageState{
-		Client:      	client,
-		VMessage:    	vMessage,
-		SenderJID:   	senderJID,
-		MessageText:	messageText,
-		IsFromGroup: 	isFromGroup,
-		UserRole:		utils.AssignRole(client, isFromGroup, senderJID),
+		Client:      client,
+		VMessage:    vMessage,
+		SenderJID:   senderJID,
+		MessageText: messageText,
+		IsFromGroup: isFromGroup,
+		UserRole:    utils.AssignRole(client, isFromGroup, senderJID),
 	}
 }
 
@@ -52,17 +52,17 @@ func (s *MessageState) UploadToWhatsapp(ctx context.Context, filedata []byte, da
 	return &uploaded, err
 }
 
-func (s *MessageState) SendDocumentMessage(ctx context.Context, uploadedData *whatsmeow.UploadResponse, documentTitle string) (error) {
+func (s *MessageState) SendDocumentMessage(ctx context.Context, uploadedData *whatsmeow.UploadResponse, documentTitle string) error {
 	_, err := s.Client.SendMessage(ctx, s.SenderJID, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
-			Title:        proto.String(documentTitle),
-			Mimetype:     proto.String("application/pdf"),
-			URL:          proto.String(uploadedData.URL),
-			DirectPath:   proto.String(uploadedData.DirectPath),
-			MediaKey:     uploadedData.MediaKey,
+			Title:         proto.String(documentTitle),
+			Mimetype:      proto.String("application/pdf"),
+			URL:           proto.String(uploadedData.URL),
+			DirectPath:    proto.String(uploadedData.DirectPath),
+			MediaKey:      uploadedData.MediaKey,
 			FileEncSHA256: uploadedData.FileEncSHA256,
-			FileSHA256:   uploadedData.FileSHA256,
-			FileLength:   proto.Uint64(uploadedData.FileLength),
+			FileSHA256:    uploadedData.FileSHA256,
+			FileLength:    proto.Uint64(uploadedData.FileLength),
 		},
 	})
 	return err
@@ -70,30 +70,30 @@ func (s *MessageState) SendDocumentMessage(ctx context.Context, uploadedData *wh
 
 func (s *MessageState) GetDownloadableMedia() ([]byte, bool, error) {
 	var downloadableMedia whatsmeow.DownloadableMessage
-	var isVideo bool
+	var isAnimated bool
 
 	if s.VMessage.GetVideoMessage() != nil {
 		downloadableMedia = s.VMessage.GetVideoMessage()
-		isVideo = true
+		isAnimated = true
 
 	} else if s.VMessage.GetImageMessage() != nil {
 		downloadableMedia = s.VMessage.GetImageMessage()
-		isVideo = false
+		isAnimated = false
 	}
 
 	if downloadableMedia == nil {
-		return nil, isVideo, fmt.Errorf("no downloadable media found")
+		return nil, isAnimated, fmt.Errorf("no downloadable media found")
 	}
 
 	data, err := s.Client.Download(downloadableMedia)
 	if err != nil {
-		return nil, isVideo, fmt.Errorf("download failed: %w", err)
+		return nil, isAnimated, fmt.Errorf("download failed: %w", err)
 	}
 
-	return data, isVideo, nil
+	return data, isAnimated, nil
 }
 
-func (s *MessageState) SendStickerMessage(ctx context.Context, uploadedData *whatsmeow.UploadResponse, isAnimated bool) (error) {
+func (s *MessageState) SendStickerMessage(ctx context.Context, uploadedData *whatsmeow.UploadResponse, isAnimated bool) error {
 	_, err := s.Client.SendMessage(ctx, s.SenderJID, &waProto.Message{
 		StickerMessage: &waProto.StickerMessage{
 			Mimetype:      proto.String("image/webp"),
@@ -111,11 +111,11 @@ func (s *MessageState) SendStickerMessage(ctx context.Context, uploadedData *wha
 }
 
 func (s *MessageState) ReplyNoCancelError(ctx context.Context, err error, msg string) {
-    if err != nil {
-        if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-            s.Reply(msg)
-        }
-    }
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			s.Reply(msg)
+		}
+	}
 }
 
 func (s *MessageState) AddUserToState(status string, cancel func()) {
@@ -128,7 +128,7 @@ func (s *MessageState) ClearUserState() {
 
 func (s *MessageState) CheckUserState() string {
 	data, exists := UserState.GetUserStatus(s.SenderJID.String())
-	if !exists{
+	if !exists {
 		return ""
 	}
 	return data.Status

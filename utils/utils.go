@@ -41,59 +41,90 @@ func GetLinkFromString(input string) (string, error) {
 	return "", fmt.Errorf("no link found / invalid link")
 }
 
-func DownloadMediaFromURL(ctx context.Context, url string) (string, error) {
-    currentTime := fmt.Sprintf("%d", time.Now().UnixMilli())
+var ErrorNotSupportedLink = errors.New("link not supported")
+
+func DownloadMediaFromURL(ctx context.Context, url string) (string, string, error) {
+	currentTime := fmt.Sprintf("%d", time.Now().UnixMilli())
 	mediaPath := "media/" + currentTime
 
-    cmd := exec.CommandContext(ctx, "yt-dlp",
-        "-o", mediaPath,
-        "--no-playlist",
-        "-f", "best",
-        url,
-    )
-    err := cmd.Run()
-    if err == nil {
-        return mediaPath, nil
-    }
+	tryCommands := []struct {
+		cmd  *exec.Cmd
+	}{
+		{
+			cmd: exec.CommandContext(ctx, "yt-dlp",
+				"-o", mediaPath,
+				"--no-playlist",
+				"-f", "best",
+				url,
+			),
+		},
+		{
+			cmd: exec.CommandContext(ctx, "gallery-dl",
+				"-D", "media",
+				"-f", currentTime,
+				url,
+			),
+		},
+	}
 
-    cmd = exec.CommandContext(ctx, "gallery-dl",
-        "-D", "media",
-        "-f", currentTime,
-        url,
-    )
-    err = cmd.Run()
-    if err == nil {
-        return mediaPath, nil
-    }
+	for _, tc := range tryCommands {
+		err := tc.cmd.Run()
+		if err != nil {
+			continue
+		}
 
-    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-    if err != nil {
-        return mediaPath, err
-    }
+		mimeType, err := GetMimeType(mediaPath)
+		if err != nil {
+			os.Remove(mediaPath)
+			continue
+		}
 
-    client := &http.Client{}
-    resp, err := client.Do(req)
-    if err != nil {
-        return mediaPath, err
-    }
-    defer resp.Body.Close()
+		if strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "video/") {
+			return mediaPath, mimeType, nil
+		} else {
+			os.Remove(mediaPath)
+		}
+	}
 
-    if resp.StatusCode != http.StatusOK {
-        return mediaPath, fmt.Errorf("failed to fetch media, status: %d", resp.StatusCode)
-    }
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return mediaPath, "", err
+	}
 
-    file, err := os.Create(mediaPath)
-    if err != nil {
-        return mediaPath, err
-    }
-    defer file.Close()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return mediaPath, "", err
+	}
+	defer resp.Body.Close()
 
-    _, err = io.Copy(file, resp.Body)
-    if err != nil {
-        return mediaPath, err
-    }
+	if resp.StatusCode != http.StatusOK {
+		return mediaPath, "", fmt.Errorf("failed to fetch media, status: %d", resp.StatusCode)
+	}
 
-    return mediaPath, nil
+	file, err := os.Create(mediaPath)
+	if err != nil {
+		return mediaPath, "", err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		return mediaPath, "", err
+	}
+
+	mimeType, err := GetMimeType(mediaPath)
+	if err != nil {
+		os.Remove(mediaPath)
+		return mediaPath, "", err
+	}
+
+	if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") {
+		os.Remove(mediaPath)
+		return mediaPath, "", ErrorNotSupportedLink
+	}
+
+	return mediaPath, mimeType, nil
 }
 
 func GetMimeType(filePath string) (string, error) {

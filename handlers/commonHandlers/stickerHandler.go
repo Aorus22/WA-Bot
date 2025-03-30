@@ -41,13 +41,13 @@ func StickerHandler(s *state.MessageState) {
 			}
 		}
 
-		mediaPath, isVideo, err := getMedia(ctx, s, s.MessageText)
+		mediaPath, isAnimated, err := getMedia(ctx, s, s.MessageText)
 		defer os.Remove(mediaPath)
 		if err != nil {
 			handleMediaError(ctx, s, err)
 			return
 		}
-		opt.IsVideo = isVideo
+		opt.IsAnimated = isAnimated
 
 		if utils.IsCanceledGoroutine(ctx) {
 			return
@@ -61,9 +61,9 @@ func StickerHandler(s *state.MessageState) {
 			if errors.Is(err, utils.ErrorNotUnder1MB) {
 				s.Reply(
 					"Failed to convert media under 1MB. Consider trying one of the following:\n" +
-					"- Lower the quality with: quality=<0-100>\n" +
-					"- Reduce the video duration: start=MM:SS end=MM:SS\n" +
-					"- Reduce the video FPS: fps=<1-60>",
+						"- Lower the quality with: quality=<0-100>\n" +
+						"- Reduce the video duration: start=MM:SS end=MM:SS\n" +
+						"- Reduce the video FPS: fps=<1-60>",
 				)
 			} else {
 				utils.LogNoCancelErr(ctx, err, "error:")
@@ -173,7 +173,7 @@ func validateVideoDuration(ctx context.Context, s *state.MessageState, path stri
 func handleMediaError(ctx context.Context, s *state.MessageState, err error) {
 	utils.LogNoCancelErr(ctx, err, "Error getting media:")
 	switch {
-	case errors.Is(err, ErrorNotSupportedLink):
+	case errors.Is(err, utils.ErrorNotSupportedLink):
 		s.ReplyNoCancelError(ctx, err, "Link not supported")
 	case errors.Is(err, ErrorNoLinkProvided):
 		s.ReplyNoCancelError(ctx, err, "No Link Provided")
@@ -187,7 +187,7 @@ func handleMediaError(ctx context.Context, s *state.MessageState, err error) {
 }
 
 func getWaMedia(s *state.MessageState) (string, bool, error) {
-	data, isVideo, err := s.GetDownloadableMedia()
+	data, isAnimated, err := s.GetDownloadableMedia()
 	if err != nil {
 		return "", false, err
 	}
@@ -199,10 +199,9 @@ func getWaMedia(s *state.MessageState) (string, bool, error) {
 		return "", false, fmt.Errorf("failed to save media: %w", err)
 	}
 
-	return mediaPath, isVideo, nil
+	return mediaPath, isAnimated, nil
 }
 
-var ErrorNotSupportedLink = errors.New("link not supported")
 var ErrorNoLinkProvided = errors.New("no link provided")
 
 func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, error) {
@@ -233,22 +232,13 @@ func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, err
 		}
 	}
 
-	mediaPath, err := utils.DownloadMediaFromURL(ctx, url)
+	mediaPath, mimeType, err := utils.DownloadMediaFromURL(ctx, url)
 	if err != nil {
 		return mediaPath, false, err
 	}
 
-	mimeType, err := utils.GetMimeType(mediaPath)
-	if err != nil {
-		return mediaPath, false, err
-	}
-
-	if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") {
-		return mediaPath, false, ErrorNotSupportedLink
-	}
-
-	isVideo := strings.HasPrefix(mimeType, "video/")
-	return mediaPath, isVideo, nil
+	isAnimated := strings.HasPrefix(mimeType, "video/") || strings.Contains(mimeType, "gif")
+	return mediaPath, isAnimated, nil
 }
 
 func sendMediaAsSticker(ctx context.Context, s *state.MessageState, mediaPath string, opt *utils.StickerOptions) error {
@@ -272,7 +262,9 @@ func sendMediaAsSticker(ctx context.Context, s *state.MessageState, mediaPath st
 	}
 
 	webpData, err := os.ReadFile(finalWebpPath)
-	if utils.IsCanceledGoroutine(ctx) { return nil }
+	if utils.IsCanceledGoroutine(ctx) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("read WebP: %w", err)
 	}
@@ -282,7 +274,7 @@ func sendMediaAsSticker(ctx context.Context, s *state.MessageState, mediaPath st
 		return fmt.Errorf("upload to WhatsApp: %w", err)
 	}
 
-	err = s.SendStickerMessage(ctx, uploadedData, opt.IsVideo)
+	err = s.SendStickerMessage(ctx, uploadedData, opt.IsAnimated)
 	if err != nil {
 		return fmt.Errorf("send sticker: %w", err)
 	}

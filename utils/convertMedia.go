@@ -14,13 +14,13 @@ import (
 )
 
 type StickerOptions struct {
-	NoCrop    bool
-	Quality   int
-	StartTime string
-	EndTime   string
-	Direction string
-	FPS       int
-	IsVideo   bool
+	NoCrop     bool
+	Quality    int
+	StartTime  string
+	EndTime    string
+	Direction  string
+	FPS        int
+	IsAnimated bool
 }
 
 var ErrorNotUnder1MB = errors.New("failed to convert to webp under 1MB")
@@ -73,7 +73,7 @@ func ConvertToWebp(ctx context.Context, mediaPath string, opt *StickerOptions) (
 	var args []string
 	args = append(args, "-i", mediaPath)
 
-	if opt.IsVideo {
+	if opt.IsAnimated {
 		if opt.StartTime != "" {
 			args = append(args, "-ss", opt.StartTime)
 		}
