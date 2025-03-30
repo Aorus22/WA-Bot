@@ -38,11 +38,13 @@ func GetLinkFromString(input string) (string, error) {
 }
 
 func DownloadMediaFromURL(ctx context.Context, url string) (string, error) {
-    mediaPath := "media/" + fmt.Sprintf("%d", time.Now().UnixMilli())
+    currentTime := fmt.Sprintf("%d", time.Now().UnixMilli())
+	mediaPath := "media/" + currentTime
 
-    cmd := exec.CommandContext(ctx, "gallery-dl",
-        "-D", "media",
-        "-f", fmt.Sprintf("%d", time.Now().UnixMilli()),
+    cmd := exec.CommandContext(ctx, "yt-dlp",
+        "-o", mediaPath,
+        "--no-playlist",
+        "-f", "best",
         url,
     )
     err := cmd.Run()
@@ -50,10 +52,9 @@ func DownloadMediaFromURL(ctx context.Context, url string) (string, error) {
         return mediaPath, nil
     }
 
-    cmd = exec.CommandContext(ctx, "yt-dlp",
-        "-o", mediaPath,
-        "--no-playlist",
-        "-f", "best",
+    cmd = exec.CommandContext(ctx, "gallery-dl",
+        "-D", "media",
+        "-f", currentTime,
         url,
     )
     err = cmd.Run()
@@ -91,20 +92,35 @@ func DownloadMediaFromURL(ctx context.Context, url string) (string, error) {
     return mediaPath, nil
 }
 
+// func GetMimeType(filePath string) (string, error) {
+// 	file, err := os.Open(filePath)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	defer file.Close()
+
+// 	buffer := make([]byte, 512)
+// 	_, err = file.Read(buffer)
+// 	if err != nil {
+// 		return "", err
+// 	}
+
+// 	mimeType := http.DetectContentType(buffer)
+// 	return mimeType, nil
+// }
+
 func GetMimeType(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
+	cmd := exec.Command("file", "--mime-type", "-b", filePath)
 
-	buffer := make([]byte, 512)
-	_, err = file.Read(buffer)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err := cmd.Run()
 	if err != nil {
 		return "", err
 	}
 
-	mimeType := http.DetectContentType(buffer)
+	mimeType := strings.TrimSpace(out.String())
 	return mimeType, nil
 }
 

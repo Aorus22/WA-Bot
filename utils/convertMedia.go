@@ -19,7 +19,7 @@ func ConvertToWebp(ctx context.Context, mediaPath string, nocrop bool) (string, 
 	}
 
 	webpPath := filepath.Join("media", fmt.Sprintf("output_%d.webp", time.Now().UnixMilli()))
-	qualityLevels := []int{80, 50, 20, 5}
+	qualityLevels := []int{80, 50, 20, 5, 1}
 
 	mimeType, err := GetMimeType(mediaPath)
 	if err != nil {
