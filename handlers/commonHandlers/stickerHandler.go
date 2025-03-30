@@ -30,67 +30,78 @@ func StickerHandler(s *state.MessageState) {
 		defer s.ClearUserState()
 		defer cancel()
 
-		nocrop := strings.Contains(strings.ToLower(s.MessageText), "nocrop")
+		var mediaPath string
+		opt := &utils.StickerOptions{}
+		var err error
 
-		var (
-			startTime, endTime 	string
-			fps 				int
-			err					error
-			direction 			string
-		)
+		opt.NoCrop = strings.Contains(strings.ToLower(s.MessageText), "nocrop")
 
 		parts := strings.Fields(s.MessageText)
 		for _, part := range parts {
 			if strings.HasPrefix(part, "start=") {
-				startTime = strings.TrimPrefix(part, "start=")
+				opt.StartTime = strings.TrimPrefix(part, "start=")
 			}
 			if strings.HasPrefix(part, "end=") {
-				endTime = strings.TrimPrefix(part, "end=")
+				opt.EndTime = strings.TrimPrefix(part, "end=")
 			}
 			if strings.HasPrefix(part, "fps=") {
 				fpsStr := strings.TrimPrefix(part, "fps=")
-				fps, err = strconv.Atoi(fpsStr)
-				if err != nil {
-					fps = 0
-				} else if fps < 1 || fps > 60 {
+				opt.FPS, err = strconv.Atoi(fpsStr)
+				if err != nil || opt.FPS < 1 || opt.FPS > 60 {
 					s.Reply("FPS must be between 1 and 60")
-				}
-			}
-			if strings.HasPrefix(part, "direction=") {
-				direction = strings.TrimPrefix(part, "direction=")
-				if direction != "up" && direction != "down" && direction != "left" && direction != "right" {
-					s.Reply("Direction Invalid. Use up, down, left, or right")
 					return
 				}
 			}
+			if strings.HasPrefix(part, "direction=") {
+				rawDirection := strings.TrimPrefix(part, "direction=")
+				dParts := strings.Split(rawDirection, "-")
+				side := dParts[0]
+
+				if side != "up" && side != "down" && side != "left" && side != "right" {
+					s.Reply("Direction invalid. Use up, down, left, or right (with optional -0 to -50)")
+					return
+				}
+
+				if len(dParts) == 2 {
+					percentStr := dParts[1]
+					if _, err := strconv.Atoi(percentStr); err != nil {
+						s.Reply("Invalid direction format. Use for example: right or right-25")
+						return
+					}
+
+					percent, _ := strconv.Atoi(percentStr)
+					if percent < 0 || percent > 50 {
+						s.Reply("Direction offset must be between 0 and 50")
+						return
+					}
+				}
+
+				opt.Direction = rawDirection
+			}
 		}
 
-		if startTime == "" && endTime != "" {
+		if opt.StartTime == "" && opt.EndTime != "" {
 			s.Reply("End Time given, but Start Time not")
 			return
 		}
 
-		if (startTime != "" && !utils.IsValidTimeFormat(startTime)) || (endTime != "" && !utils.IsValidTimeFormat(endTime)) {
+		if (opt.StartTime != "" && !utils.IsValidTimeFormat(opt.StartTime)) || (opt.EndTime != "" && !utils.IsValidTimeFormat(opt.EndTime)) {
 			s.Reply("Invalid time format. Use MM:SS, e.g., start=00:10 end=00:20")
 			return
 		}
 
-		if startTime != "" && endTime != "" {
-			if utils.ParseTimeFromString(startTime) >= utils.ParseTimeFromString(endTime) {
+		if opt.StartTime != "" && opt.EndTime != "" {
+			if utils.ParseTimeFromString(opt.StartTime) >= utils.ParseTimeFromString(opt.EndTime) {
 				s.Reply("Start time must be earlier than end time")
 				return
 			}
 		}
 
-		var (
-			mediaPath string
-			isVideo   bool
-		)
 
 		if s.VMessage.GetImageMessage() != nil || s.VMessage.GetVideoMessage() != nil {
-			mediaPath, isVideo, err = getWaMedia(s)
+			mediaPath, opt.IsVideo, err = getWaMedia(s)
 		} else {
-			mediaPath, isVideo, err = getMediaFromUrl(ctx, s.MessageText)
+			mediaPath, opt.IsVideo, err = getMediaFromUrl(ctx, s.MessageText)
 		}
 		defer os.Remove(mediaPath)
 		if err != nil {
@@ -107,7 +118,7 @@ func StickerHandler(s *state.MessageState) {
 
 		if utils.IsCanceledGoroutine(ctx) { return }
 
-		if startTime != "" {
+		if opt.StartTime != "" {
 			duration, err := utils.GetMediaDuration(mediaPath)
 			if err != nil {
 				if errors.Is(err, utils.ErrorNotVideo) {
@@ -120,21 +131,21 @@ func StickerHandler(s *state.MessageState) {
 				return
 			}
 
-			startTimeInSecond :=  utils.ParseTimeFromString(startTime)
-			endTimeInSecond := utils.ParseTimeFromString(endTime)
+			startTimeInSecond :=  utils.ParseTimeFromString(opt.StartTime)
+			endTimeInSecond := utils.ParseTimeFromString(opt.EndTime)
 
 			if startTimeInSecond > duration {
 				s.Reply(fmt.Sprintf("Start Time (%.0fs) exceeds media duration (%.0fs)", startTimeInSecond, duration))
 				return
 			}
 
-			if endTime != "" && utils.ParseTimeFromString(endTime) > duration {
+			if opt.EndTime != "" && utils.ParseTimeFromString(opt.EndTime) > duration {
 				s.Reply(fmt.Sprintf("End Time (%.0fs) exceeds media duration (%.0fs)", endTimeInSecond, duration))
 				return
 			}
 		}
 
-		err = sendMediaAsSticker(ctx, s, isVideo, mediaPath, nocrop, isVideo, startTime, endTime, direction, fps)
+		err = sendMediaAsSticker(ctx, s, mediaPath, opt)
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "error:")
 			s.ReplyNoCancelError(ctx, err, "Server error: failed to convert sticker")
@@ -185,10 +196,10 @@ func getMediaFromUrl(ctx context.Context, messageText string) (string, bool, err
 	return mediaPath, isVideo, nil
 }
 
-func sendMediaAsSticker(ctx context.Context, s *state.MessageState, isVideo bool, mediaPath string, nocrop bool, isAnimated bool, startTime string, endTime string, direction string, fps int) error {
+func sendMediaAsSticker(ctx context.Context, s *state.MessageState, mediaPath string, opt *utils.StickerOptions) error {
 	var err error
 
-	webpPath, err := utils.ConvertToWebp(ctx, isVideo, mediaPath, nocrop, startTime, endTime, direction, fps)
+	webpPath, err := utils.ConvertToWebp(ctx, mediaPath, opt)
 	defer os.Remove(webpPath)
 	if err != nil {
 		return fmt.Errorf("convert to WebP: %w", err)
@@ -208,12 +219,12 @@ func sendMediaAsSticker(ctx context.Context, s *state.MessageState, isVideo bool
 		return fmt.Errorf("read WebP: %w", err)
 	}
 
-	uploaded, err := s.UploadToWhatsapp(ctx, webpData, "image")
+	uploadedData, err := s.UploadToWhatsapp(ctx, webpData, "image")
 	if err != nil {
 		return fmt.Errorf("upload to WhatsApp: %w", err)
 	}
 
-	err = s.SendStickerMessage(ctx, uploaded, isAnimated)
+	err = s.SendStickerMessage(ctx, uploadedData, opt.IsVideo)
 	if err != nil {
 		return fmt.Errorf("send sticker: %w", err)
 	}

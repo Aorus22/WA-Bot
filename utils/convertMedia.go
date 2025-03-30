@@ -8,30 +8,60 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
+
 )
 
-func ConvertToWebp(ctx context.Context, isVideo bool, mediaPath string, nocrop bool, startTime string, endTime string, direction string, fps int) (string, error) {
+type StickerOptions struct {
+	NoCrop     bool
+	StartTime  string
+	EndTime    string
+	Direction  string
+	FPS        int
+	IsVideo    bool
+}
+
+func ConvertToWebp(ctx context.Context, mediaPath string, opt *StickerOptions) (string, error) {
 	webpPath := filepath.Join("media", fmt.Sprintf("output_%d.webp", time.Now().UnixMilli()))
 	qualityLevels := []int{80, 50, 20, 5, 1}
 
-	if fps == 0 {
-		fps = 15
+	if opt.FPS == 0 {
+		opt.FPS = 15
+	}
+
+	parseDirection := func() (string, int) {
+		parts := strings.Split(opt.Direction, "-")
+		side := parts[0]
+		level := 0
+
+		if len(parts) == 2 {
+			if n, err := strconv.Atoi(parts[1]); err == nil {
+				level = n
+			}
+		}
+
+		return side, level
 	}
 
 	getCropFilter := func() string {
-		baseCrop := "crop=min(iw\\,ih):min(iw\\,ih)"
-		switch direction {
+		base := "crop=min(iw\\,ih):min(iw\\,ih)"
+		side, percent := parseDirection()
+
+		ratio := float64(percent) / 100
+
+		switch side {
 		case "up":
-			return baseCrop + ":0:0"
+			return fmt.Sprintf("%s:0:round((ih-min(iw\\,ih))*(1-%f))", base, ratio)
 		case "down":
-			return baseCrop + ":0:(ih-min(iw\\,ih))"
+			return fmt.Sprintf("%s:0:round((ih-min(iw\\,ih))*%f)", base, ratio)
 		case "left":
-			return baseCrop + ":0:0"
+			return fmt.Sprintf("%s:round((iw-min(iw\\,ih))*%f):0", base, ratio)
 		case "right":
-			return baseCrop + ":(iw-min(iw\\,ih)):0"
+			return fmt.Sprintf("%s:round((iw-min(iw\\,ih))*(1-%f)):0", base, ratio)
 		default:
-			return baseCrop
+			return base
 		}
 	}
 
@@ -39,26 +69,26 @@ func ConvertToWebp(ctx context.Context, isVideo bool, mediaPath string, nocrop b
 		var args []string
 		args = append(args, "-i", mediaPath)
 
-		if isVideo {
-			if startTime != "" {
-				args = append(args, "-ss", startTime)
+		if opt.IsVideo {
+			if opt.StartTime != "" {
+				args = append(args, "-ss", opt.StartTime)
 			}
-			if endTime != "" {
-				args = append(args, "-to", endTime)
+			if opt.EndTime != "" {
+				args = append(args, "-to", opt.EndTime)
 			} else {
 				args = append(args, "-t", "30")
 			}
-			if nocrop {
-				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s", fps,
+			if opt.NoCrop {
+				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s", opt.FPS,
 					"scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0"))
 			} else {
-				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s,scale=512:512", fps, getCropFilter()))
+				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s,scale=512:512", opt.FPS, getCropFilter()))
 			}
 		} else {
-			if nocrop {
+			if opt.NoCrop {
 				args = append(args, "-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0")
 			} else {
-				args = append(args, "-vf", getCropFilter() + ",scale=512:512")
+				args = append(args, "-vf", getCropFilter()+",scale=512:512")
 			}
 		}
 
