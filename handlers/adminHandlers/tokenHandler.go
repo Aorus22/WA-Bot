@@ -1,6 +1,7 @@
 package adminHandlers
 
 import (
+	goctx "context"
 	"fmt"
 	"os"
 	"regexp"
@@ -21,62 +22,79 @@ func TokenHandler(ctx *context.MessageContext) {
 		return
 	}
 
-	ctx.AddUserToState("PendingToken");
+	ctx.AddUserToState("PendingToken", func() {});
 	ctx.Reply("Silakan masukkan nama lengkap Anda.")
 }
 
 func GetNameHandler(ctx *context.MessageContext) {
-
 	ctx.Reply("⏳ Loading...")
 
-	timeoutStr := os.Getenv("TIMEOUT_NAMA")
+	procCtx, cancel := goctx.WithCancel(goctx.Background())
+	ctx.UpdateUserProcess(cancel)
 
-	timeout, err := strconv.Atoi(timeoutStr)
-	if err != nil {
-		timeout = 2
-	}
+	go func() {
+		defer ctx.ClearUserState()
 
-	startTime, err := ctx.GetUserPendingStartTime()
+		timeoutStr := os.Getenv("TIMEOUT_NAMA")
 
-	if err != nil {
-		fmt.Println("User not Found in State", err)
-		return
-	}
+		timeout, err := strconv.Atoi(timeoutStr)
+		if err != nil {
+			timeout = 2
+		}
 
-	if time.Since(startTime) > time.Duration(timeout)*time.Minute {
-		ctx.ClearUserState()
-		ctx.Reply("⏳ Waktu habis! Silakan ketik *!token* lagi.")
-		return
-	}
+		startTime, err := ctx.GetUserPendingStartTime()
 
-	var validNameRegex = regexp.MustCompile(`^[a-zA-Z' ]+$`)
+		if err != nil {
+			fmt.Println("User not Found in State", err)
+			return
+		}
 
-	if !validNameRegex.MatchString(ctx.MessageText) {
-		ctx.Reply("⚠️ Nama Invalid")
-		ctx.ClearUserState()
-		return
-	}
+		if time.Since(startTime) > time.Duration(timeout)*time.Minute {
+			ctx.ClearUserState()
+			ctx.Reply("⏳ Waktu habis! Silakan ketik *!token* lagi.")
+			return
+		}
 
-	nis := strings.Split(ctx.SenderJID.String(), "@")[0]
-	nama := ctx.MessageText
+		var validNameRegex = regexp.MustCompile(`^[a-zA-Z' ]+$`)
 
-	ctx.ClearUserState()
+		if !validNameRegex.MatchString(ctx.MessageText) {
+			ctx.Reply("⚠️ Nama Invalid")
+			ctx.ClearUserState()
+			return
+		}
 
-	status, token, err := utils.FetchTokenData(nama, nis)
-	if err != nil {
-		fmt.Println("Failed to fetch token:", err)
-		return
-	}
+		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+			return
+		}
 
-	var responseText string
-	if status == "new" {
-		responseText = "✅ Token baru Anda adalah:"
-	} else if status == "update" {
-		responseText = "Token lama telah tidak berlaku. Ini token baru anda:"
-	} else {
-		responseText = "Gagal mendapatkan token."
-	}
+		nis := strings.Split(ctx.SenderJID.String(), "@")[0]
+		nama := ctx.MessageText
 
-	ctx.Reply(responseText)
-	ctx.Reply(token)
+		status, token, err := utils.FetchTokenData(nama, nis)
+		if err != nil {
+			fmt.Println("Failed to fetch token:", err)
+			return
+		}
+
+		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+			return
+		}
+
+		var responseText string
+		if status == "new" {
+			responseText = "✅ Token baru Anda adalah:"
+		} else if status == "update" {
+			responseText = "Token lama telah tidak berlaku. Ini token baru anda:"
+		} else {
+			responseText = "Gagal mendapatkan token."
+		}
+
+		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+			return
+		}
+
+		ctx.Reply(responseText)
+		ctx.Reply(token)
+
+	}()
 }

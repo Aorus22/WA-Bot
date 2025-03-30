@@ -1,6 +1,7 @@
 package adminHandlers
 
 import (
+	goctx "context"
 	"fmt"
 	"os"
 	"strconv"
@@ -17,10 +18,15 @@ func SendPDFHandler(ctx *context.MessageContext) {
 		ctx.Reply("Invalid Command")
 		return
 	}
+
+	procCtx, cancel := goctx.WithCancel(goctx.Background())
+	ctx.AddUserToState("processing", cancel)
+
 	ctx.Reply("⏳ Loading...")
 
 	messageArray := strings.Split(ctx.MessageText, " ")
 	if len(messageArray) < 2 && len(messageArray) > 3 {
+		ctx.Reply("Format perintah salah. Gunakan: !answer <mapel> -<jawaban>")
 		return
 	}
 
@@ -43,34 +49,47 @@ func SendPDFHandler(ctx *context.MessageContext) {
 		return
 	}
 
+	var answer string
 	if len(messageArray) == 3 {
-		answer := messageArray[2]
-		sendPDFMessage(ctx, mapel, answer)
-	} else if len(messageArray) == 2 {
-		sendPDFMessage(ctx, mapel, "")
-	} else {
-		ctx.Reply("Invalid Command")
+		answer = messageArray[2]
 	}
+
+	go func() {
+		sendPDFMessage(procCtx, ctx, mapel, answer)
+		ctx.ClearUserState()
+	}()
 }
 
-func sendPDFMessage(ctx *context.MessageContext, mapel string, answer string) {
+func sendPDFMessage(procCtx goctx.Context, ctx *context.MessageContext, mapel string, answer string){
 	var pdfPath string
 	var err error
 
-	if answer == "" {
-		pdfPath, err = utils.FetchPDF(mapel)
-	} else {
-		jsonAnswer, err := convertToJSON(answer)
-
-		if err != nil {
-			ctx.Reply("Format Jawaban Salah")
-		}
-		pdfPath, _ = utils.FetchPDF(mapel, jsonAnswer)
+	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+		return
 	}
 
+	switch answer {
+	case "":
+		pdfPath, err = utils.FetchPDF(mapel)
+	default:
+		var jsonAnswer map[string]string
+
+		jsonAnswer, err = convertToJSON(answer)
+		if err != nil {
+			ctx.Reply("Format Jawaban Salah")
+			return
+		}
+		pdfPath, err = utils.FetchPDF(mapel, jsonAnswer)
+	}
+
+	defer os.Remove(pdfPath)
 	if err != nil {
 		fmt.Println("Failed to fetch PDF:", err)
 		ctx.Reply("Gagal mengambil PDF")
+		return
+	}
+
+	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
 		return
 	}
 
@@ -80,21 +99,24 @@ func sendPDFMessage(ctx *context.MessageContext, mapel string, answer string) {
 		return
 	}
 
+	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+		return
+	}
+
 	uploaded, err := ctx.UploadToWhatsapp(fileData, "document")
 	if err != nil {
 		fmt.Println("Failed to upload PDF:", err)
 		return
 	}
 
-	err = ctx.SendDocumentMessage(uploaded, mapel)
-
-	if err != nil {
-		fmt.Println("Failed to send PDF:", err)
+	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+		return
 	}
 
-	err = os.Remove(pdfPath)
+	err = ctx.SendDocumentMessage(uploaded, mapel)
 	if err != nil {
-		fmt.Println("Failed to delete PDF file:", err)
+		fmt.Println("Failed to send PDF:", err)
+		return
 	}
 }
 

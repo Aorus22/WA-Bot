@@ -1,7 +1,7 @@
 package context
 
 import (
-	"context"
+	goctx "context"
 	"fmt"
 	"os"
 	"strings"
@@ -106,7 +106,7 @@ func getUserRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.J
 }
 
 func (ctx *MessageContext) Reply(text string) {
-	ctx.Client.SendMessage(context.Background(), ctx.SenderJID, &waProto.Message{
+	ctx.Client.SendMessage(goctx.Background(), ctx.SenderJID, &waProto.Message{
 		Conversation: proto.String(text),
 	})
 }
@@ -120,12 +120,12 @@ func (ctx *MessageContext) UploadToWhatsapp(filedata []byte, dataType string) (*
 		mediaType = whatsmeow.MediaDocument
 	}
 
-	uploaded, err := ctx.Client.Upload(context.Background(), filedata, mediaType)
+	uploaded, err := ctx.Client.Upload(goctx.Background(), filedata, mediaType)
 	return &uploaded, err
 }
 
 func (ctx *MessageContext) SendDocumentMessage(uploadedData *whatsmeow.UploadResponse, documentTitle string) (error) {
-	_, err := ctx.Client.SendMessage(context.Background(), ctx.SenderJID, &waProto.Message{
+	_, err := ctx.Client.SendMessage(goctx.Background(), ctx.SenderJID, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:        proto.String(documentTitle),
 			Mimetype:     proto.String("application/pdf"),
@@ -161,7 +161,7 @@ func (ctx *MessageContext) GetDownloadableMedia(isVideo bool) ([]byte, error) {
 }
 
 func (ctx *MessageContext) SendStickerMessage(uploadedData *whatsmeow.UploadResponse, isAnimated bool) (error) {
-	_, err := ctx.Client.SendMessage(context.Background(), ctx.SenderJID, &waProto.Message{
+	_, err := ctx.Client.SendMessage(goctx.Background(), ctx.SenderJID, &waProto.Message{
 		StickerMessage: &waProto.StickerMessage{
 			Mimetype:      proto.String("image/webp"),
 			URL:           proto.String(uploadedData.URL),
@@ -177,12 +177,20 @@ func (ctx *MessageContext) SendStickerMessage(uploadedData *whatsmeow.UploadResp
 	return err
 }
 
+func (ctx *MessageContext) AddUserToState(status string, cancel func()) {
+	UserState.AddUser(ctx.SenderJID.String(), status, cancel)
+}
+
 func (ctx *MessageContext) ClearUserState() {
 	UserState.ClearUser(ctx.SenderJID.String())
 }
 
-func (ctx *MessageContext) AddUserToState(status string) {
-	UserState.AddUser(ctx.SenderJID.String(), status)
+func (ctx *MessageContext) CheckUserState() string {
+	data, exists := UserState.GetUserStatus(ctx.SenderJID.String())
+	if !exists{
+		return ""
+	}
+	return data.Status
 }
 
 func (ctx *MessageContext) GetUserPendingStartTime() (time.Time, error) {
@@ -194,10 +202,10 @@ func (ctx *MessageContext) GetUserPendingStartTime() (time.Time, error) {
 	return data.StartTime, nil
 }
 
-func (ctx *MessageContext) CheckUserState() (string) {
-	data, exists := UserState.GetUserStatus(ctx.SenderJID.String())
-	if !exists{
-		return ""
-	}
-	return data.Status
+func (ctx *MessageContext) UpdateUserProcess(cancel func()) {
+	UserState.UpdateProcessContext(ctx.SenderJID.String(), cancel)
+}
+
+func (ctx *MessageContext) CancelCurrentProcess() bool {
+	return UserState.CancelUser(ctx.SenderJID.String())
 }

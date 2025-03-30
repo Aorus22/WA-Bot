@@ -9,7 +9,7 @@ func CheckHandler(ctx *context.MessageContext){
 	ctx.Reply("Hello, World!")
 }
 
-func GetCommandList(ctx *context.MessageContext) {
+func GetCommandListHandler(ctx *context.MessageContext) {
 	role := ctx.UserRole
 	var message string
 
@@ -72,4 +72,19 @@ func GetCommandList(ctx *context.MessageContext) {
 	message = strings.Join(lines, "\n")
 
 	ctx.Reply(message)
+}
+
+func CancelHandler(ctx *context.MessageContext){
+	state := ctx.CheckUserState()
+	if state == "" {
+		ctx.Reply("❌ There is no running process")
+		return
+	}
+
+	cancelled := ctx.CancelCurrentProcess()
+	if cancelled {
+		ctx.Reply("✅ Process successfully cancelled")
+	} else {
+		ctx.Reply("⚠️ Failed to cancel process")
+	}
 }

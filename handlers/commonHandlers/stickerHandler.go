@@ -1,6 +1,7 @@
 package commonHandlers
 
 import (
+	goctx "context"
 	"fmt"
 	"os"
 	"strings"
@@ -16,33 +17,45 @@ func StickerHandler(ctx *context.MessageContext) {
 		return
 	}
 
+	procCtx, cancel := goctx.WithCancel(goctx.Background())
+	ctx.AddUserToState("processing", cancel)
+
 	ctx.Reply("⏳ Loading...")
 
-	crop := strings.Contains(strings.ToLower(ctx.MessageText), "crop")
+	go func() {
+		defer ctx.ClearUserState()
 
-	var (
-		mediaPath string
-		isVideo   bool
-		err       error
-	)
+		crop := strings.Contains(strings.ToLower(ctx.MessageText), "crop")
 
-	switch {
-	case ctx.VMessage.GetImageMessage() != nil:
-		mediaPath, isVideo, err = getWaMedia(ctx, false)
-	case ctx.VMessage.GetVideoMessage() != nil:
-		mediaPath, isVideo, err = getWaMedia(ctx, true)
-	default:
-		mediaPath, isVideo, err = getMediaFromUrl(ctx.MessageText)
-	}
+		var (
+			mediaPath string
+			isVideo   bool
+			err       error
+		)
 
-	if err != nil {
-		ctx.Reply("Failed to process media")
-		fmt.Println("Failed to process media:", err)
-		return
-	}
+		switch {
+		case ctx.VMessage.GetImageMessage() != nil:
+			mediaPath, isVideo, err = getWaMedia(ctx, false)
+		case ctx.VMessage.GetVideoMessage() != nil:
+			mediaPath, isVideo, err = getWaMedia(ctx, true)
+		default:
+			mediaPath, isVideo, err = getMediaFromUrl(ctx.MessageText)
+		}
 
-	sendMediaAsSticker(ctx, mediaPath, crop, isVideo)
+		if err != nil {
+			ctx.Reply("Failed to process media")
+			return
+		}
+		defer os.Remove(mediaPath)
+
+		if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+			return
+		}
+
+		sendMediaAsSticker(procCtx, ctx, mediaPath, crop, isVideo)
+	}()
 }
+
 
 func getWaMedia(ctx *context.MessageContext, isVideo bool) (string, bool, error) {
 	data, err := ctx.GetDownloadableMedia(isVideo)
@@ -85,13 +98,22 @@ func getMediaFromUrl(messageText string) (string, bool, error) {
 	return mediaPath, isVideo, nil
 }
 
-func sendMediaAsSticker(ctx *context.MessageContext, mediaPath string, crop bool, isAnimated bool) {
+func sendMediaAsSticker(procCtx goctx.Context, ctx *context.MessageContext, mediaPath string, crop bool, isAnimated bool) {
+	var err error
+
+	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+		return
+	}
+
 	webpPath, err := utils.ConvertToWebp(mediaPath, crop)
 	if err != nil {
-		ctx.Reply("Could not compress media to below 1MB")
 		return
 	}
 	defer os.Remove(webpPath)
+
+	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+		return
+	}
 
 	author := os.Getenv("APP_NAME")
 	finalWebpPath, err := utils.WriteWebpExifFile(webpPath, "+62 812-3436-3620", author)
@@ -100,6 +122,10 @@ func sendMediaAsSticker(ctx *context.MessageContext, mediaPath string, crop bool
 		return
 	}
 	defer os.Remove(finalWebpPath)
+
+	if err = utils.CheckCanceledGoroutine(procCtx); err != nil {
+		return
+	}
 
 	webpData, err := os.ReadFile(finalWebpPath)
 	if err != nil {

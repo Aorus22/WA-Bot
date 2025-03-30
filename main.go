@@ -71,8 +71,12 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 		message_ctx := ctx.NewMessageContext(client, v.Message, senderJID, messageText, isFromGroup)
 
 		if message_ctx.CheckUserState() != "" {
-			if strings.HasPrefix(messageText, "!") {
-				message_ctx.ClearUserState()
+			if strings.HasPrefix(messageText, "!cancel") {
+				Common.CancelHandler(message_ctx)
+				return
+			} else if strings.HasPrefix(messageText, "!") {
+				message_ctx.Reply("There is another process, !cancel to cancel it")
+				return
 			}
 		}
 
@@ -112,7 +116,7 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 			Common.StickerHandler(message_ctx)
 
 		case message_ctx.MessageText == "!help":
-			Common.GetCommandList(message_ctx)
+			Common.GetCommandListHandler(message_ctx)
 
 		default:
 			if message_ctx.CheckUserState() == "PendingToken" {

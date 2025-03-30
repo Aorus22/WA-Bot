@@ -1,6 +1,7 @@
 package utils
 
 import (
+	goctx "context"
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
@@ -140,4 +141,13 @@ func WriteWebpExifFile(inputPath string, packName, author string) (string, error
 	}
 
 	return outputPath, nil
+}
+
+func CheckCanceledGoroutine(ctx goctx.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
