@@ -13,8 +13,6 @@ import (
 )
 
 func ConvertToWebp(ctx context.Context, mediaPath string, nocrop bool) (string, error) {
-	defer os.Remove(mediaPath)
-
 	ffmpegExec, err := GetFFMPEGExecutable()
 	if err != nil {
 		return "", err
@@ -62,7 +60,7 @@ func ConvertToWebp(ctx context.Context, mediaPath string, nocrop bool) (string, 
 		err := cmd.Run()
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return "", err
+				return webpPath, err
 			} else {
 				fmt.Println("FFmpeg failed:", stderr.String())
 				continue
@@ -75,5 +73,5 @@ func ConvertToWebp(ctx context.Context, mediaPath string, nocrop bool) (string, 
 		}
 	}
 
-	return "", fmt.Errorf("failed to convert to webp under 1MB")
+	return webpPath, fmt.Errorf("failed to convert to webp under 1MB")
 }

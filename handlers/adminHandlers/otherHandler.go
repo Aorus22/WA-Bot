@@ -45,6 +45,7 @@ func ListMapelHandler(s *state.MessageState) {
 	if err != nil {
 		utils.LogNoCancelErr(context.Background(), err, "Error fetching mapel:")
 		s.ReplyNoCancelError(context.Background(), err, "Gagal mengambil daftar mapel.")
+		return
 	}
 
 	var listMapelString string

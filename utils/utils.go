@@ -38,35 +38,57 @@ func GetLinkFromString(input string) (string, error) {
 }
 
 func DownloadMediaFromURL(ctx context.Context, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return "", err
-	}
+    mediaPath := "media/" + fmt.Sprintf("%d", time.Now().UnixMilli())
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
+    cmd := exec.CommandContext(ctx, "gallery-dl",
+        "-D", "media",
+        "-f", fmt.Sprintf("%d", time.Now().UnixMilli()),
+        url,
+    )
+    err := cmd.Run()
+    if err == nil {
+        return mediaPath, nil
+    }
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch media, status: %d", resp.StatusCode)
-	}
+    cmd = exec.CommandContext(ctx, "yt-dlp",
+        "-o", mediaPath,
+        "--no-playlist",
+        "-f", "best",
+        url,
+    )
+    err = cmd.Run()
+    if err == nil {
+        return mediaPath, nil
+    }
 
-	mediaPath := "media/" + fmt.Sprintf("%d", time.Now().UnixMilli())
-	file, err := os.Create(mediaPath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        return mediaPath, err
+    }
 
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return "", err
-	}
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        return mediaPath, err
+    }
+    defer resp.Body.Close()
 
-	return mediaPath, nil
+    if resp.StatusCode != http.StatusOK {
+        return mediaPath, fmt.Errorf("failed to fetch media, status: %d", resp.StatusCode)
+    }
+
+    file, err := os.Create(mediaPath)
+    if err != nil {
+        return mediaPath, err
+    }
+    defer file.Close()
+
+    _, err = io.Copy(file, resp.Body)
+    if err != nil {
+        return mediaPath, err
+    }
+
+    return mediaPath, nil
 }
 
 func GetMimeType(filePath string) (string, error) {

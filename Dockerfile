@@ -17,7 +17,7 @@ FROM alpine:latest
 
 WORKDIR /root/
 
-RUN apk add --no-cache sqlite-libs libwebp-tools
+RUN apk add --no-cache sqlite-libs libwebp-tools yt-dlp gallery-dl
 
 COPY --from=builder /app/wa-bot .
 COPY --from=builder /app/ffmpeg .

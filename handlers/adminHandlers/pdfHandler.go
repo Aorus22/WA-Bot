@@ -18,17 +18,21 @@ func SendPDFHandler(s *state.MessageState) {
 		return
 	}
 
-	messageArray := strings.Split(s.MessageText, " ")
-	if len(messageArray) < 2 || len(messageArray) > 3 {
+	parts := strings.SplitN(s.MessageText, "\n", 2)
+	commandString := parts[0]
+	answerBody := ""
+	if len(parts) > 1 {
+		answerBody = parts[1]
+	}
+
+	commandArray := strings.Split(commandString, " ")
+	if len(commandArray) != 2 {
 		s.Reply("Format perintah salah")
 		return
 	}
 
-	mapel := messageArray[1]
-	var answer string
-	if len(messageArray) == 3 {
-		answer = messageArray[2]
-	}
+	command := commandArray[0]
+	mapel := commandArray[1]
 
 	s.Reply("⏳ Loading...")
 
@@ -61,35 +65,39 @@ func SendPDFHandler(s *state.MessageState) {
 		var pdfPath string
 		var err error
 
-		switch answer {
-		case "":
+		switch command{
+		case "!pdf":
 			pdfPath, err = utils.FetchPDF(ctx, mapel)
-		default:
-			pdfPath, err = utils.FetchPDF(ctx, mapel, convertToJSON(answer))
+		case "!answer":
+			pdfPath, err = utils.FetchPDF(ctx, mapel, convertToJSON(answerBody))
 		}
+		defer os.Remove(pdfPath)
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "Error fetching PDF:")
 			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
+			return
 		}
-		defer os.Remove(pdfPath)
 
 		fileData, err := os.ReadFile(pdfPath)
 		if utils.IsCanceledGoroutine(ctx) { return }
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "Error reading file:")
 			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
+			return
 		}
 
 		uploaded, err := s.UploadToWhatsapp(ctx, fileData, "document")
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "Error uploading file:")
 			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
+			return
 		}
 
 		err = s.SendDocumentMessage(ctx, uploaded, mapel)
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "Error sending document message:")
 			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
+			return
 		}
 	}()
 }
