@@ -154,14 +154,12 @@ func IsCanceledGoroutine(ctx context.Context) bool {
 	}
 }
 
-func LogNoCancelErr(ctx context.Context, err error, msg string) bool {
+func LogNoCancelErr(ctx context.Context, err error, msg string) {
     if err != nil {
         if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
             fmt.Println(msg, err)
         }
-        return true
     }
-    return false
 }
 
 func IsValidTimeFormat (t string) bool {

@@ -11,24 +11,29 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
 )
 
 type StickerOptions struct {
-	NoCrop     bool
-	StartTime  string
-	EndTime    string
-	Direction  string
-	FPS        int
-	IsVideo    bool
+	NoCrop    bool
+	Quality   int
+	StartTime string
+	EndTime   string
+	Direction string
+	FPS       int
+	IsVideo   bool
 }
+
+var ErrorNotUnder1MB = errors.New("failed to convert to webp under 1MB")
 
 func ConvertToWebp(ctx context.Context, mediaPath string, opt *StickerOptions) (string, error) {
 	webpPath := filepath.Join("media", fmt.Sprintf("output_%d.webp", time.Now().UnixMilli()))
-	qualityLevels := []int{80, 50, 20, 5, 1}
 
 	if opt.FPS == 0 {
 		opt.FPS = 15
+	}
+
+	if opt.Quality == 0 {
+		opt.Quality = 100
 	}
 
 	parseDirection := func() (string, int) {
@@ -65,57 +70,62 @@ func ConvertToWebp(ctx context.Context, mediaPath string, opt *StickerOptions) (
 		}
 	}
 
-	for _, quality := range qualityLevels {
-		var args []string
-		args = append(args, "-i", mediaPath)
+	var args []string
+	args = append(args, "-i", mediaPath)
 
-		if opt.IsVideo {
-			if opt.StartTime != "" {
-				args = append(args, "-ss", opt.StartTime)
-			}
-			if opt.EndTime != "" {
-				args = append(args, "-to", opt.EndTime)
-			} else {
-				args = append(args, "-t", "30")
-			}
-			if opt.NoCrop {
-				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s", opt.FPS,
-					"scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0"))
-			} else {
-				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s,scale=512:512", opt.FPS, getCropFilter()))
-			}
+	if opt.IsVideo {
+		if opt.StartTime != "" {
+			args = append(args, "-ss", opt.StartTime)
+		}
+		if opt.EndTime != "" {
+			args = append(args, "-to", opt.EndTime)
 		} else {
-			if opt.NoCrop {
-				args = append(args, "-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0")
-			} else {
-				args = append(args, "-vf", getCropFilter()+",scale=512:512")
-			}
+			args = append(args, "-t", "30")
 		}
-
-		args = append(args,
-			"-quality", fmt.Sprintf("%d", quality),
-			"-pix_fmt", "rgba",
-			"-y", webpPath,
-		)
-
-		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-
-		err := cmd.Run()
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return webpPath, err
-			}
-			fmt.Println("FFmpeg failed:", stderr.String())
-			continue
+		if opt.NoCrop {
+			args = append(args, "-vf", fmt.Sprintf("fps=%d,%s", opt.FPS,
+				"scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0"))
+		} else {
+			args = append(args, "-vf", fmt.Sprintf("fps=%d,%s,scale=512:512", opt.FPS, getCropFilter()))
 		}
-
-		info, err := os.Stat(webpPath)
-		if err == nil && info.Size() <= 1024*1024 {
-			return webpPath, nil
+	} else {
+		if opt.NoCrop {
+			args = append(args, "-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0")
+		} else {
+			args = append(args, "-vf", getCropFilter()+",scale=512:512")
 		}
 	}
 
-	return webpPath, fmt.Errorf("failed to convert to webp under 1MB")
+	args = append(args,
+		"-quality", fmt.Sprintf("%d", opt.Quality),
+		"-y", webpPath,
+	)
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if strings.Contains(err.Error(), "signal: killed") {
+			return webpPath, context.Canceled
+		}
+
+		if strings.Contains(err.Error(), "exit status 1") {
+			return webpPath, context.Canceled
+		}
+
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println("FFmpeg failed:", stderr.String())
+		}
+
+		return webpPath, err
+	}
+
+	info, err := os.Stat(webpPath)
+	if err == nil && info.Size() <= 1024*1024 {
+		return webpPath, nil
+	}
+
+	return webpPath, ErrorNotUnder1MB
 }

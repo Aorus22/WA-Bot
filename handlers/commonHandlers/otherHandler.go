@@ -18,51 +18,74 @@ func GetCommandListHandler(s *state.MessageState) {
 		message = strings.TrimSpace(`
 			COMMANDS LIST
 
-			From Url:
-			1. !sticker <video/gif/image URL>
-			2. !sticker nocrop <video/gif/image URL>
+			_From URL:_
+			- ` + "`!sticker`" + ` <video/gif/image URL>
 
-			Send with image/video/gif:
-			1. !sticker
-			2. !sticker nocrop
+			_Send with image/video/gif:_
+			- ` + "`!sticker`" + `
+
+			_Optional parameters_ (can be added after the command or URL):
+			- ` + "`nocrop`" + ` // Prevent auto-cropping to square
+			- ` + "`start=MM:SS`" + ` // Start time for video/gif
+			- ` + "`end=MM:SS`" + ` // End time for video/gif
+			- ` + "`fps=N`" + ` // Frame per second (1-60)
+			- ` + "`quality=N`" + ` // Output quality (1-100)
+			- ` + "`direction=side`" + ` // Pan direction: up, down, left, right
+			- ` + "`direction=side-N`" + ` // Pan with offset (0-50), e.g., ` + "`right-25`" + `
+
+			*Examples:*
+			1. !sticker https://demo.alyza.site nocrop start=00:00 end=00:02 fps=24 quality=80
+			2. !sticker https://demo.alyza.site/ direction=left-30 quality=90
 		`)
+
 	case "USER":
 		message = strings.TrimSpace(`
-			LIST COMMAND
-			1. !token
+			*LIST COMMANDS*
+			1. ` + "`!token`" + `
 		`)
 	case "ADMIN":
 		message = strings.TrimSpace(`
-			LIST COMMAND
-			1. !listmapel
-			2. !pdf <nomor dari !listmapel>
-			3. !pdf <nama mapel>
-			4. !answer <nomor dari !listmapel> -<jawaban>
-			5. !answer <nama mapel> -<jawaban>
+			*LIST COMMANDS*
+			1. ` + "`!listmapel`" + `
+			2. ` + "`!pdf <nomor dari !listmapel>`" + `
+			3. ` + "`!pdf <nama mapel>`" + `
+			4. ` + "`!answer <nomor dari !listmapel <jawaban>`" + `
+			5. ` + "`!answer <nama mapel> <jawaban>`" + `
 		`)
 	case "OWNER":
 		message = strings.TrimSpace(`
-			COMMANDS LIST
+			*LIST COMMANDS*
 
-			# ADMIN
-			1. !listmapel
-			2. !pdf <nomor dari !listmapel>
-			3. !pdf <nama mapel>
-			4. !answer <nomor dari !listmapel> -<jawaban>
-			5. !answer <nama mapel> -<jawaban>
+			*ADMIN*
+			1. ` + "`!listmapel`" + `
+			2. ` + "`!pdf <nomor dari !listmapel>`" + `
+			3. ` + "`!pdf <nama mapel>`" + `
+			4. ` + "`!answer <nomor dari !listmapel <jawaban>`" + `
+			5. ` + "`!answer <nama mapel> <jawaban>`" + `
 
-			# USER
-			1. !token
+			*USER*
+			1. ` + "`!token`" + `
 
-			# COMMON
-			From Url:
-			1. !sticker <video/gif/image URL>
-			2. !sticker !nocrop <video/gif/image URL>
+			*COMMON*
+			_From URL:_
+			- ` + "`!sticker <video/gif/image URL>`" + `
 
-			Send with image/video/gif:
-			1. !sticker
-			2. !sticker !nocrop
-	`)
+			_Send with image/video/gif:_
+			- ` + "`!sticker`" + `
+
+			_Optional parameters_ (can be added after the command or URL):
+			- ` + "`nocrop`" + ` // Prevent auto-cropping to square
+			- ` + "`start=MM:SS`" + ` // Start time for video/gif
+			- ` + "`end=MM:SS`" + ` // End time for video/gif
+			- ` + "`fps=N`" + ` // Frame per second (1-60)
+			- ` + "`quality=N`" + ` // Output quality (1-100)
+			- ` + "`direction=side`" + ` // Pan direction: up, down, left, right
+			- ` + "`direction=side-N`" + ` // Pan with offset (0-50), e.g., ` + "`right-25`" + `
+
+			*Examples:*
+			1. !sticker https://demo.alyza.site nocrop start=00:00 end=00:02 fps=24 quality=80
+			2. !sticker https://demo.alyza.site/ direction=left-30 quality=90
+		`)
 	}
 
 	lines := strings.Split(message, "\n")

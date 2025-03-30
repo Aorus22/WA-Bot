@@ -52,6 +52,14 @@ func StickerHandler(s *state.MessageState) {
 					return
 				}
 			}
+			if strings.HasPrefix(part, "quality=") {
+				qualityStr := strings.TrimPrefix(part, "quality=")
+				opt.Quality, err = strconv.Atoi(qualityStr)
+				if err != nil || opt.Quality < 1 || opt.Quality > 100 {
+					s.Reply("Quality must be between 1 and 100")
+					return
+				}
+			}
 			if strings.HasPrefix(part, "direction=") {
 				rawDirection := strings.TrimPrefix(part, "direction=")
 				dParts := strings.Split(rawDirection, "-")
@@ -96,7 +104,6 @@ func StickerHandler(s *state.MessageState) {
 				return
 			}
 		}
-
 
 		if s.VMessage.GetImageMessage() != nil || s.VMessage.GetVideoMessage() != nil {
 			mediaPath, opt.IsVideo, err = getWaMedia(s)
@@ -147,6 +154,10 @@ func StickerHandler(s *state.MessageState) {
 
 		err = sendMediaAsSticker(ctx, s, mediaPath, opt)
 		if err != nil {
+			if errors.Is(err, utils.ErrorNotUnder1MB) {
+				s.Reply("Failed to convert media under 1MB, consider lowering the quality with quality=<0-100>")
+				return
+			}
 			utils.LogNoCancelErr(ctx, err, "error:")
 			s.ReplyNoCancelError(ctx, err, "Server error: failed to convert sticker")
 		}
@@ -202,16 +213,19 @@ func sendMediaAsSticker(ctx context.Context, s *state.MessageState, mediaPath st
 	webpPath, err := utils.ConvertToWebp(ctx, mediaPath, opt)
 	defer os.Remove(webpPath)
 	if err != nil {
-		return fmt.Errorf("convert to WebP: %w", err)
+		if errors.Is(err, utils.ErrorNotUnder1MB) {
+			return err
+		} else {
+			return fmt.Errorf("convert to WebP: %w", err)
+		}
 	}
 
 	author := os.Getenv("APP_NAME")
 	finalWebpPath, err := utils.WriteWebpExifFile(ctx, webpPath, "+62 812-3436-3620", author)
+	defer os.Remove(finalWebpPath)
 	if err != nil {
 		return fmt.Errorf("write EXIF: %w", err)
 	}
-
-	defer os.Remove(finalWebpPath)
 
 	webpData, err := os.ReadFile(finalWebpPath)
 	if utils.IsCanceledGoroutine(ctx) { return nil }
