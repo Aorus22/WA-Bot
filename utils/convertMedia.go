@@ -11,9 +11,29 @@ import (
 	"time"
 )
 
-func ConvertToWebp(ctx context.Context, isVideo bool, mediaPath string, nocrop bool, startTime string, endTime string) (string, error) {
+func ConvertToWebp(ctx context.Context, isVideo bool, mediaPath string, nocrop bool, startTime string, endTime string, direction string, fps int) (string, error) {
 	webpPath := filepath.Join("media", fmt.Sprintf("output_%d.webp", time.Now().UnixMilli()))
 	qualityLevels := []int{80, 50, 20, 5, 1}
+
+	if fps == 0 {
+		fps = 15
+	}
+
+	getCropFilter := func() string {
+		baseCrop := "crop=min(iw\\,ih):min(iw\\,ih)"
+		switch direction {
+		case "up":
+			return baseCrop + ":0:0"
+		case "down":
+			return baseCrop + ":0:(ih-min(iw\\,ih))"
+		case "left":
+			return baseCrop + ":0:0"
+		case "right":
+			return baseCrop + ":(iw-min(iw\\,ih)):0"
+		default:
+			return baseCrop
+		}
+	}
 
 	for _, quality := range qualityLevels {
 		var args []string
@@ -28,17 +48,17 @@ func ConvertToWebp(ctx context.Context, isVideo bool, mediaPath string, nocrop b
 			} else {
 				args = append(args, "-t", "30")
 			}
-
 			if nocrop {
-				args = append(args, "-vf", "fps=10,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0")
+				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s", fps,
+					"scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0"))
 			} else {
-				args = append(args, "-vf", "fps=10,crop=min(iw\\,ih):min(iw\\,ih),scale=512:512")
+				args = append(args, "-vf", fmt.Sprintf("fps=%d,%s,scale=512:512", fps, getCropFilter()))
 			}
 		} else {
 			if nocrop {
 				args = append(args, "-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000@0")
 			} else {
-				args = append(args, "-vf", "crop=min(iw\\,ih):min(iw\\,ih),scale=512:512")
+				args = append(args, "-vf", getCropFilter() + ",scale=512:512")
 			}
 		}
 
@@ -49,7 +69,6 @@ func ConvertToWebp(ctx context.Context, isVideo bool, mediaPath string, nocrop b
 		)
 
 		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 
@@ -57,10 +76,9 @@ func ConvertToWebp(ctx context.Context, isVideo bool, mediaPath string, nocrop b
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return webpPath, err
-			} else {
-				fmt.Println("FFmpeg failed:", stderr.String())
-				continue
 			}
+			fmt.Println("FFmpeg failed:", stderr.String())
+			continue
 		}
 
 		info, err := os.Stat(webpPath)
