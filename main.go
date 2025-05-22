@@ -93,6 +93,7 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 		stickerRegex := regexp.MustCompile(`^!sticker(\s+\S+)*$`)
 		pdfRegex := regexp.MustCompile(`^!pdf\s+\S+$`)
 		answerPdfRegex := regexp.MustCompile(`^!answer(\s+\S+)*$`)
+		geminiRegex := regexp.MustCompile(`^!gemini(\s+\S+)*$`)
 
 		switch {
 		case message_state.MessageText == "!check":
@@ -109,6 +110,9 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 
 		case pdfRegex.MatchString(message_state.MessageText), answerPdfRegex.MatchString(message_state.MessageText):
 			Admin.SendPDFHandler(message_state)
+
+		case geminiRegex.MatchString(message_state.MessageText):
+			Admin.GeminiHandler(message_state)
 
 		case stickerRegex.MatchString(message_state.MessageText):
 			Common.StickerHandler(message_state)
