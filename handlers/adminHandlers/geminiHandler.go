@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"regexp"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/joho/godotenv"
@@ -20,6 +21,17 @@ func init() {
 	if err != nil {
 		fmt.Println("Error loading .env file")
 	}
+}
+
+func sanitizeFileName(name string) string {
+	name = strings.ToLower(name)
+
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	name = re.ReplaceAllString(name, "-")
+
+	name = strings.Trim(name, "-")
+
+	return name
 }
 
 func GeminiHandler(s *state.MessageState) {
@@ -92,12 +104,34 @@ func GeminiHandler(s *state.MessageState) {
 
 		model := client.GenerativeModel("gemini-2.0-flash")
 
-		uploadedFile, err := client.UploadFile(ctx, "test-1", file, nil)
+		re := regexp.MustCompile(`[^a-z0-9]+`)
+		file_name := re.ReplaceAllString(mapel, "")
+
+		uploadedFile, err := client.UploadFile(ctx, file_name, file, nil)
+		defer client.DeleteFile(ctx, file_name)
+
 		if err != nil {
-			fmt.Printf("Gagal mengunggah file: %v\n", err)
-			return
+			if strings.Contains(err.Error(), "already exists") {
+				fmt.Println("File sudah ada, mencoba menghapus dan mengunggah ulang...")
+
+				delErr := client.DeleteFile(ctx, file_name)
+				if delErr != nil {
+					fmt.Printf("Gagal menghapus file yang sudah ada: %v\n", delErr)
+					return
+				}
+
+				uploadedFile, err = client.UploadFile(ctx, file_name, file, nil)
+				if err != nil {
+					fmt.Printf("Gagal mengunggah ulang file: %v\n", err)
+					s.Reply("Gagal mengunggah ulang file. Coba lagi")
+					return
+				}
+			} else {
+				fmt.Printf("Gagal mengunggah file: %v\n", err)
+				return
+			}
 		}
-		defer client.DeleteFile(ctx, uploadedFile.Name)
+
 
 		prompt := genai.Text("jawab ini dengan format gini, tanpa ada tambahan lainnya/n1.a/n2.b/n3.c")
 
