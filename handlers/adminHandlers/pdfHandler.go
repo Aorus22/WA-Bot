@@ -64,12 +64,15 @@ func SendPDFHandler(s *state.MessageState) {
 
 		var pdfPath string
 		var err error
+		var source string
 
 		switch command{
 		case "!pdf":
 			pdfPath, err = utils.FetchPDF(ctx, mapel)
+			source = "Original"
 		case "!answer":
 			pdfPath, err = utils.FetchPDF(ctx, mapel, convertToJSON(answerBody))
+			source = "With Answer"
 		}
 		defer os.Remove(pdfPath)
 		if err != nil {
@@ -93,7 +96,7 @@ func SendPDFHandler(s *state.MessageState) {
 			return
 		}
 
-		err = s.SendDocumentMessage(ctx, uploaded, mapel)
+		err = s.SendDocumentMessage(ctx, uploaded, mapel + " (" + source + ")")
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "Error sending document message:")
 			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")

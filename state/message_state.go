@@ -63,6 +63,7 @@ func (s *MessageState) SendDocumentMessage(ctx context.Context, uploadedData *wh
 			FileEncSHA256: uploadedData.FileEncSHA256,
 			FileSHA256:    uploadedData.FileSHA256,
 			FileLength:    proto.Uint64(uploadedData.FileLength),
+			FileName:      proto.String(documentTitle),
 		},
 	})
 	return err

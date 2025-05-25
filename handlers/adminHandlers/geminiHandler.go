@@ -169,7 +169,7 @@ func GeminiHandler(s *state.MessageState) {
 			return
 		}
 
-		err = s.SendDocumentMessage(ctx, uploaded, mapel)
+		err = s.SendDocumentMessage(ctx, uploaded, mapel + " (Gemini)")
 		if err != nil {
 			utils.LogNoCancelErr(ctx, err, "Error sending document message:")
 			s.ReplyNoCancelError(ctx, err, "Gagal mengambil PDF")
