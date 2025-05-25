@@ -73,6 +73,19 @@ func SendPDFHandler(s *state.MessageState) {
 		case "!answer":
 			pdfPath, err = utils.FetchPDF(ctx, mapel, convertToJSON(answerBody))
 			source = "With Answer"
+		case "!gemini":
+			var originalPdfPath string
+			originalPdfPath, err = utils.FetchPDF(ctx, mapel)
+			defer os.Remove(originalPdfPath)
+
+			answerBody, err = utils.GenerateAnswerGemini(ctx, originalPdfPath, mapel)
+			if answerBody == ""{
+				utils.LogNoCancelErr(ctx, err, "Error generating answer:")
+				s.ReplyNoCancelError(ctx, err, "Gemini Error, Coba Lagi")
+				return
+			}
+			source = "Gemini"
+			pdfPath, err = utils.FetchPDF(ctx, mapel, convertToJSON(answerBody))
 		}
 		defer os.Remove(pdfPath)
 		if err != nil {

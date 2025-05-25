@@ -108,11 +108,8 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 		case message_state.MessageText == "!listmapel":
 			Admin.ListMapelHandler(message_state)
 
-		case pdfRegex.MatchString(message_state.MessageText), answerPdfRegex.MatchString(message_state.MessageText):
+		case pdfRegex.MatchString(message_state.MessageText), answerPdfRegex.MatchString(message_state.MessageText), geminiRegex.MatchString(message_state.MessageText):
 			Admin.SendPDFHandler(message_state)
-
-		case geminiRegex.MatchString(message_state.MessageText):
-			Admin.GeminiHandler(message_state)
 
 		case stickerRegex.MatchString(message_state.MessageText):
 			Common.StickerHandler(message_state)
