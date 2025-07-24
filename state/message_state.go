@@ -86,7 +86,7 @@ func (s *MessageState) GetDownloadableMedia() ([]byte, bool, error) {
 		return nil, isAnimated, fmt.Errorf("no downloadable media found")
 	}
 
-	data, err := s.Client.Download(downloadableMedia)
+	data, err := s.Client.Download(context.Background(), downloadableMedia)
 	if err != nil {
 		return nil, isAnimated, fmt.Errorf("download failed: %w", err)
 	}

@@ -143,8 +143,9 @@ func getAuth(client *whatsmeow.Client) {
 	fmt.Println("1. QR Code")
 	fmt.Println("2. Pair Code")
 	fmt.Print("Choice: ")
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
+	// choice, _ := reader.ReadString('\n')
+	// choice = strings.TrimSpace(choice)
+	choice := "1"
 
 	switch choice {
 	case "1":
@@ -174,7 +175,7 @@ func getAuth(client *whatsmeow.Client) {
 			panic(err)
 		}
 
-		pairCode, err := client.PairPhone(phoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
+		pairCode, err := client.PairPhone(context.Background(), phoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
 		if err != nil {
 			panic(err)
 		}
@@ -201,12 +202,12 @@ func main() {
 	}
 
 	dbLog := waLog.Stdout("Database", logLevel, true)
-	container, err := sqlstore.New("sqlite3", dbUrl, dbLog)
+	container, err := sqlstore.New(context.Background(), "sqlite3", dbUrl, dbLog)
 	if err != nil {
 		panic(err)
 	}
 
-	deviceStore, err := container.GetFirstDevice()
+	deviceStore, err := container.GetFirstDevice(context.Background())
 	if err != nil {
 		panic(err)
 	}
