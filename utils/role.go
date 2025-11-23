@@ -48,7 +48,7 @@ func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JI
 		}
 
 		for _, participant := range groupInfo.Participants {
-			if participant.JID.String() == senderJID.String() {
+			if participant.JID.ToNonAD().String() == senderJID.ToNonAD().String() {
 				role = "ADMIN"
 				return role
 			}
@@ -67,7 +67,7 @@ func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JI
 		}
 
 		for _, participant := range groupInfo.Participants {
-			if participant.JID.String() == senderJID.String() {
+			if participant.JID.ToNonAD().String() == senderJID.ToNonAD().String() {
 				role = "USER"
 				return role
 			}
