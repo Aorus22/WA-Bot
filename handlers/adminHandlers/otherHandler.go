@@ -82,9 +82,10 @@ func ListMemberHandler(s *state.MessageState) {
 			continue
 		}
 
-		responseText += fmt.Sprintf("*%s*\n", groupInfo.Name)
+		responseText += fmt.Sprintf("*%s* (%d members)\n", groupInfo.Name, len(groupInfo.Participants))
 		for _, participant := range groupInfo.Participants {
-			responseText += fmt.Sprintf("- %s\n", participant.JID.ToNonAD().User)
+			jid := participant.JID.ToNonAD()
+			responseText += fmt.Sprintf("- %s (JID: %s)\n", jid.User, jid.String())
 		}
 		responseText += "\n"
 	}
