@@ -58,9 +58,9 @@ func eventHandler(evt any, client *whatsmeow.Client) {
 		var messageText string
 		if v.Message.ExtendedTextMessage != nil && v.Message.ExtendedTextMessage.Text != nil {
 			messageText = *v.Message.ExtendedTextMessage.Text
-		} else if v.Message.ImageMessage != nil {
+		} else if v.Message.ImageMessage != nil && v.Message.ImageMessage.Caption != nil {
 			messageText = *v.Message.ImageMessage.Caption
-		} else if v.Message.VideoMessage != nil {
+		} else if v.Message.VideoMessage != nil && v.Message.VideoMessage.Caption != nil {
 			messageText = *v.Message.VideoMessage.Caption
 		} else {
 			messageText = v.Message.GetConversation()
