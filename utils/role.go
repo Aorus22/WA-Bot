@@ -12,74 +12,70 @@ import (
 
 func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JID) string {
 	owner := os.Getenv("OWNER_JID")
-	if senderJID.String() == owner {
-		return "OWNER"
-	}
-
 	adminGroups := strings.Split(os.Getenv("ADMIN_GROUPS_JID"), ",")
 	userGroups := strings.Split(os.Getenv("USER_GROUPS_JID"), ",")
 
+	var role string
+	defer func() {
+		fmt.Printf("[AssignRole] sender=%s | isFromGroup=%v | owner=%s | adminGroups=%v | userGroups=%v | result=%s\n",
+			senderJID.String(), isFromGroup, owner, adminGroups, userGroups, role)
+	}()
+
+	if senderJID.String() == owner {
+		role = "OWNER"
+		return role
+	}
+
 	if isFromGroup {
 		if Contains(adminGroups, senderJID.String()) {
-			return "ADMIN"
-		} else if Contains(adminGroups, senderJID.String()) {
-			return "USER"
+			role = "ADMIN"
+			return role
+		} else if Contains(userGroups, senderJID.String()) {
+			role = "USER"
+			return role
 		}
 	}
 
-	isAdmin := false
 	for _, adminGroup := range adminGroups {
 		targetGroupJID, err := waTypes.ParseJID(adminGroup)
 		if err != nil {
-			fmt.Println("Invalid group JID:", err)
 			continue
 		}
 
 		groupInfo, err := client.GetGroupInfo(context.Background(), targetGroupJID)
 		if err != nil {
-			fmt.Println("Failed to get group info for", adminGroup, ":", err)
 			continue
 		}
 
 		for _, participant := range groupInfo.Participants {
 			if participant.JID.String() == senderJID.String() {
-				isAdmin = true
-				break
+				role = "ADMIN"
+				return role
 			}
-		}
-
-		if isAdmin {
-			return "ADMIN"
 		}
 	}
 
-	isUser := false
 	for _, userGroup := range userGroups {
 		targetGroupJID, err := waTypes.ParseJID(userGroup)
 		if err != nil {
-			fmt.Println("Invalid group JID:", err)
 			continue
 		}
 
 		groupInfo, err := client.GetGroupInfo(context.Background(), targetGroupJID)
 		if err != nil {
-			fmt.Println("Failed to get group info for", userGroup, ":", err)
 			continue
 		}
 
 		for _, participant := range groupInfo.Participants {
 			if participant.JID.String() == senderJID.String() {
-				isUser = true
-				break
+				role = "USER"
+				return role
 			}
-		}
-
-		if isUser {
-			return "USER"
 		}
 	}
 
-	return "COMMON"
+	role = "COMMON"
+	return role
 }
 
 func IsFromAllowedGroups(vInfo *waTypes.MessageInfo) bool {
