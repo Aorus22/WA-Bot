@@ -14,7 +14,7 @@ func ListgroupsHandler(s *state.MessageState){
 		return
 	}
 
-	groups, err := s.Client.GetJoinedGroups()
+	groups, err := s.Client.GetJoinedGroups(context.Background())
 	if err != nil {
 		fmt.Println("Error fetching joined groups:", err)
 		return
@@ -24,7 +24,7 @@ func ListgroupsHandler(s *state.MessageState){
 	for _, group := range groups {
 		responseText += fmt.Sprintf("📂 *%s*\n📎 ID: %s\n", group.Name, group.JID.String())
 
-		_, err :=  s.Client.GetGroupInfo(group.JID)
+		_, err := s.Client.GetGroupInfo(context.Background(), group.JID)
 		if err != nil {
 			fmt.Println("Failed to get group info for", group.JID.String(), ":", err)
 			continue

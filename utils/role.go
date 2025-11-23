@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -34,7 +35,7 @@ func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JI
 			continue
 		}
 
-		groupInfo, err := client.GetGroupInfo(targetGroupJID)
+		groupInfo, err := client.GetGroupInfo(context.Background(), targetGroupJID)
 		if err != nil {
 			fmt.Println("Failed to get group info for", adminGroup, ":", err)
 			continue
@@ -60,7 +61,7 @@ func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JI
 			continue
 		}
 
-		groupInfo, err := client.GetGroupInfo(targetGroupJID)
+		groupInfo, err := client.GetGroupInfo(context.Background(), targetGroupJID)
 		if err != nil {
 			fmt.Println("Failed to get group info for", userGroup, ":", err)
 			continue
