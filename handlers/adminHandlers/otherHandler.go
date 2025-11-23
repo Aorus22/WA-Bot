@@ -3,9 +3,12 @@ package adminHandlers
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"wa-bot/state"
 	"wa-bot/utils"
+	waTypes "go.mau.fi/whatsmeow/types"
 )
 
 func ListgroupsHandler(s *state.MessageState){
@@ -54,4 +57,37 @@ func ListMapelHandler(s *state.MessageState) {
 	}
 
 	s.Reply(listMapelString)
+}
+
+func ListMemberHandler(s *state.MessageState) {
+	if s.UserRole != "OWNER" {
+		s.Reply("Invalid Command")
+		return
+	}
+
+	userGroups := strings.Split(os.Getenv("USER_GROUPS_JID"), ",")
+
+	responseText := "*Daftar Member per Grup:*\n\n"
+
+	for _, userGroup := range userGroups {
+		targetGroupJID, err := waTypes.ParseJID(userGroup)
+		if err != nil {
+			fmt.Printf("Invalid user group JID '%s': %v\n", userGroup, err)
+			continue
+		}
+
+		groupInfo, err := s.Client.GetGroupInfo(context.Background(), targetGroupJID)
+		if err != nil {
+			fmt.Printf("Failed to get group info for '%s': %v\n", userGroup, err)
+			continue
+		}
+
+		responseText += fmt.Sprintf("*%s*\n", groupInfo.Name)
+		for _, participant := range groupInfo.Participants {
+			responseText += fmt.Sprintf("- %s\n", participant.JID.ToNonAD().User)
+		}
+		responseText += "\n"
+	}
+
+	s.Reply(responseText)
 }
