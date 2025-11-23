@@ -36,6 +36,18 @@ func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JI
 		}
 	}
 
+	// Get sender's LID for comparison with group participants
+	var senderLID waTypes.JID
+	userInfo, err := client.GetUserInfo(context.Background(), []waTypes.JID{senderJID.ToNonAD()})
+	if err == nil && len(userInfo) > 0 {
+		for _, info := range userInfo {
+			if !info.LID.IsEmpty() {
+				senderLID = info.LID
+			}
+			break
+		}
+	}
+
 	for _, adminGroup := range adminGroups {
 		targetGroupJID, err := waTypes.ParseJID(adminGroup)
 		if err != nil {
@@ -48,7 +60,19 @@ func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JI
 		}
 
 		for _, participant := range groupInfo.Participants {
-			if participant.JID.ToNonAD().String() == senderJID.ToNonAD().String() {
+			participantJID := participant.JID.ToNonAD()
+
+			// Handle LID format - compare with sender's LID
+			if participantJID.Server == "lid" {
+				if senderLID.User != "" && participantJID.User == senderLID.User {
+					role = "ADMIN"
+					return role
+				}
+				continue
+			}
+
+			// Normal phone number comparison
+			if participantJID.String() == senderJID.ToNonAD().String() {
 				role = "ADMIN"
 				return role
 			}
@@ -67,7 +91,19 @@ func AssignRole(client *whatsmeow.Client, isFromGroup bool, senderJID waTypes.JI
 		}
 
 		for _, participant := range groupInfo.Participants {
-			if participant.JID.ToNonAD().String() == senderJID.ToNonAD().String() {
+			participantJID := participant.JID.ToNonAD()
+
+			// Handle LID format - compare with sender's LID
+			if participantJID.Server == "lid" {
+				if senderLID.User != "" && participantJID.User == senderLID.User {
+					role = "USER"
+					return role
+				}
+				continue
+			}
+
+			// Normal phone number comparison
+			if participantJID.String() == senderJID.ToNonAD().String() {
 				role = "USER"
 				return role
 			}
