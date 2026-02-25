@@ -4,12 +4,10 @@ go 1.24.2
 
 require (
 	github.com/aorus22/instagramdl v0.0.0-20250413042826-610b92f59faf
-	github.com/gabriel-vasile/mimetype v1.4.11
 	github.com/google/generative-ai-go v0.20.1
 	github.com/gorilla/mux v1.8.1
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.32
-	github.com/mdp/qrterminal v1.0.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/cors v1.11.1
 	go.mau.fi/whatsmeow v0.0.0-20251120135021-071293c6b9f0
@@ -37,6 +35,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mdp/qrterminal v1.0.1 // indirect
 	github.com/petermattis/goid v0.0.0-20251121121749-a11dd1a45f9a // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
 	github.com/vektah/gqlparser/v2 v2.5.31 // indirect
