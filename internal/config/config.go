@@ -105,6 +105,7 @@ func InitializeApp() (*App, error) {
 	}
 
 	cfg := infrastructureConfig.NewEnvConfig()
+	storageRepo := storage.NewLocalStorage("media")
 	stateRepo := storage.NewInMemoryUserState()
 
 	logLevel := cfg.Get("LOG_LEVEL")
@@ -120,31 +121,31 @@ func InitializeApp() (*App, error) {
 	}
 
 	apiKey := cfg.Get("GEMINI_API_KEY")
-	geminiService, err := ai.NewGeminiService(apiKey)
+	geminiService, err := ai.NewGeminiService(apiKey, storageRepo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini service: %w", err)
 	}
 
-	mediaDownloader := media.NewMediaDownloader()
+	mediaDownloader := media.NewMediaDownloader(storageRepo)
 
-	pdfClient := api.NewPDFClient(cfg.Get("PDF_URL"))
+	pdfClient := api.NewPDFClient(cfg.Get("PDF_URL"), storageRepo)
 	tokenClient := api.NewTokenClient(cfg.Get("API_URL"))
 	apiRepository := api.NewAPIRepository(pdfClient, tokenClient)
 
 	waService := usecase.NewWhatsAppService(waClient, cfg)
 
-	stickerUC := usecase.NewStickerUseCase(waClient, mediaDownloader, stateRepo, cfg)
-	pdfUC := usecase.NewPDFUseCase(waClient, apiRepository, geminiService, stateRepo)
+	stickerUC := usecase.NewStickerUseCase(waClient, mediaDownloader, stateRepo, cfg, storageRepo)
+	pdfUC := usecase.NewPDFUseCase(waClient, apiRepository, geminiService, stateRepo, storageRepo)
 	tokenUC := usecase.NewTokenUseCase(waClient, apiRepository, stateRepo, cfg)
 	adminUC := usecase.NewAdminUseCase(waClient, apiRepository, cfg)
 	handlerUC := usecase.NewHandlerUseCase(stickerUC, pdfUC, tokenUC, adminUC, waService, stateRepo, waClient)
 
 	deliveryWaService := whatsapp.NewWhatsAppService(waClient, cfg)
-	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient)
+	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient, storageRepo)
 	commandRouter := whatsapp.NewCommandRouter(handlerUC)
 	_ = commandRouter
 
-	httpServer := http.NewHTTPServer(waClient, cfg)
+	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
 	cronScheduler := cron.NewCronScheduler(waClient, dbURL, cfg.Get("CRON_SCHEDULE"))
 
 	// Initialize message store

@@ -1,9 +1,11 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -22,16 +24,18 @@ import (
 type HTTPServer struct {
 	client  *whatsappInfra.WhatsAppClient
 	config  repository.ConfigRepository
+	storage repository.StorageRepository
 	server  *http.Server
 	hub     *WSHub
 	msgRepo *repository.MessageStore
 }
 
-func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.ConfigRepository) *HTTPServer {
+func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.ConfigRepository, storage repository.StorageRepository) *HTTPServer {
 	return &HTTPServer{
-		client: client,
-		config: config,
-		hub:    NewWSHub(),
+		client:  client,
+		config:  config,
+		storage: storage,
+		hub:     NewWSHub(),
 	}
 }
 
@@ -63,8 +67,6 @@ func (s *HTTPServer) Start() error {
 	api.HandleFunc("/logout", s.handleLogout).Methods("POST", "OPTIONS")
 
 	// Media files - custom handler to URL decode filenames
-	mediaPath := filepath.Join(".", "media")
-	os.MkdirAll(mediaPath, 0755)
 	api.PathPrefix("/media/").Handler(http.StripPrefix("/api/media/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// URL decode the filename
 		filename := r.URL.Path
@@ -74,17 +76,15 @@ func (s *HTTPServer) Start() error {
 		}
 		fmt.Printf("Serving media: %s (decoded: %s)\n", filename, decodedFilename)
 
-		filePath := filepath.Join(mediaPath, filepath.Clean(decodedFilename))
-
 		// Check if file exists
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		if !s.storage.Exists(decodedFilename) {
 			http.NotFound(w, r)
-			fmt.Printf("File not found: %s\n", filePath)
+			fmt.Printf("File not found in storage: %s\n", decodedFilename)
 			return
 		}
 
 		// Set content type based on extension
-		ext := strings.ToLower(filepath.Ext(filePath))
+		ext := strings.ToLower(filepath.Ext(decodedFilename))
 		switch ext {
 		case ".jpg", ".jpeg":
 			w.Header().Set("Content-Type", "image/jpeg")
@@ -100,7 +100,18 @@ func (s *HTTPServer) Start() error {
 			w.Header().Set("Content-Type", "application/pdf")
 		}
 
-		http.ServeFile(w, r, filePath)
+		reader, err := s.storage.Get(r.Context(), decodedFilename)
+		if err != nil {
+			http.Error(w, "Failed to get file", http.StatusInternalServerError)
+			return
+		}
+		defer reader.Close()
+
+		// Use io.Copy for simplicity, or we could implement a more sophisticated serve content
+		// but storage.Get returns a reader, not a file with Seek.
+		// If we want Seek, we might need a different interface or local temp file.
+		// For now, io.Copy is fine for small files.
+		io.Copy(w, reader)
 	})))
 
 	// Avatar proxy - proxy WhatsApp avatar URLs
@@ -340,10 +351,9 @@ func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 	safeJID := strings.ReplaceAll(target, "@", "_")
 	safeJID = strings.ReplaceAll(safeJID, ".", "_")
 	filename := fmt.Sprintf("sent_%d_%s%s", time.Now().UnixMilli(), safeJID, ext)
-	localPath := filepath.Join("media", filename)
 	mediaURL := fmt.Sprintf("/media/%s", filename)
 
-	if err := os.WriteFile(localPath, data, 0644); err != nil {
+	if _, err := s.storage.Save(r.Context(), filename, bytes.NewReader(data)); err != nil {
 		fmt.Printf("Failed to persist sent media: %v\n", err)
 		mediaURL = ""
 	}
@@ -635,7 +645,14 @@ func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("📤 Sending sticker to: %s | Path: %s\n", req.Target, localPath)
 
-	data, err := os.ReadFile(localPath)
+	reader, err := s.storage.Get(context.Background(), localPath)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read sticker file: " + err.Error()})
+		return
+	}
+	data, err := io.ReadAll(reader)
+	reader.Close()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read sticker file: " + err.Error()})

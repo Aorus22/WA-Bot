@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -28,6 +29,7 @@ type WhatsAppEventHandler struct {
 	waClient   *whatsappInfra.WhatsAppClient
 	msgStore   *repository.MessageStore
 	httpServer HTTPServer
+	storage    repository.StorageRepository
 }
 
 func NewWhatsAppEventHandler(
@@ -35,12 +37,14 @@ func NewWhatsAppEventHandler(
 	waService *WhatsAppService,
 	stateRepo repository.UserStateRepository,
 	waClient *whatsappInfra.WhatsAppClient,
+	storage repository.StorageRepository,
 ) *WhatsAppEventHandler {
 	return &WhatsAppEventHandler{
 		handlerUC: handlerUC,
 		waService: waService,
 		stateRepo: stateRepo,
 		waClient:  waClient,
+		storage:   storage,
 	}
 }
 
@@ -153,7 +157,6 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 
 			data, _, err := h.waClient.DownloadMedia(ctx, msg)
 			if err == nil && len(data) > 0 {
-				os.MkdirAll("media", 0755)
 				ext := ".jpg"
 				if img.GetMimetype() == "image/png" {
 					ext = ".png"
@@ -163,9 +166,8 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 				safeJID := strings.ReplaceAll(senderJID.String(), "@", "_")
 				safeJID = strings.ReplaceAll(safeJID, ".", "_")
 				filename := fmt.Sprintf("img_%d_%s%s", time.Now().UnixMilli(), safeJID, ext)
-				filepath := fmt.Sprintf("media/%s", filename)
 
-				if err := os.WriteFile(filepath, data, 0644); err == nil {
+				if _, err := h.storage.Save(ctx, filename, bytes.NewReader(data)); err == nil {
 					mediaURL = fmt.Sprintf("/media/%s", filename)
 				}
 				content = img.GetCaption()
@@ -186,11 +188,9 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 
 			data, _, err := h.waClient.DownloadMedia(ctx, msg)
 			if err == nil && len(data) > 0 {
-				os.MkdirAll("media", 0755)
 				filename := fmt.Sprintf("sticker_%d_%s.webp", time.Now().UnixMilli(), strings.ReplaceAll(senderJID.String(), "@", "_"))
-				filepath := fmt.Sprintf("media/%s", filename)
 
-				if err := os.WriteFile(filepath, data, 0644); err == nil {
+				if _, err := h.storage.Save(ctx, filename, bytes.NewReader(data)); err == nil {
 					mediaURL = fmt.Sprintf("/media/%s", filename)
 				}
 			}

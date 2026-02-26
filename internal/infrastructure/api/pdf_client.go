@@ -7,35 +7,29 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
+
+	"wa-bot/internal/domain/repository"
 )
 
 type PDFClient struct {
 	baseURL string
 	client  *http.Client
+	storage repository.StorageRepository
 }
 
-func NewPDFClient(baseURL string) *PDFClient {
+func NewPDFClient(baseURL string, storage repository.StorageRepository) *PDFClient {
 	return &PDFClient{
 		baseURL: baseURL,
 		client:  &http.Client{},
+		storage: storage,
 	}
 }
 
 func (p *PDFClient) FetchPDF(ctx context.Context, mapel string, answerKey map[string]string) (string, error) {
 	url := fmt.Sprintf("%s/pdf/%s", p.baseURL, mapel)
 
-	mediaFolder := "media"
-	if _, err := os.Stat(mediaFolder); os.IsNotExist(err) {
-		err = os.Mkdir(mediaFolder, 0755)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	filePath := filepath.Join(mediaFolder, fmt.Sprintf("soal_%d.pdf", time.Now().Unix()))
+	filename := fmt.Sprintf("soal_%d.pdf", time.Now().Unix())
 
 	var req *http.Request
 	var err error
@@ -68,18 +62,11 @@ func (p *PDFClient) FetchPDF(ctx context.Context, mapel string, answerKey map[st
 	}
 	defer resp.Body.Close()
 
-	out, err := os.Create(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
+	if _, err := p.storage.Save(ctx, filename, resp.Body); err != nil {
 		return "", err
 	}
 
-	return filePath, nil
+	return filename, nil
 }
 
 func (p *PDFClient) FetchMapelList(ctx context.Context) ([]string, error) {

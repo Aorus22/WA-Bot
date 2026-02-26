@@ -9,22 +9,27 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/domain/valueobject"
 )
 
-type FFmpegConverter struct{}
+type FFmpegConverter struct {
+	storage repository.StorageRepository
+}
 
-func NewFFmpegConverter() *FFmpegConverter {
-	return &FFmpegConverter{}
+func NewFFmpegConverter(storage repository.StorageRepository) *FFmpegConverter {
+	return &FFmpegConverter{
+		storage: storage,
+	}
 }
 
 func (f *FFmpegConverter) ConvertToWebP(ctx context.Context, mediaPath string, opt *valueobject.StickerOptions) (string, error) {
-	webpPath := filepath.Join("media", fmt.Sprintf("output_%d.webp", time.Now().UnixMilli()))
+	webpRelativePath := fmt.Sprintf("output_%d.webp", time.Now().UnixMilli())
+	webpPath := f.storage.GetPath(webpRelativePath)
 
 	if opt.FPS == 0 {
 		opt.FPS = 15
@@ -123,10 +128,10 @@ func (f *FFmpegConverter) ConvertToWebP(ctx context.Context, mediaPath string, o
 
 	info, err := os.Stat(webpPath)
 	if err == nil && info.Size() <= 1024*1024 {
-		return webpPath, nil
+		return webpRelativePath, nil
 	}
 
-	return webpPath, valueobject.ErrNotUnder1MB
+	return webpRelativePath, valueobject.ErrNotUnder1MB
 }
 
 func (f *FFmpegConverter) GetDuration(filePath string) (float64, error) {
@@ -192,9 +197,11 @@ func (f *FFmpegConverter) WriteWebpExif(ctx context.Context, inputPath string, p
 	timestamp := time.Now().Unix()
 	filenameBase := fmt.Sprintf("%d_convert", timestamp)
 
-	outputPath := filepath.Join("media", filenameBase+"_output.webp")
-	exifPath := filepath.Join("media", filenameBase+"_meta.exif")
-	defer os.Remove(exifPath)
+	outputRelativePath := filenameBase + "_output.webp"
+	outputPath := f.storage.GetPath(outputRelativePath)
+	exifRelativePath := filenameBase + "_meta.exif"
+	exifPath := f.storage.GetPath(exifRelativePath)
+	defer f.storage.Delete(ctx, exifRelativePath)
 
 	var b bytes.Buffer
 	startingBytes := []byte{0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00}
@@ -218,7 +225,7 @@ func (f *FFmpegConverter) WriteWebpExif(ctx context.Context, inputPath string, p
 	b.Write(endingBytes)
 	b.Write(jsonBytes)
 
-	if err := os.WriteFile(exifPath, b.Bytes(), 0644); err != nil {
+	if _, err := f.storage.Save(ctx, exifRelativePath, bytes.NewReader(b.Bytes())); err != nil {
 		return "", err
 	}
 
@@ -227,5 +234,5 @@ func (f *FFmpegConverter) WriteWebpExif(ctx context.Context, inputPath string, p
 		return "", err
 	}
 
-	return outputPath, nil
+	return outputRelativePath, nil
 }

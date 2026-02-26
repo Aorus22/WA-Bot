@@ -3,7 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,14 +22,16 @@ type PDFUseCase struct {
 	apiRepo       *api.APIRepository
 	geminiService *ai.GeminiService
 	stateRepo     repository.UserStateRepository
+	storage       repository.StorageRepository
 }
 
-func NewPDFUseCase(waClient *whatsapp.WhatsAppClient, apiRepo *api.APIRepository, geminiService *ai.GeminiService, stateRepo repository.UserStateRepository) *PDFUseCase {
+func NewPDFUseCase(waClient *whatsapp.WhatsAppClient, apiRepo *api.APIRepository, geminiService *ai.GeminiService, stateRepo repository.UserStateRepository, storage repository.StorageRepository) *PDFUseCase {
 	return &PDFUseCase{
 		waClient:      waClient,
 		apiRepo:       apiRepo,
 		geminiService: geminiService,
 		stateRepo:     stateRepo,
+		storage:       storage,
 	}
 }
 
@@ -89,7 +91,13 @@ func (uc *PDFUseCase) SendPDF(ctx context.Context, senderJID waTypes.JID, comman
 			return
 		}
 
-		pdfData, err := os.ReadFile(pdfPath)
+		reader, err := uc.storage.Get(cancelCtx, pdfPath)
+		if err != nil {
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal membaca PDF", true)
+			return
+		}
+		pdfData, err := io.ReadAll(reader)
+		reader.Close()
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal membaca PDF", true)
 			return
@@ -148,7 +156,7 @@ func (uc *PDFUseCase) fetchPDF(ctx context.Context, command, mapel, answerBody s
 		if fetchErr != nil {
 			return "", "", fetchErr
 		}
-		defer os.Remove(originalPdfPath)
+		defer uc.storage.Delete(ctx, originalPdfPath)
 
 		answerBody, err = uc.geminiService.GenerateAnswer(ctx, originalPdfPath, mapel)
 		if err != nil {

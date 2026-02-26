@@ -3,28 +3,31 @@ package ai
 import (
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
+
+	"wa-bot/internal/domain/repository"
 )
 
 type GeminiService struct {
-	client *genai.Client
-	apiKey string
+	client  *genai.Client
+	apiKey  string
+	storage repository.StorageRepository
 }
 
-func NewGeminiService(apiKey string) (*GeminiService, error) {
+func NewGeminiService(apiKey string, storage repository.StorageRepository) (*GeminiService, error) {
 	client, err := genai.NewClient(context.Background(), option.WithAPIKey(apiKey))
 	if err != nil {
 		return nil, err
 	}
 
 	return &GeminiService{
-		client: client,
-		apiKey: apiKey,
+		client:  client,
+		apiKey:  apiKey,
+		storage: storage,
 	}, nil
 }
 
@@ -34,9 +37,9 @@ func (g *GeminiService) GenerateAnswer(ctx context.Context, filepath, mapel stri
 		return "", fmt.Errorf("GEMINI_API_KEY tidak ditemukan di .env")
 	}
 
-	file, err := os.Open(filepath)
+	file, err := g.storage.Get(ctx, filepath)
 	if err != nil {
-		fmt.Printf("Gagal membuka file: %v\n", err)
+		fmt.Printf("Gagal membuka file dari storage: %v\n", err)
 		return "", err
 	}
 	defer file.Close()

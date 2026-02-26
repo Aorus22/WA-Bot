@@ -1,11 +1,12 @@
 package usecase
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -25,14 +26,16 @@ type StickerUseCase struct {
 	mediaDown *media.MediaDownloader
 	stateRepo repository.UserStateRepository
 	config    repository.ConfigRepository
+	storage   repository.StorageRepository
 }
 
-func NewStickerUseCase(waClient *whatsapp.WhatsAppClient, mediaDown *media.MediaDownloader, stateRepo repository.UserStateRepository, config repository.ConfigRepository) *StickerUseCase {
+func NewStickerUseCase(waClient *whatsapp.WhatsAppClient, mediaDown *media.MediaDownloader, stateRepo repository.UserStateRepository, config repository.ConfigRepository, storage repository.StorageRepository) *StickerUseCase {
 	return &StickerUseCase{
 		waClient:  waClient,
 		mediaDown: mediaDown,
 		stateRepo: stateRepo,
 		config:    config,
+		storage:   storage,
 	}
 }
 
@@ -64,7 +67,7 @@ func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waType
 		}
 
 		mediaPath, isAnimated, err := uc.getMedia(cancelCtx, senderJID, messageText, msg)
-		defer os.Remove(mediaPath)
+		defer uc.storage.Delete(cancelCtx, mediaPath)
 		if err != nil {
 			uc.handleMediaError(cancelCtx, senderJID, err)
 			return
@@ -75,8 +78,8 @@ func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waType
 			return
 		}
 
-		webpPath, err := uc.mediaDown.ConvertToWebP(cancelCtx, mediaPath, opt)
-		defer os.Remove(webpPath)
+		webpPath, err := uc.mediaDown.ConvertToWebP(cancelCtx, uc.storage.GetPath(mediaPath), opt)
+		defer uc.storage.Delete(cancelCtx, webpPath)
 		if err != nil {
 			if errors.Is(err, valueobject.ErrNotUnder1MB) {
 				uc.waClient.SendMessageToJID(cancelCtx, senderJID,
@@ -93,26 +96,30 @@ func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waType
 		}
 
 		author := os.Getenv("APP_NAME")
-		finalWebpPath, err := uc.mediaDown.WriteWebpExif(cancelCtx, webpPath, "+62 812-3436-3620", author)
-		defer os.Remove(finalWebpPath)
+		finalWebpPath, err := uc.mediaDown.WriteWebpExif(cancelCtx, uc.storage.GetPath(webpPath), "+62 812-3436-3620", author)
+		defer uc.storage.Delete(cancelCtx, finalWebpPath)
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to write EXIF", true)
 			return
 		}
 
-		webpData, err := os.ReadFile(finalWebpPath)
+		reader, err := uc.storage.Get(cancelCtx, finalWebpPath)
+		if err != nil {
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to read sticker data", true)
+			return
+		}
+		webpData, err := io.ReadAll(reader)
+		reader.Close()
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to read sticker data", true)
 			return
 		}
 
 		// Save to persistent media folder for frontend display
-		os.MkdirAll("media", 0755)
 		filename := fmt.Sprintf("sent_sticker_%d.webp", time.Now().UnixMilli())
-		persistedPath := filepath.Join("media", filename)
 		mediaURL := fmt.Sprintf("/media/%s", filename)
 		
-		if err := os.WriteFile(persistedPath, webpData, 0644); err != nil {
+		if _, err := uc.storage.Save(cancelCtx, filename, bytes.NewReader(webpData)); err != nil {
 			fmt.Printf("Failed to persist sent sticker: %v\n", err)
 			mediaURL = "" // Fallback to empty if save fails
 		}
@@ -199,8 +206,8 @@ func (uc *StickerUseCase) getWaMedia(ctx context.Context, msg *entity.Message) (
 		return "", false, err
 	}
 
-	mediaPath := fmt.Sprintf("media/%d", time.Now().UnixMilli())
-	if err := os.WriteFile(mediaPath, data, 0644); err != nil {
+	mediaPath := fmt.Sprintf("%d", time.Now().UnixMilli())
+	if _, err := uc.storage.Save(ctx, mediaPath, bytes.NewReader(data)); err != nil {
 		return "", false, err
 	}
 
@@ -247,7 +254,7 @@ func (uc *StickerUseCase) validateVideoDuration(ctx context.Context, senderJID w
 		return true
 	}
 
-	duration, err := uc.mediaDown.GetDuration(mediaPath)
+	duration, err := uc.mediaDown.GetDuration(uc.storage.GetPath(mediaPath))
 	if err != nil {
 		if errors.Is(err, valueobject.ErrNotVideo) {
 			uc.waClient.SendMessageToJID(ctx, senderJID, "Not a video but given start time", true)

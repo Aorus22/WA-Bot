@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -15,16 +13,19 @@ import (
 
 	"github.com/aorus22/instagramdl"
 
+	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/domain/valueobject"
 )
 
 type MediaDownloader struct {
 	converter *FFmpegConverter
+	storage   repository.StorageRepository
 }
 
-func NewMediaDownloader() *MediaDownloader {
+func NewMediaDownloader(storage repository.StorageRepository) *MediaDownloader {
 	return &MediaDownloader{
-		converter: NewFFmpegConverter(),
+		converter: NewFFmpegConverter(storage),
+		storage:   storage,
 	}
 }
 
@@ -32,14 +33,15 @@ var ErrorNotSupportedLink = errors.New("link not supported")
 
 func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (string, string, error) {
 	currentTime := fmt.Sprintf("%d", time.Now().UnixMilli())
-	mediaPath := "media/" + currentTime
+	mediaPath := currentTime
+	fullPath := m.storage.GetPath(mediaPath)
 
 	tryCommands := []struct {
 		cmd *exec.Cmd
 	}{
 		{
 			cmd: exec.CommandContext(ctx, "yt-dlp",
-				"-o", mediaPath,
+				"-o", fullPath,
 				"--no-playlist",
 				"-f", "best",
 				url,
@@ -47,7 +49,7 @@ func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (stri
 		},
 		{
 			cmd: exec.CommandContext(ctx, "gallery-dl",
-				"-D", "media",
+				"-D", m.storage.GetPath(""),
 				"-f", currentTime,
 				url,
 			),
@@ -60,16 +62,16 @@ func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (stri
 			continue
 		}
 
-		mimeType, err := m.converter.GetMimeType(mediaPath)
+		mimeType, err := m.converter.GetMimeType(fullPath)
 		if err != nil {
-			os.Remove(mediaPath)
+			m.storage.Delete(ctx, mediaPath)
 			continue
 		}
 
 		if strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "video/") {
 			return mediaPath, mimeType, nil
 		} else {
-			os.Remove(mediaPath)
+			m.storage.Delete(ctx, mediaPath)
 		}
 	}
 
@@ -89,25 +91,19 @@ func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (stri
 		return mediaPath, "", fmt.Errorf("failed to fetch media, status: %d", resp.StatusCode)
 	}
 
-	file, err := os.Create(mediaPath)
-	if err != nil {
-		return mediaPath, "", err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
+	_, err = m.storage.Save(ctx, mediaPath, resp.Body)
 	if err != nil {
 		return mediaPath, "", err
 	}
 
-	mimeType, err := m.converter.GetMimeType(mediaPath)
+	mimeType, err := m.converter.GetMimeType(fullPath)
 	if err != nil {
-		os.Remove(mediaPath)
-		return mediaPath, "", err
+		m.storage.Delete(ctx, mediaPath)
+		return fullPath, "", err
 	}
 
 	if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") {
-		os.Remove(mediaPath)
+		m.storage.Delete(ctx, mediaPath)
 		return mediaPath, "", ErrorNotSupportedLink
 	}
 

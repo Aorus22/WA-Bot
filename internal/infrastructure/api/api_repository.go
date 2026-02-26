@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"os"
+	"io"
 )
 
 type APIRepository struct {
@@ -40,11 +40,17 @@ func (a *APIRepository) FetchMapel() ([]string, error) {
 
 func (a *APIRepository) FetchPDFWithAnswer(mapel, answer string) ([]byte, error) {
 	answerKey := map[string]string{}
-	path, err := a.pdfClient.FetchPDF(context.Background(), mapel, answerKey)
+	ctx := context.Background()
+	path, err := a.pdfClient.FetchPDF(ctx, mapel, answerKey)
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
-	return data, err
+	reader, err := a.pdfClient.storage.Get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	return io.ReadAll(reader)
 }
