@@ -23,8 +23,6 @@ func NewFFmpegConverter() *FFmpegConverter {
 	return &FFmpegConverter{}
 }
 
-var ErrorNotUnder1MB = errors.New("failed to convert to webp under 1MB")
-
 func (f *FFmpegConverter) ConvertToWebP(ctx context.Context, mediaPath string, opt *valueobject.StickerOptions) (string, error) {
 	webpPath := filepath.Join("media", fmt.Sprintf("output_%d.webp", time.Now().UnixMilli()))
 
@@ -128,7 +126,7 @@ func (f *FFmpegConverter) ConvertToWebP(ctx context.Context, mediaPath string, o
 		return webpPath, nil
 	}
 
-	return webpPath, ErrorNotUnder1MB
+	return webpPath, valueobject.ErrNotUnder1MB
 }
 
 func (f *FFmpegConverter) GetDuration(filePath string) (float64, error) {
@@ -143,7 +141,7 @@ func (f *FFmpegConverter) GetDuration(filePath string) (float64, error) {
 	durationStr := strings.TrimSpace(string(output))
 	duration, err := strconv.ParseFloat(durationStr, 64)
 	if err != nil {
-		return 0, err
+		return 0, valueobject.ErrNotVideo
 	}
 
 	return duration, nil

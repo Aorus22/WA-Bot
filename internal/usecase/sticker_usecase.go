@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	waTypes "go.mau.fi/whatsmeow/types"
 
@@ -36,10 +37,10 @@ func NewStickerUseCase(waClient *whatsapp.WhatsAppClient, mediaDown *media.Media
 
 func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waTypes.JID, messageText string, role string, msg *entity.Message) error {
 	if role != "OWNER" && role != "COMMON" {
-		return uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command")
+		return uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command", true)
 	}
 
-	uc.waClient.SendMessageToJID(ctx, senderJID, "⏳ Loading...")
+	uc.waClient.SendMessageToJID(ctx, senderJID, "⏳ Loading...", true)
 
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	uc.stateRepo.AddUser(senderJID.String(), "processing", cancel)
@@ -50,29 +51,31 @@ func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waType
 
 		opt, err := uc.parseStickerOptions(messageText)
 		if err != nil {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, err.Error())
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, err.Error(), true)
 			return
 		}
 
 		if opt.StartTime != "" && opt.EndTime != "" {
 			if err := uc.validateTimeRange(opt); err != nil {
-				uc.waClient.SendMessageToJID(cancelCtx, senderJID, err.Error())
+				uc.waClient.SendMessageToJID(cancelCtx, senderJID, err.Error(), true)
 				return
 			}
 		}
 
-		mediaData, isAnimated, err := uc.getMedia(cancelCtx, senderJID, messageText, msg)
+		mediaPath, isAnimated, err := uc.getMedia(cancelCtx, senderJID, messageText, msg)
+		defer os.Remove(mediaPath)
 		if err != nil {
 			uc.handleMediaError(cancelCtx, senderJID, err)
 			return
 		}
 		opt.IsAnimated = isAnimated
 
-		if !uc.validateVideoDuration(cancelCtx, senderJID, mediaData, opt) {
+		if !uc.validateVideoDuration(cancelCtx, senderJID, mediaPath, opt) {
 			return
 		}
 
-		webpData, err := uc.mediaDown.ConvertToWebpBytes(cancelCtx, mediaData, opt)
+		webpPath, err := uc.mediaDown.ConvertToWebP(cancelCtx, mediaPath, opt)
+		defer os.Remove(webpPath)
 		if err != nil {
 			if errors.Is(err, valueobject.ErrNotUnder1MB) {
 				uc.waClient.SendMessageToJID(cancelCtx, senderJID,
@@ -80,23 +83,31 @@ func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waType
 						"- Lower the quality with: quality=<0-100>\n"+
 						"- Reduce the video duration: start=MM:SS end=MM:SS\n"+
 						"- Reduce the video FPS: fps=<1-60>",
+					true,
 				)
 				return
 			}
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to convert sticker")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to convert sticker", true)
 			return
 		}
 
 		author := os.Getenv("APP_NAME")
-		webpData, err = uc.mediaDown.WriteWebpExifBytes(cancelCtx, webpData, "+62 812-3436-3620", author)
+		finalWebpPath, err := uc.mediaDown.WriteWebpExif(cancelCtx, webpPath, "+62 812-3436-3620", author)
+		defer os.Remove(finalWebpPath)
 		if err != nil {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to write EXIF")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to write EXIF", true)
 			return
 		}
 
-		err = uc.waClient.SendStickerToJID(cancelCtx, senderJID, webpData, opt.IsAnimated)
+		webpData, err := os.ReadFile(finalWebpPath)
 		if err != nil {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to send sticker")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to read sticker data", true)
+			return
+		}
+
+		err = uc.waClient.SendStickerToJID(cancelCtx, senderJID, webpData, opt.IsAnimated, true)
+		if err != nil {
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to send sticker", true)
 			return
 		}
 	}()
@@ -163,25 +174,31 @@ func (uc *StickerUseCase) validateTimeRange(opt *valueobject.StickerOptions) err
 	return nil
 }
 
-func (uc *StickerUseCase) getMedia(ctx context.Context, senderJID waTypes.JID, messageText string, msg *entity.Message) ([]byte, bool, error) {
+func (uc *StickerUseCase) getMedia(ctx context.Context, senderJID waTypes.JID, messageText string, msg *entity.Message) (string, bool, error) {
 	if msg.VMessage.GetImageMessage() != nil || msg.VMessage.GetVideoMessage() != nil {
 		return uc.getWaMedia(ctx, msg)
 	}
 	return uc.getMediaFromUrl(ctx, messageText)
 }
 
-func (uc *StickerUseCase) getWaMedia(ctx context.Context, msg *entity.Message) ([]byte, bool, error) {
+func (uc *StickerUseCase) getWaMedia(ctx context.Context, msg *entity.Message) (string, bool, error) {
 	data, isAnimated, err := uc.waClient.DownloadMedia(ctx, msg)
 	if err != nil {
-		return nil, false, err
+		return "", false, err
 	}
-	return data, isAnimated, nil
+
+	mediaPath := fmt.Sprintf("media/%d", time.Now().UnixMilli())
+	if err := os.WriteFile(mediaPath, data, 0644); err != nil {
+		return "", false, err
+	}
+
+	return mediaPath, isAnimated, nil
 }
 
-func (uc *StickerUseCase) getMediaFromUrl(ctx context.Context, messageText string) ([]byte, bool, error) {
+func (uc *StickerUseCase) getMediaFromUrl(ctx context.Context, messageText string) (string, bool, error) {
 	url, err := valueobject.GetLinkFromString(messageText)
 	if err != nil {
-		return nil, false, errors.New("no link provided")
+		return "", false, errors.New("no link provided")
 	}
 
 	page := func() int {
@@ -200,35 +217,30 @@ func (uc *StickerUseCase) getMediaFromUrl(ctx context.Context, messageText strin
 	if strings.Contains(url, "instagram.com") {
 		url, err = uc.mediaDown.GetInstagramDirectURL(url, page)
 		if err != nil {
-			return nil, false, err
+			return "", false, err
 		}
 	}
 
 	mediaPath, mimeType, err := uc.mediaDown.DownloadFromURL(ctx, url)
 	if err != nil {
-		return nil, false, err
-	}
-
-	mediaData, err := os.ReadFile(mediaPath)
-	if err != nil {
-		return nil, false, err
+		return "", false, err
 	}
 
 	isAnimated := strings.HasPrefix(mimeType, "video/") || strings.Contains(mimeType, "gif")
-	return mediaData, isAnimated, nil
+	return mediaPath, isAnimated, nil
 }
 
-func (uc *StickerUseCase) validateVideoDuration(ctx context.Context, senderJID waTypes.JID, mediaData []byte, opt *valueobject.StickerOptions) bool {
+func (uc *StickerUseCase) validateVideoDuration(ctx context.Context, senderJID waTypes.JID, mediaPath string, opt *valueobject.StickerOptions) bool {
 	if opt.StartTime == "" {
 		return true
 	}
 
-	duration, err := uc.mediaDown.GetMediaDuration(mediaData)
+	duration, err := uc.mediaDown.GetDuration(mediaPath)
 	if err != nil {
 		if errors.Is(err, valueobject.ErrNotVideo) {
-			uc.waClient.SendMessageToJID(ctx, senderJID, "Not a video but given start time")
+			uc.waClient.SendMessageToJID(ctx, senderJID, "Not a video but given start time", true)
 		} else {
-			uc.waClient.SendMessageToJID(ctx, senderJID, "Server error: failed to get duration")
+			uc.waClient.SendMessageToJID(ctx, senderJID, "Server error: failed to get duration", true)
 		}
 		return false
 	}
@@ -237,11 +249,11 @@ func (uc *StickerUseCase) validateVideoDuration(ctx context.Context, senderJID w
 	end := valueobject.ParseTimeFromString(opt.EndTime)
 
 	if start > duration {
-		uc.waClient.SendMessageToJID(ctx, senderJID, fmt.Sprintf("%.0f", duration))
+		uc.waClient.SendMessageToJID(ctx, senderJID, fmt.Sprintf("Start Time (%.0fs) exceeds media duration (%.0fs)", start, duration), true)
 		return false
 	}
 	if opt.EndTime != "" && end > duration {
-		uc.waClient.SendMessageToJID(ctx, senderJID, fmt.Sprintf("%.0f", duration))
+		uc.waClient.SendMessageToJID(ctx, senderJID, fmt.Sprintf("End Time (%.0fs) exceeds media duration (%.0fs)", end, duration), true)
 		return false
 	}
 
@@ -251,15 +263,15 @@ func (uc *StickerUseCase) validateVideoDuration(ctx context.Context, senderJID w
 func (uc *StickerUseCase) handleMediaError(ctx context.Context, senderJID waTypes.JID, err error) error {
 	switch {
 	case errors.Is(err, valueobject.ErrNotSupportedLink):
-		uc.waClient.SendMessageToJID(ctx, senderJID, "Link not supported")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "Link not supported", true)
 	case errors.Is(err, valueobject.ErrNoLinkProvided):
-		uc.waClient.SendMessageToJID(ctx, senderJID, "No Link Provided")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "No Link Provided", true)
 	case errors.Is(err, valueobject.ErrPageNumberExceeded):
-		uc.waClient.SendMessageToJID(ctx, senderJID, "Page Number Exceed the Available Pages")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "Page Number Exceed the Available Pages", true)
 	case errors.Is(err, valueobject.ErrPageNumberNotGiven):
-		uc.waClient.SendMessageToJID(ctx, senderJID, "No Page Number Given, type page=<number>")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "No Page Number Given, type page=<number>", true)
 	default:
-		uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Media / Link")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Media / Link", true)
 	}
 	return err
 }

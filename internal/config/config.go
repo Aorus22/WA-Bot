@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/joho/godotenv"
 	"github.com/mdp/qrterminal"
@@ -14,6 +12,7 @@ import (
 	"wa-bot/internal/delivery/cron"
 	"wa-bot/internal/delivery/http"
 	"wa-bot/internal/delivery/whatsapp"
+	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
 	"wa-bot/internal/infrastructure/api"
 	infrastructureConfig "wa-bot/internal/infrastructure/config"
@@ -44,27 +43,46 @@ func (a *App) Run() error {
 		return fmt.Errorf("whatsapp client not initialized")
 	}
 
+	// Start session management in background
+	go a.HandleSession()
+
+	// Start HTTP server (this is blocking)
+	fmt.Printf("Starting HTTP server on port %s...\n", a.config.Get("PORT"))
+	if err := a.httpServer.Start(); err != nil {
+		return fmt.Errorf("failed to start HTTP server: %w", err)
+	}
+
+	return nil
+}
+
+func (a *App) HandleSession() {
 	if !a.waClient.IsLoggedIn() {
 		qrChan, err := a.waClient.GetQRChannel(context.Background())
 		if err != nil {
-			return fmt.Errorf("failed to get QR channel: %w", err)
+			fmt.Printf("failed to get QR channel: %v\n", err)
+			return
 		}
 
 		err = a.waClient.Connect()
 		if err != nil {
-			return fmt.Errorf("failed to connect to WhatsApp: %w", err)
+			fmt.Printf("failed to connect to WhatsApp: %v\n", err)
+			return
 		}
 
-		fmt.Println("Waiting for QR code scan...")
+		fmt.Println("Waiting for QR code scan (check frontend or terminal)...")
 		for evt := range qrChan {
 			if evt.Event == "code" {
-				fmt.Println("\n=== SCAN QR CODE BELOW ===")
+				fmt.Println("\n=== SCAN QR CODE IN FRONTEND ===")
+				// We also keep it in terminal for convenience
 				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-				fmt.Println("\n=== OR SCAN THIS STRING ===")
-				fmt.Println(evt.Code)
-				fmt.Println("===========================\n")
+				
+				// Broadcast to frontend
+				a.httpServer.BroadcastMessage("qr_code", map[string]string{
+					"code": evt.Code,
+				})
 			} else if evt.Event == "success" {
 				fmt.Println("\n✅ Successfully authenticated!")
+				a.httpServer.BroadcastMessage("auth_success", nil)
 				break
 			} else {
 				fmt.Println("Login event:", evt.Event)
@@ -73,20 +91,12 @@ func (a *App) Run() error {
 	} else {
 		err := a.waClient.Connect()
 		if err != nil {
-			return fmt.Errorf("failed to connect to WhatsApp: %w", err)
+			fmt.Printf("failed to connect to WhatsApp: %v\n", err)
+			return
 		}
 		fmt.Println("✅ Successfully authenticated!")
+		a.httpServer.BroadcastMessage("auth_success", nil)
 	}
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
-
-	fmt.Println("\nShutting down...")
-	a.waClient.Disconnect()
-	a.cronScheduler.Stop()
-
-	return nil
 }
 
 func InitializeApp() (*App, error) {
@@ -136,6 +146,20 @@ func InitializeApp() (*App, error) {
 
 	httpServer := http.NewHTTPServer(waClient, cfg)
 	cronScheduler := cron.NewCronScheduler(waClient, dbURL, cfg.Get("CRON_SCHEDULE"))
+
+	// Initialize message store
+	msgStore, err := repository.NewMessageStore("file:wa-bot-messages.db?_foreign_keys=on")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create message store: %w", err)
+	}
+	httpServer.SetMessageRepo(msgStore)
+
+	// Set http server as logger for WhatsApp client
+	waClient.SetLogger(httpServer)
+
+	// Set message store and http server to event handler
+	eventHandler.SetMessageStore(msgStore)
+	eventHandler.SetHTTPServer(httpServer)
 
 	app := &App{
 		waClient:      waClient,

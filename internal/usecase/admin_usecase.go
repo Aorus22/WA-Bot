@@ -29,13 +29,13 @@ func NewAdminUseCase(waClient *whatsapp.WhatsAppClient, apiRepo *api.APIReposito
 
 func (uc *AdminUseCase) ListGroups(ctx context.Context, senderJID string, role string) error {
 	if role != "OWNER" {
-		uc.waClient.SendMessage(ctx, senderJID, "Invalid Command")
+		uc.waClient.SendMessage(ctx, senderJID, "Invalid Command", true)
 		return nil
 	}
 
 	groups, err := uc.waClient.GetJoinedGroups(ctx)
 	if err != nil {
-		uc.waClient.SendMessage(ctx, senderJID, "Failed to get groups")
+		uc.waClient.SendMessage(ctx, senderJID, "Failed to get groups", true)
 		return err
 	}
 
@@ -44,7 +44,7 @@ func (uc *AdminUseCase) ListGroups(ctx context.Context, senderJID string, role s
 		responseText += fmt.Sprintf("📂 *%s*\n📎 ID: %s\n", group.Name, group.JID)
 	}
 
-	uc.waClient.SendMessage(ctx, senderJID, responseText)
+	uc.waClient.SendMessage(ctx, senderJID, responseText, true)
 	return nil
 }
 
@@ -56,7 +56,7 @@ func (uc *AdminUseCase) ListMapel(ctx context.Context, senderJID string, role st
 
 	listMapel, err := uc.apiRepo.FetchMapel()
 	if err != nil {
-		uc.waClient.SendMessage(ctx, senderJID, "Gagal mengambil daftar mapel.")
+		uc.waClient.SendMessage(ctx, senderJID, "Gagal mengambil daftar mapel.", true)
 		return err
 	}
 
@@ -65,13 +65,13 @@ func (uc *AdminUseCase) ListMapel(ctx context.Context, senderJID string, role st
 		listMapelString += fmt.Sprintf("%d. %s\n", i+1, mapel)
 	}
 
-	uc.waClient.SendMessage(ctx, senderJID, listMapelString)
+	uc.waClient.SendMessage(ctx, senderJID, listMapelString, true)
 	return nil
 }
 
 func (uc *AdminUseCase) ListMembers(ctx context.Context, senderJID string, role string) error {
 	if role != "OWNER" {
-		uc.waClient.SendMessage(ctx, senderJID, "Invalid Command")
+		uc.waClient.SendMessage(ctx, senderJID, "Invalid Command", true)
 		return nil
 	}
 
@@ -102,6 +102,6 @@ func (uc *AdminUseCase) ListMembers(ctx context.Context, senderJID string, role 
 		responseText += "\n"
 	}
 
-	uc.waClient.SendMessage(ctx, senderJID, responseText)
+	uc.waClient.SendMessage(ctx, senderJID, responseText, true)
 	return nil
 }

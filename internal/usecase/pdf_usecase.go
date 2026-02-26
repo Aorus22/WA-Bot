@@ -35,7 +35,7 @@ func NewPDFUseCase(waClient *whatsapp.WhatsAppClient, apiRepo *api.APIRepository
 func (uc *PDFUseCase) SendPDF(ctx context.Context, senderJID waTypes.JID, command string, role string, msg *entity.Message) error {
 	isAllowed := role == "ADMIN" || role == "OWNER"
 	if !isAllowed {
-		uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command", true)
 		return nil
 	}
 
@@ -48,14 +48,14 @@ func (uc *PDFUseCase) SendPDF(ctx context.Context, senderJID waTypes.JID, comman
 
 	commandArray := strings.Split(commandString, " ")
 	if len(commandArray) != 2 {
-		uc.waClient.SendMessageToJID(ctx, senderJID, "Format perintah salah")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "Format perintah salah", true)
 		return nil
 	}
 
 	cmd := commandArray[0]
 	mapel := commandArray[1]
 
-	uc.waClient.SendMessageToJID(ctx, senderJID, "⏳ Loading...")
+	uc.waClient.SendMessageToJID(ctx, senderJID, "⏳ Loading...", true)
 
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	uc.stateRepo.AddUser(senderJID.String(), "processing", cancel)
@@ -66,7 +66,7 @@ func (uc *PDFUseCase) SendPDF(ctx context.Context, senderJID waTypes.JID, comman
 
 		listMapel, err := uc.apiRepo.FetchMapel()
 		if err != nil {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengambil daftar mapel.")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengambil daftar mapel.", true)
 			return
 		}
 
@@ -74,23 +74,23 @@ func (uc *PDFUseCase) SendPDF(ctx context.Context, senderJID waTypes.JID, comman
 			if index > 0 && index <= len(listMapel) {
 				mapel = listMapel[index-1]
 			} else {
-				uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Nomor mapel tidak valid.")
+				uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Nomor mapel tidak valid.", true)
 				return
 			}
 		} else if !uc.isValidMapel(mapel, listMapel) {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Mapel tidak valid.")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Mapel tidak valid.", true)
 			return
 		}
 
 		pdfData, source, err := uc.fetchPDF(cancelCtx, cmd, mapel, answerBody)
 		if err != nil {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengambil PDF")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengambil PDF", true)
 			return
 		}
 
-		err = uc.waClient.SendDocumentToJID(cancelCtx, senderJID, pdfData, fmt.Sprintf("%s (%s)", mapel, source))
+		err = uc.waClient.SendDocumentToJID(cancelCtx, senderJID, pdfData, fmt.Sprintf("%s (%s)", mapel, source), true)
 		if err != nil {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengirim PDF")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengirim PDF", true)
 			return
 		}
 	}()

@@ -48,7 +48,7 @@ func NewWhatsAppService(waClient *whatsapp.WhatsAppClient, config repository.Con
 
 func (uc *HandlerUseCase) HandleCheck(ctx interface{}, senderJID waTypes.JID, args map[string]interface{}) {
 	ctxTyped := ctx.(context.Context)
-	uc.waClient.SendMessageToJID(ctxTyped, senderJID, "Hello, World!")
+	uc.waClient.SendMessageToJID(ctxTyped, senderJID, "Hello, World!", true)
 }
 
 func (uc *HandlerUseCase) HandleListGroups(ctx interface{}, senderJID waTypes.JID, role string) {
@@ -167,27 +167,25 @@ func (uc *HandlerUseCase) HandleHelp(ctx interface{}, senderJID waTypes.JID, rol
 	message = strings.Join(lines, "\n")
 
 	fmt.Printf("DEBUG: Sending help message to %s\n", senderJID.String())
-	if err := uc.waClient.SendMessageToJID(ctxTyped, senderJID, message); err != nil {
-		fmt.Printf("DEBUG: Error sending message: %v\n", err)
-	} else {
-		fmt.Printf("DEBUG: Message sent successfully to %s\n", senderJID.String())
-	}
+	uc.waClient.SendMessageToJID(ctxTyped, senderJID, message, true)
 }
 
 func (uc *HandlerUseCase) HandleCancel(senderJID string) {
 	state := uc.StateRepo.GetUserStateSimple(senderJID)
+	targetJID, _ := waTypes.ParseJID(senderJID)
+	
 	if state == "" {
-		uc.waClient.SendMessage(context.Background(), senderJID, "❌ There is no running process")
+		uc.waClient.SendMessageToJID(context.Background(), targetJID, "❌ There is no running process", true)
 		return
 	}
 
 	err := uc.StateRepo.CancelUserState(senderJID)
 	if err != nil {
-		uc.waClient.SendMessage(context.Background(), senderJID, "⚠️ Failed to cancel process")
+		uc.waClient.SendMessageToJID(context.Background(), targetJID, "⚠️ Failed to cancel process", true)
 		return
 	}
 
-	uc.waClient.SendMessage(context.Background(), senderJID, "✅ Process successfully cancelled")
+	uc.waClient.SendMessageToJID(context.Background(), targetJID, "✅ Process successfully cancelled", true)
 }
 
 func (uc *HandlerUseCase) HandlePendingToken(ctx interface{}, senderJID waTypes.JID, messageText string) {

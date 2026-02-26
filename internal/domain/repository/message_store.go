@@ -1,0 +1,358 @@
+package repository
+
+import (
+	"database/sql"
+	"fmt"
+	"sync"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+type MessageStore struct {
+	db *sql.DB
+	mu sync.RWMutex
+}
+
+type Message struct {
+	ID          string `json:"id"`
+	ChatID      string `json:"chatId"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Content     string `json:"content"`
+	Timestamp   int64  `json:"timestamp"`
+	Status      string `json:"status"`
+	Type        string `json:"type"`
+	MediaURL    string `json:"mediaUrl,omitempty"`
+	IsAutomatic bool   `json:"isAutomatic"`
+}
+
+type Chat struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Avatar    string `json:"avatar"`
+	LastMsg   string `json:"lastMsg"`
+	LastTime  int64  `json:"lastTime"`
+	Unread    int    `json:"unread"`
+	IsActive  bool   `json:"isActive"`
+	IsGroup   bool   `json:"isGroup"`
+}
+
+type Contact struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	JID    string `json:"jid"`
+	Avatar string `json:"avatar"`
+}
+
+func NewMessageStore(dbPath string) (*MessageStore, error) {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	store := &MessageStore{db: db}
+
+	if err := store.init(); err != nil {
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+
+	return store, nil
+}
+
+func (s *MessageStore) init() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS contacts (
+			id TEXT PRIMARY KEY,
+			name TEXT,
+			jid TEXT UNIQUE,
+			avatar TEXT,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS chats (
+			id TEXT PRIMARY KEY,
+			name TEXT,
+			avatar TEXT,
+			last_msg TEXT,
+			last_time INTEGER,
+			unread INTEGER DEFAULT 0,
+			is_active INTEGER DEFAULT 0,
+			is_group INTEGER DEFAULT 0,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS messages (
+			id TEXT PRIMARY KEY,
+			chat_id TEXT,
+			sender_id TEXT,
+			receiver_id TEXT,
+			content TEXT,
+			timestamp INTEGER,
+			status TEXT DEFAULT 'sent',
+			msg_type TEXT DEFAULT 'text',
+			media_url TEXT,
+			is_automatic INTEGER DEFAULT 0,
+			metadata TEXT,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS update_chat_timestamp
+			AFTER INSERT ON messages
+			BEGIN
+				UPDATE chats SET last_msg = NEW.content, last_time = NEW.timestamp, updated_at = strftime('%s', 'now')
+				WHERE id = NEW.chat_id;
+			END`,
+	}
+
+	for _, query := range queries {
+		if _, err := s.db.Exec(query); err != nil {
+			return fmt.Errorf("failed to create table: %w", err)
+		}
+	}
+
+	// Migration: Add is_automatic column if it doesn't exist
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN is_automatic INTEGER DEFAULT 0")
+
+	return nil
+}
+
+func (s *MessageStore) SaveMessage(msg *Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Insert or update chat
+	var chatExists bool
+	err = tx.QueryRow("SELECT COUNT(*) > 0 FROM chats WHERE id = ?", msg.ChatID).Scan(&chatExists)
+	if err != nil {
+		return err
+	}
+
+	if !chatExists {
+		_, err = tx.Exec(`
+			INSERT INTO chats (id, name, last_msg, last_time, is_active, is_group)
+			VALUES (?, ?, ?, ?, 1, 0)
+		`, msg.ChatID, msg.ChatID, msg.Content, msg.Timestamp)
+	} else {
+		_, err = tx.Exec(`
+			UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
+			WHERE id = ?
+		`, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Insert message
+	_, err = tx.Exec(`
+		INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
+		if msg.IsAutomatic {
+			return 1
+		}
+		return 0
+	}())
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `
+		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic
+		FROM messages
+		WHERE chat_id = ?
+		ORDER BY timestamp DESC
+		LIMIT ?
+	`
+
+	rows, err := s.db.Query(query, chatID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		var isAuto int
+		err := rows.Scan(
+			&msg.ID,
+			&msg.ChatID,
+			&msg.From,
+			&msg.To,
+			&msg.Content,
+			&msg.Timestamp,
+			&msg.Status,
+			&msg.Type,
+			&msg.MediaURL,
+			&isAuto,
+		)
+		if err != nil {
+			return nil, err
+		}
+		msg.IsAutomatic = isAuto == 1
+		messages = append(messages, msg)
+	}
+
+	// Reverse to get chronological order
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nil
+}
+
+func (s *MessageStore) GetChats() ([]Chat, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `
+		SELECT id, name, ifnull(avatar, '') as avatar, last_msg, last_time, unread, is_active, is_group
+		FROM chats
+		ORDER BY last_time DESC
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chats []Chat
+	for rows.Next() {
+		var chat Chat
+		var isActive, isGroup int
+		err := rows.Scan(
+			&chat.ID,
+			&chat.Name,
+			&chat.Avatar,
+			&chat.LastMsg,
+			&chat.LastTime,
+			&chat.Unread,
+			&isActive,
+			&isGroup,
+		)
+		if err != nil {
+			return nil, err
+		}
+		chat.IsActive = isActive == 1
+		chat.IsGroup = isGroup == 1
+		chats = append(chats, chat)
+	}
+
+	return chats, nil
+}
+
+func (s *MessageStore) GetContacts() ([]Contact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `
+		SELECT id, name, jid, ifnull(avatar, '') as avatar
+		FROM contacts
+		ORDER BY name ASC
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var contacts []Contact
+	for rows.Next() {
+		var contact Contact
+		err := rows.Scan(
+			&contact.ID,
+			&contact.Name,
+			&contact.JID,
+			&contact.Avatar,
+		)
+		if err != nil {
+			return nil, err
+		}
+		contacts = append(contacts, contact)
+	}
+
+	return contacts, nil
+}
+
+func (s *MessageStore) SaveContact(contact *Contact) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT OR REPLACE INTO contacts (id, name, jid, avatar, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, contact.ID, contact.Name, contact.JID, contact.Avatar, time.Now().Unix())
+
+	return err
+}
+
+func (s *MessageStore) UpdateChatLastMessage(chatID, content string, timestamp int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE chats
+		SET last_msg = ?, last_time = ?, updated_at = ?
+		WHERE id = ?
+	`, content, timestamp, time.Now().Unix(), chatID)
+
+	return err
+}
+
+func (s *MessageStore) MarkAsRead(chatID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE chats SET unread = 0, updated_at = ? WHERE id = ?
+	`, time.Now().Unix(), chatID)
+
+	return err
+}
+
+func (s *MessageStore) UpdateChatAvatar(chatID, avatarURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE chats SET avatar = ?, updated_at = ? WHERE id = ?
+	`, avatarURL, time.Now().Unix(), chatID)
+
+	return err
+}
+
+func (s *MessageStore) UpdateChatName(chatID, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE chats SET name = ?, updated_at = ? WHERE id = ?
+	`, name, time.Now().Unix(), chatID)
+
+	return err
+}
+
+func (s *MessageStore) Close() error {
+	return s.db.Close()
+}

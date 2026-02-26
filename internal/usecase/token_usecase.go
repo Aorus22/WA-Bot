@@ -35,17 +35,17 @@ func (uc *TokenUseCase) HandleToken(ctx context.Context, senderJID waTypes.JID, 
 	isAllowed := role == "ADMIN" || role == "OWNER" || role == "USER"
 
 	if !isAllowed || isFromGroup {
-		uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command")
+		uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command", true)
 		return nil
 	}
 
 	uc.stateRepo.SetUserState(senderJID.String(), "PendingToken")
-	uc.waClient.SendMessageToJID(ctx, senderJID, "Silakan masukkan nama lengkap Anda.")
+	uc.waClient.SendMessageToJID(ctx, senderJID, "Silakan masukkan nama lengkap Anda.", true)
 	return nil
 }
 
 func (uc *TokenUseCase) HandleNameInput(ctx context.Context, senderJID waTypes.JID, messageText string) error {
-	uc.waClient.SendMessageToJID(ctx, senderJID, "⏳ Loading...")
+	uc.waClient.SendMessageToJID(ctx, senderJID, "⏳ Loading...", true)
 
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	uc.stateRepo.UpdateProcessContext(senderJID.String(), cancel)
@@ -63,14 +63,14 @@ func (uc *TokenUseCase) HandleNameInput(ctx context.Context, senderJID waTypes.J
 		userState, err := uc.stateRepo.GetUserStatus(senderJID.String())
 		if err == nil && userState != nil {
 			if time.Since(userState.StartTime) > time.Duration(timeout)*time.Minute {
-				uc.waClient.SendMessageToJID(cancelCtx, senderJID, "⏳ Waktu habis! Silakan ketik *!token* lagi.")
+				uc.waClient.SendMessageToJID(cancelCtx, senderJID, "⏳ Waktu habis! Silakan ketik *!token* lagi.", true)
 				return
 			}
 		}
 
 		validNameRegex := regexp.MustCompile(`^[a-zA-Z' ]+$`)
 		if !validNameRegex.MatchString(messageText) {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "⚠️ Nama Invalid")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "⚠️ Nama Invalid", true)
 			return
 		}
 
@@ -79,7 +79,7 @@ func (uc *TokenUseCase) HandleNameInput(ctx context.Context, senderJID waTypes.J
 
 		status, token, err := uc.apiRepo.FetchToken(cancelCtx, nama, nis)
 		if err != nil {
-			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mendapatkan token.")
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mendapatkan token.", true)
 			return
 		}
 
@@ -90,8 +90,8 @@ func (uc *TokenUseCase) HandleNameInput(ctx context.Context, senderJID waTypes.J
 			responseText = "Token lama telah tidak berlaku. Ini token baru anda:"
 		}
 
-		uc.waClient.SendMessageToJID(cancelCtx, senderJID, responseText)
-		uc.waClient.SendMessageToJID(cancelCtx, senderJID, token)
+		uc.waClient.SendMessageToJID(cancelCtx, senderJID, responseText, true)
+		uc.waClient.SendMessageToJID(cancelCtx, senderJID, token, true)
 	}()
 
 	return nil
