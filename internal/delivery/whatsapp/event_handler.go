@@ -20,6 +20,7 @@ import (
 type HTTPServer interface {
 	BroadcastMessage(msgType string, payload interface{})
 	SaveAndBroadcastMessage(msg *repository.Message)
+	UpdateMessageStatus(msgID, status string)
 }
 
 type WhatsAppEventHandler struct {
@@ -60,6 +61,29 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
 		h.handleMessage(v)
+	case *events.Receipt:
+		h.handleReceipt(v)
+	}
+}
+
+func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
+	if h.httpServer == nil {
+		return
+	}
+
+	status := "sent"
+	if evt.Type == events.ReceiptTypeDelivered {
+		status = "delivered"
+	} else if evt.Type == events.ReceiptTypeRead || evt.Type == events.ReceiptTypeReadSelf {
+		status = "read"
+	} else {
+		// We only care about delivered and read status
+		return
+	}
+
+	for _, msgID := range evt.MessageIDs {
+		h.httpServer.UpdateMessageStatus(msgID, status)
+		fmt.Printf("✅ Updated status for %s to %s\n", msgID, status)
 	}
 }
 

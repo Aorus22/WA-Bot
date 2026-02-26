@@ -453,6 +453,17 @@ func (s *MessageStore) DeleteFavoriteSticker(id string) error {
 	return err
 }
 
+func (s *MessageStore) UpdateMessageStatus(msgID, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE messages SET status = ? WHERE id = ?
+	`, status, msgID)
+
+	return err
+}
+
 func (s *MessageStore) Close() error {
 	return s.db.Close()
 }

@@ -215,9 +215,9 @@ func (s *HTTPServer) BroadcastMessage(msgType string, payload interface{}) {
 	})
 }
 
-func (s *HTTPServer) LogSentMessage(chatID, from, to, content, msgType, mediaURL string, isAutomatic bool) {
+func (s *HTTPServer) LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool) {
 	msg := &repository.Message{
-		ID:          generateID(),
+		ID:          msgID,
 		ChatID:      chatID,
 		From:        from,
 		To:          to,
@@ -229,6 +229,26 @@ func (s *HTTPServer) LogSentMessage(chatID, from, to, content, msgType, mediaURL
 		IsAutomatic: isAutomatic,
 	}
 	s.SaveAndBroadcastMessage(msg)
+}
+
+func (s *HTTPServer) UpdateMessageStatus(msgID, status string) {
+	if s.msgRepo != nil {
+		if err := s.msgRepo.UpdateMessageStatus(msgID, status); err != nil {
+			fmt.Printf("Failed to update message status: %v\n", err)
+			return
+		}
+
+		// Broadcast via WebSocket
+		if s.hub != nil {
+			s.hub.Broadcast(WSMessage{
+				Type: "message_status",
+				Payload: map[string]interface{}{
+					"id":     msgID,
+					"status": status,
+				},
+			})
+		}
+	}
 }
 
 func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
@@ -424,7 +444,22 @@ func (s *HTTPServer) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("✓ WhatsApp message sent to %s\n", req.Target)
 
+	// Since LogSentMessage calls SaveAndBroadcastMessage, it already saved it to DB.
+	// We should return the message we just created to the FE so it knows the real ID.
+	// We'll need the ID from whatsmeow, which is not directly here but LogSentMessage
+	// was called by the client. We need to get that message back.
+	
+	// Actually, let's just find the last message for this chat to be safe, 
+	// or better, modify handleSendMessage to return the result.
+	// Since the client.SendMessage now calls logger.LogSentMessage, we can't easily get it back.
+	
+	// Alternative: Let's have handleSendMessage return a 200 OK, and the FE 
+	// will get the "new_message" event via WebSocket anyway.
+	// But the FE wants to replace its temporary message.
+	
 	w.WriteHeader(http.StatusOK)
+	// Return a placeholder or the actual message if we can.
+	// For now, let's just return success and let WebSocket handle the real update.
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 

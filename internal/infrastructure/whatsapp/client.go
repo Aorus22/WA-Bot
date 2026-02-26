@@ -16,7 +16,7 @@ import (
 )
 
 type MessageLogger interface {
-	LogSentMessage(chatID, from, to, content, msgType, mediaURL string, isAutomatic bool)
+	LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool)
 }
 
 type QREvent struct {
@@ -57,9 +57,9 @@ func (w *WhatsAppClient) SetLogger(logger MessageLogger) {
 	w.logger = logger
 }
 
-func (w *WhatsAppClient) log(to string, content string, msgType string, mediaURL string, isAutomatic bool) {
+func (w *WhatsAppClient) log(msgID string, to string, content string, msgType string, mediaURL string, isAutomatic bool) {
 	if w.logger != nil {
-		w.logger.LogSentMessage(to, "me", to, content, msgType, mediaURL, isAutomatic)
+		w.logger.LogSentMessage(msgID, to, "me", to, content, msgType, mediaURL, isAutomatic)
 	}
 }
 
@@ -71,11 +71,11 @@ func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	_, err = w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		Conversation: proto.String(text),
 	})
 	if err == nil {
-		w.log(targetJID.String(), text, "text", "", isAutomatic)
+		w.log(resp.ID, targetJID.String(), text, "text", "", isAutomatic)
 	}
 	return err
 }
@@ -112,14 +112,14 @@ func (w *WhatsAppClient) SendMessageToJID(ctx context.Context, to waTypes.JID, t
 		}
 	}
 
-	_, sendErr := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, sendErr := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		Conversation: proto.String(text),
 	})
 	if sendErr != nil {
 		fmt.Printf("❌ SendMessageToJID failed: %v\n", sendErr)
 	} else {
 		fmt.Printf("✓ SendMessageToJID success\n")
-		w.log(targetJID.String(), text, "text", "", isAutomatic)
+		w.log(resp.ID, targetJID.String(), text, "text", "", isAutomatic)
 	}
 	return sendErr
 }
@@ -138,7 +138,7 @@ func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, 
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	_, err = w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		ImageMessage: &waProto.ImageMessage{
 			Caption:       proto.String(caption),
 			Mimetype:      proto.String("image/jpeg"),
@@ -151,7 +151,7 @@ func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, 
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), caption, "image", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), caption, "image", mediaURL, isAutomatic)
 	}
 	return err
 }
@@ -170,7 +170,7 @@ func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, 
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	_, err = w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		VideoMessage: &waProto.VideoMessage{
 			Caption:       proto.String(caption),
 			Mimetype:      proto.String("video/mp4"),
@@ -183,7 +183,7 @@ func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, 
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), caption, "video", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), caption, "video", mediaURL, isAutomatic)
 	}
 	return err
 }
@@ -202,7 +202,7 @@ func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byt
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	_, err = w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:         proto.String(title),
 			Mimetype:      proto.String("application/pdf"),
@@ -216,7 +216,7 @@ func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byt
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), title, "document", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), title, "document", mediaURL, isAutomatic)
 	}
 	return err
 }
@@ -235,7 +235,7 @@ func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	_, err = w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		StickerMessage: &waProto.StickerMessage{
 			Mimetype:      proto.String("image/webp"),
 			URL:           proto.String(uploaded.URL),
@@ -248,7 +248,7 @@ func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
 	}
 	return err
 }
@@ -262,7 +262,7 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 		return err
 	}
 
-	_, err = w.client.SendMessage(ctx, to, &waProto.Message{
+	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:         proto.String(title),
 			Mimetype:      proto.String("application/pdf"),
@@ -276,7 +276,7 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 		},
 	})
 	if err == nil {
-		w.log(to.String(), title, "document", mediaURL, isAutomatic)
+		w.log(resp.ID, to.String(), title, "document", mediaURL, isAutomatic)
 	}
 	return err
 }
@@ -290,7 +290,7 @@ func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, d
 		return err
 	}
 
-	_, err = w.client.SendMessage(ctx, to, &waProto.Message{
+	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
 		StickerMessage: &waProto.StickerMessage{
 			Mimetype:      proto.String("image/webp"),
 			URL:           proto.String(uploaded.URL),
@@ -303,7 +303,7 @@ func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, d
 		},
 	})
 	if err == nil {
-		w.log(to.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
+		w.log(resp.ID, to.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
 	}
 	return err
 }
