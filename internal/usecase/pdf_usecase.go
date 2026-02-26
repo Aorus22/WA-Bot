@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -82,13 +83,20 @@ func (uc *PDFUseCase) SendPDF(ctx context.Context, senderJID waTypes.JID, comman
 			return
 		}
 
-		pdfData, source, err := uc.fetchPDF(cancelCtx, cmd, mapel, answerBody)
+		pdfPath, source, err := uc.fetchPDF(cancelCtx, cmd, mapel, answerBody)
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengambil PDF", true)
 			return
 		}
 
-		err = uc.waClient.SendDocumentToJID(cancelCtx, senderJID, pdfData, fmt.Sprintf("%s (%s)", mapel, source), true)
+		pdfData, err := os.ReadFile(pdfPath)
+		if err != nil {
+			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal membaca PDF", true)
+			return
+		}
+
+		mediaURL := "/" + filepath.ToSlash(pdfPath)
+		err = uc.waClient.SendDocumentToJID(cancelCtx, senderJID, pdfData, fmt.Sprintf("%s (%s)", mapel, source), mediaURL, true)
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengirim PDF", true)
 			return
@@ -115,58 +123,46 @@ func (uc *PDFUseCase) isValidMapel(mapel string, listMapel []string) bool {
 	return false
 }
 
-func (uc *PDFUseCase) fetchPDF(ctx context.Context, command, mapel, answerBody string) ([]byte, string, error) {
+func (uc *PDFUseCase) fetchPDF(ctx context.Context, command, mapel, answerBody string) (string, string, error) {
 	var source string
-	var pdfData []byte
+	var path string
 	var err error
 
 	switch command {
 	case "!pdf":
 		source = "Original"
-		path, fetchErr := uc.apiRepo.FetchPDF(ctx, mapel, nil)
-		if fetchErr != nil {
-			return nil, "", fetchErr
-		}
-		pdfData, err = os.ReadFile(path)
+		path, err = uc.apiRepo.FetchPDF(ctx, mapel, nil)
 		if err != nil {
-			return nil, "", err
+			return "", "", err
 		}
 	case "!answer":
 		source = "With Answer"
 		answerKey := uc.convertToJSON(answerBody)
-		path, fetchErr := uc.apiRepo.FetchPDF(ctx, mapel, answerKey)
-		if fetchErr != nil {
-			return nil, "", fetchErr
-		}
-		pdfData, err = os.ReadFile(path)
+		path, err = uc.apiRepo.FetchPDF(ctx, mapel, answerKey)
 		if err != nil {
-			return nil, "", err
+			return "", "", err
 		}
 	case "!gemini":
 		source = "Gemini"
 		originalPdfPath, fetchErr := uc.apiRepo.FetchPDF(ctx, mapel, nil)
 		if fetchErr != nil {
-			return nil, "", fetchErr
+			return "", "", fetchErr
 		}
 		defer os.Remove(originalPdfPath)
 
 		answerBody, err = uc.geminiService.GenerateAnswer(ctx, originalPdfPath, mapel)
 		if err != nil {
-			return nil, "", err
+			return "", "", err
 		}
 
 		answerKey := uc.convertToJSON(answerBody)
-		path, fetchErr := uc.apiRepo.FetchPDF(ctx, mapel, answerKey)
-		if fetchErr != nil {
-			return nil, "", fetchErr
-		}
-		pdfData, err = os.ReadFile(path)
+		path, err = uc.apiRepo.FetchPDF(ctx, mapel, answerKey)
 		if err != nil {
-			return nil, "", err
+			return "", "", err
 		}
 	}
 
-	return pdfData, source, nil
+	return path, source, nil
 }
 
 func (uc *PDFUseCase) convertToJSON(input string) map[string]string {

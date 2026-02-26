@@ -7,8 +7,10 @@ import (
 
 type WhatsAppRepository interface {
 	SendMessage(ctx context.Context, to string, text string) error
-	SendDocument(ctx context.Context, to string, data []byte, title string) error
-	SendSticker(ctx context.Context, to string, data []byte, isAnimated bool) error
+	SendImage(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) error
+	SendVideo(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) error
+	SendDocument(ctx context.Context, to string, data []byte, title string, mediaURL string, isAutomatic bool) error
+	SendSticker(ctx context.Context, to string, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) error
 	DownloadMedia(ctx context.Context, msg *entity.Message) ([]byte, bool, error)
 	UploadMedia(ctx context.Context, data []byte, mediaType string) (*entity.UploadResult, error)
 	GetUserInfo(ctx context.Context, jid string) (*entity.UserInfo, error)

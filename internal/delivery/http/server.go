@@ -50,10 +50,14 @@ func (s *HTTPServer) Start() error {
 	api := r.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/send-message", s.handleSendMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/send-media", s.handleSendMedia).Methods("POST", "OPTIONS")
+	api.HandleFunc("/send-sticker", s.handleSendSticker).Methods("POST", "OPTIONS")
 	api.HandleFunc("/send-bulk-same-message", s.handleBulkSendSameMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/send-bulk-different-messages", s.handleBulkSendDifferentMessages).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats", s.handleGetChats).Methods("GET")
 	api.HandleFunc("/chats/{id}/messages", s.handleGetMessages).Methods("GET")
+	api.HandleFunc("/stickers/favorites", s.handleGetFavoriteStickers).Methods("GET")
+	api.HandleFunc("/stickers/favorite", s.handleFavoriteSticker).Methods("POST", "OPTIONS")
+	api.HandleFunc("/stickers/favorites/{id}", s.handleDeleteFavoriteSticker).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/contacts", s.handleGetContacts).Methods("GET")
 	api.HandleFunc("/status", s.handleGetStatus).Methods("GET")
 	api.HandleFunc("/logout", s.handleLogout).Methods("POST", "OPTIONS")
@@ -321,16 +325,39 @@ func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("📤 Sending %s to: %s\n", mediaType, target)
 
+	// Create safe filename and save locally for historical view
+	os.MkdirAll("media", 0755)
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		if mediaType == "image" {
+			ext = ".jpg"
+		} else if mediaType == "video" {
+			ext = ".mp4"
+		} else {
+			ext = ".bin"
+		}
+	}
+	safeJID := strings.ReplaceAll(target, "@", "_")
+	safeJID = strings.ReplaceAll(safeJID, ".", "_")
+	filename := fmt.Sprintf("sent_%d_%s%s", time.Now().UnixMilli(), safeJID, ext)
+	localPath := filepath.Join("media", filename)
+	mediaURL := fmt.Sprintf("/media/%s", filename)
+
+	if err := os.WriteFile(localPath, data, 0644); err != nil {
+		fmt.Printf("Failed to persist sent media: %v\n", err)
+		mediaURL = ""
+	}
+
 	ctx := context.Background()
 	var sendErr error
 
 	switch mediaType {
 	case "image":
-		sendErr = s.client.SendImage(ctx, target, data, message, false)
+		sendErr = s.client.SendImage(ctx, target, data, message, mediaURL, false)
 	case "video":
-		sendErr = s.client.SendVideo(ctx, target, data, message, false)
+		sendErr = s.client.SendVideo(ctx, target, data, message, mediaURL, false)
 	default: // document or anything else
-		sendErr = s.client.SendDocument(ctx, target, data, header.Filename, false)
+		sendErr = s.client.SendDocument(ctx, target, data, header.Filename, mediaURL, false)
 	}
 
 	if sendErr != nil {
@@ -341,19 +368,6 @@ func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Printf("✓ Media sent successfully to %s\n", target)
-
-	// Save to database
-	if s.msgRepo != nil {
-		// Create safe filename and save locally for historical view
-		os.MkdirAll("media", 0755)
-		ext := filepath.Ext(header.Filename)
-		safeJID := strings.ReplaceAll(target, "@", "_")
-		safeJID = strings.ReplaceAll(safeJID, ".", "_")
-		filename := fmt.Sprintf("sent_%d_%s%s", time.Now().UnixMilli(), safeJID, ext)
-		localPath := filepath.Join("media", filename)
-		
-		os.WriteFile(localPath, data, 0644)
-	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
@@ -484,6 +498,159 @@ func (s *HTTPServer) handleBulkSendDifferentMessages(w http.ResponseWriter, r *h
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Bulk different messages sent successfully"))
+}
+
+func (s *HTTPServer) handleGetFavoriteStickers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.msgRepo == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Message repository not configured"})
+		return
+	}
+
+	stickers, err := s.msgRepo.GetFavoriteStickers()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if stickers == nil {
+		stickers = []map[string]interface{}{}
+	}
+
+	json.NewEncoder(w).Encode(stickers)
+}
+
+type favoriteRequest struct {
+	Secret     string `json:"secret"`
+	MessageID  string `json:"messageId"`
+	MediaURL   string `json:"mediaUrl"`
+	IsAnimated bool   `json:"isAnimated"`
+}
+
+func (s *HTTPServer) handleFavoriteSticker(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req favoriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	SECRET := os.Getenv("API_SECRET")
+	if SECRET == "" {
+		SECRET = "default-secret"
+	}
+
+	if req.Secret != SECRET {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	// We'll use the filename as the ID or a unique hash
+	// For now, let's just save it to the DB
+	if s.msgRepo != nil {
+		err := s.msgRepo.SaveFavoriteSticker(req.MessageID, req.MediaURL, req.IsAnimated)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *HTTPServer) handleDeleteFavoriteSticker(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if s.msgRepo != nil {
+		err := s.msgRepo.DeleteFavoriteSticker(id)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	type stickerSendRequest struct {
+		Secret     string `json:"secret"`
+		Target     string `json:"target"`
+		MediaURL   string `json:"mediaUrl"`
+		IsAnimated bool   `json:"isAnimated"`
+	}
+
+	var req stickerSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	SECRET := os.Getenv("API_SECRET")
+	if SECRET == "" {
+		SECRET = "default-secret"
+	}
+
+	if req.Secret != SECRET {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	// Clean up media URL to get local path
+	localPath := strings.TrimPrefix(req.MediaURL, "/")
+	// If it contains /api/ prefix from frontend
+	localPath = strings.TrimPrefix(localPath, "api/")
+
+	fmt.Printf("📤 Sending sticker to: %s | Path: %s\n", req.Target, localPath)
+
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read sticker file: " + err.Error()})
+		return
+	}
+
+	err = s.client.SendSticker(context.Background(), req.Target, data, req.IsAnimated, req.MediaURL, false)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
 func (s *HTTPServer) handleGetStatus(w http.ResponseWriter, r *http.Request) {

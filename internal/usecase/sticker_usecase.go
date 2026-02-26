@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -105,7 +106,18 @@ func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waType
 			return
 		}
 
-		err = uc.waClient.SendStickerToJID(cancelCtx, senderJID, webpData, opt.IsAnimated, true)
+		// Save to persistent media folder for frontend display
+		os.MkdirAll("media", 0755)
+		filename := fmt.Sprintf("sent_sticker_%d.webp", time.Now().UnixMilli())
+		persistedPath := filepath.Join("media", filename)
+		mediaURL := fmt.Sprintf("/media/%s", filename)
+		
+		if err := os.WriteFile(persistedPath, webpData, 0644); err != nil {
+			fmt.Printf("Failed to persist sent sticker: %v\n", err)
+			mediaURL = "" // Fallback to empty if save fails
+		}
+
+		err = uc.waClient.SendStickerToJID(cancelCtx, senderJID, webpData, opt.IsAnimated, mediaURL, true)
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to send sticker", true)
 			return

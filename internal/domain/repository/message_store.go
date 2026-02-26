@@ -100,6 +100,12 @@ func (s *MessageStore) init() error {
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS favorite_stickers (
+			id TEXT PRIMARY KEY,
+			media_url TEXT,
+			is_animated INTEGER DEFAULT 0,
+			created_at INTEGER DEFAULT (strftime('%s', 'now'))
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS update_chat_timestamp
@@ -118,6 +124,41 @@ func (s *MessageStore) init() error {
 
 	// Migration: Add is_automatic column if it doesn't exist
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN is_automatic INTEGER DEFAULT 0")
+
+	// Migration: Ensure favorite_stickers has the 'id' column (handling old implementation)
+	var tableExists bool
+	err := s.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='favorite_stickers'").Scan(&tableExists)
+	if err == nil && tableExists {
+		// Check if 'id' column exists
+		var idExists bool
+		rows, err := s.db.Query("PRAGMA table_info(favorite_stickers)")
+		if err == nil {
+			for rows.Next() {
+				var cid int
+				var name, dtype string
+				var notnull, pk int
+				var dflt_value interface{}
+				if err := rows.Scan(&cid, &name, &dtype, &notnull, &dflt_value, &pk); err == nil {
+					if name == "id" {
+						idExists = true
+						break
+					}
+				}
+			}
+			rows.Close()
+		}
+		
+		if !idExists {
+			// Easiest fix: drop and recreate since it's a new feature and data is transient
+			_, _ = s.db.Exec("DROP TABLE favorite_stickers")
+			_, _ = s.db.Exec(`CREATE TABLE favorite_stickers (
+				id TEXT PRIMARY KEY,
+				media_url TEXT,
+				is_animated INTEGER DEFAULT 0,
+				created_at INTEGER DEFAULT (strftime('%s', 'now'))
+			)`)
+		}
+	}
 
 	return nil
 }
@@ -350,6 +391,55 @@ func (s *MessageStore) UpdateChatName(chatID, name string) error {
 		UPDATE chats SET name = ?, updated_at = ? WHERE id = ?
 	`, name, time.Now().Unix(), chatID)
 
+	return err
+}
+
+func (s *MessageStore) SaveFavoriteSticker(id, mediaURL string, isAnimated bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT OR REPLACE INTO favorite_stickers (id, media_url, is_animated)
+		VALUES (?, ?, ?)
+	`, id, mediaURL, func() int {
+		if isAnimated { return 1 }
+		return 0
+	}())
+
+	return err
+}
+
+func (s *MessageStore) GetFavoriteStickers() ([]map[string]interface{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query("SELECT id, media_url, is_animated FROM favorite_stickers ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stickers []map[string]interface{}
+	for rows.Next() {
+		var id, url string
+		var isAnim int
+		if err := rows.Scan(&id, &url, &isAnim); err != nil {
+			return nil, err
+		}
+		stickers = append(stickers, map[string]interface{}{
+			"id":         id,
+			"mediaUrl":   url,
+			"isAnimated": isAnim == 1,
+		})
+	}
+	return stickers, nil
+}
+
+func (s *MessageStore) DeleteFavoriteSticker(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("DELETE FROM favorite_stickers WHERE id = ?", id)
 	return err
 }
 

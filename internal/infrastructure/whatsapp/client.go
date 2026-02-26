@@ -124,7 +124,7 @@ func (w *WhatsAppClient) SendMessageToJID(ctx context.Context, to waTypes.JID, t
 	return sendErr
 }
 
-func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, caption string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) error {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaImage
 
@@ -151,12 +151,12 @@ func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, 
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), caption, "image", "", isAutomatic)
+		w.log(targetJID.String(), caption, "image", mediaURL, isAutomatic)
 	}
 	return err
 }
 
-func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, caption string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) error {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaVideo
 
@@ -183,12 +183,12 @@ func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, 
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), caption, "video", "", isAutomatic)
+		w.log(targetJID.String(), caption, "video", mediaURL, isAutomatic)
 	}
 	return err
 }
 
-func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byte, title string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byte, title string, mediaURL string, isAutomatic bool) error {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaDocument
 
@@ -216,12 +216,12 @@ func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byt
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), title, "document", "", isAutomatic)
+		w.log(targetJID.String(), title, "document", mediaURL, isAutomatic)
 	}
 	return err
 }
 
-func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte, isAnimated bool, isAutomatic bool) error {
+func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) error {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaImage
 
@@ -248,12 +248,12 @@ func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte
 		},
 	})
 	if err == nil {
-		w.log(targetJID.String(), "[Sticker]", "sticker", "", isAutomatic)
+		w.log(targetJID.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
 	}
 	return err
 }
 
-func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, data []byte, title string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, data []byte, title string, mediaURL string, isAutomatic bool) error {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaDocument
 
@@ -276,12 +276,12 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 		},
 	})
 	if err == nil {
-		w.log(to.String(), title, "document", "", isAutomatic)
+		w.log(to.String(), title, "document", mediaURL, isAutomatic)
 	}
 	return err
 }
 
-func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, data []byte, isAnimated bool, isAutomatic bool) error {
+func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) error {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaImage
 
@@ -303,7 +303,7 @@ func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, d
 		},
 	})
 	if err == nil {
-		w.log(to.String(), "[Sticker]", "sticker", "", isAutomatic)
+		w.log(to.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
 	}
 	return err
 }
