@@ -87,9 +87,10 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	}
 
 	chatID := evt.Info.Chat.String()
+	senderName := evt.Info.PushName
 
 	// Save to DB and broadcast to FE immediately (NO FILTERS)
-	h.showMessage(evt, senderJID, messageText, chatID)
+	h.showMessage(evt, senderJID, messageText, chatID, senderName)
 	fmt.Printf("📩 Logged message: [%s] from=%s text=%s\n", chatID, senderJID.String(), messageText)
 
 	// --- LOGIC BOT (RUN IN BACKGROUND WITH FILTERS) ---
@@ -127,7 +128,7 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	}()
 }
 
-func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waTypes.JID, messageText, chatID string) {
+func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waTypes.JID, messageText, chatID, senderName string) {
 	ctx := context.Background()
 
 	// Save/update contact info with avatar
@@ -224,6 +225,7 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 			Type:        msgType,
 			MediaURL:    mediaURL,
 			IsAutomatic: false,
+			SenderName:  senderName,
 		}
 
 		if h.httpServer != nil {

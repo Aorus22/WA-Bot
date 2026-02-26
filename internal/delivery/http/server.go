@@ -59,6 +59,7 @@ func (s *HTTPServer) Start() error {
 	api.HandleFunc("/send-bulk-different-messages", s.handleBulkSendDifferentMessages).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats", s.handleGetChats).Methods("GET")
 	api.HandleFunc("/chats/{id}/messages", s.handleGetMessages).Methods("GET")
+	api.HandleFunc("/chats/{id}/read", s.handleMarkAsRead).Methods("POST", "OPTIONS")
 	api.HandleFunc("/stickers/favorites", s.handleGetFavoriteStickers).Methods("GET")
 	api.HandleFunc("/stickers/favorite", s.handleFavoriteSticker).Methods("POST", "OPTIONS")
 	api.HandleFunc("/stickers/favorites/{id}", s.handleDeleteFavoriteSticker).Methods("DELETE", "OPTIONS")
@@ -253,6 +254,7 @@ func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 					"type":        msg.Type,
 					"mediaUrl":    msg.MediaURL,
 					"isAutomatic": msg.IsAutomatic,
+					"senderName":  msg.SenderName,
 				},
 			})
 			fmt.Printf("✓ Broadcasted message via WebSocket\n")
@@ -704,6 +706,33 @@ func (s *HTTPServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *HTTPServer) handleMarkAsRead(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if s.msgRepo == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Message repository not configured"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+
+	err := s.msgRepo.MarkAsRead(chatID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 

@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ type Message struct {
 	Type        string `json:"type"`
 	MediaURL    string `json:"mediaUrl,omitempty"`
 	IsAutomatic bool   `json:"isAutomatic"`
+	SenderName  string `json:"senderName,omitempty"`
 }
 
 type Chat struct {
@@ -181,10 +183,18 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 	}
 
 	if !chatExists {
+		name := msg.SenderName
+		if name == "" {
+			name = msg.ChatID
+		}
+		isGroup := 0
+		if strings.HasSuffix(msg.ChatID, "@g.us") {
+			isGroup = 1
+		}
 		_, err = tx.Exec(`
 			INSERT INTO chats (id, name, last_msg, last_time, is_active, is_group)
-			VALUES (?, ?, ?, ?, 1, 0)
-		`, msg.ChatID, msg.ChatID, msg.Content, msg.Timestamp)
+			VALUES (?, ?, ?, ?, 1, ?)
+		`, msg.ChatID, name, msg.Content, msg.Timestamp, isGroup)
 	} else {
 		_, err = tx.Exec(`
 			UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
