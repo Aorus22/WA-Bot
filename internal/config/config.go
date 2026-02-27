@@ -12,15 +12,16 @@ import (
 	"wa-bot/internal/delivery/cron"
 	"wa-bot/internal/delivery/http"
 	"wa-bot/internal/delivery/whatsapp"
-	        "wa-bot/internal/domain/repository"
-	        "wa-bot/internal/infrastructure/ai"
-	        "wa-bot/internal/infrastructure/api"
-	        infrastructureConfig "wa-bot/internal/infrastructure/config"
-	        "wa-bot/internal/infrastructure/lua"
-	        "wa-bot/internal/infrastructure/media"
-	        "wa-bot/internal/infrastructure/storage"
-	        whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
-	        "wa-bot/internal/usecase")
+	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/infrastructure/ai"
+	"wa-bot/internal/infrastructure/api"
+	infrastructureConfig "wa-bot/internal/infrastructure/config"
+	"wa-bot/internal/infrastructure/lua"
+	"wa-bot/internal/infrastructure/media"
+	"wa-bot/internal/infrastructure/storage"
+	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
+	"wa-bot/internal/usecase"
+)
 
 type App struct {
 	waClient      *whatsappInfra.WhatsAppClient
@@ -75,13 +76,13 @@ func (a *App) HandleSession() {
 				fmt.Println("\n=== SCAN QR CODE IN FRONTEND ===")
 				// We also keep it in terminal for convenience
 				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-				
+
 				// Broadcast to frontend
 				a.httpServer.BroadcastMessage("qr_code", map[string]string{
 					"code": evt.Code,
 				})
 			} else if evt.Event == "success" {
-				fmt.Println("\n✅ Successfully authenticated!")
+				fmt.Println("\n[AUTH] Successfully authenticated!")
 				a.httpServer.BroadcastMessage("auth_success", nil)
 				break
 			} else {
@@ -94,7 +95,7 @@ func (a *App) HandleSession() {
 			fmt.Printf("failed to connect to WhatsApp: %v\n", err)
 			return
 		}
-		fmt.Println("✅ Successfully authenticated!")
+		fmt.Println("[AUTH] Successfully authenticated!")
 		a.httpServer.BroadcastMessage("auth_success", nil)
 	}
 }

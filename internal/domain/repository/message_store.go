@@ -26,6 +26,7 @@ type Message struct {
 	MediaURL    string `json:"mediaUrl,omitempty"`
 	IsAutomatic bool   `json:"isAutomatic"`
 	SenderName  string `json:"senderName,omitempty"`
+	ChatName    string `json:"chatName,omitempty"`
 }
 
 type Chat struct {
@@ -125,6 +126,7 @@ func (s *MessageStore) init() error {
 
 	// Migration: Add is_automatic column if it doesn't exist
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN is_automatic INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN sender_name TEXT")
 
 	// Migration: Ensure favorite_stickers has the 'id' column (handling old implementation)
 	var tableExists bool
@@ -182,7 +184,10 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 	}
 
 	if !chatExists {
-		name := msg.SenderName
+		name := msg.ChatName
+		if name == "" {
+			name = msg.SenderName
+		}
 		if name == "" {
 			name = msg.ChatID
 		}
@@ -195,10 +200,18 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
                         VALUES (?, ?, ?, ?, 1, ?)
                 `, msg.ChatID, name, msg.Content, msg.Timestamp, isGroup)
 	} else {
-		_, err = tx.Exec(`
-                        UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
-                        WHERE id = ?
-                `, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+		// Update chat name if provided
+		if msg.ChatName != "" {
+			_, err = tx.Exec(`
+                                UPDATE chats SET name = ?, last_msg = ?, last_time = ?, updated_at = ?
+                                WHERE id = ?
+                        `, msg.ChatName, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+		} else {
+			_, err = tx.Exec(`
+                                UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
+                                WHERE id = ?
+                        `, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+		}
 	}
 	if err != nil {
 		return err
@@ -206,27 +219,26 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 
 	// Insert message
 	_, err = tx.Exec(`
-                INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
 		if msg.IsAutomatic {
 			return 1
 		}
 		return 0
-	}())
+	}(), msg.SenderName)
 	if err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
-
 func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	query := `
-                SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic
+                SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name
                 FROM messages
                 WHERE chat_id = ?
                 ORDER BY timestamp DESC
@@ -254,6 +266,7 @@ func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) 
 			&msg.Type,
 			&msg.MediaURL,
 			&isAuto,
+			&msg.SenderName,
 		)
 		if err != nil {
 			return nil, err
@@ -467,4 +480,16 @@ func (s *MessageStore) UpdateMessageStatus(msgID, status string) error {
 
 func (s *MessageStore) Close() error {
 	return s.db.Close()
+}
+
+func (s *MessageStore) GetContactName(jid string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var name string
+	err := s.db.QueryRow("SELECT name FROM contacts WHERE jid = ?", jid).Scan(&name)
+	if err != nil {
+		return "", err
+	}
+	return name, nil
 }

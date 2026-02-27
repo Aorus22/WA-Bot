@@ -104,7 +104,7 @@ func (uc *PDFUseCase) SendPDF(ctx context.Context, senderJID waTypes.JID, comman
 		}
 
 		mediaURL := "/" + filepath.ToSlash(pdfPath)
-		err = uc.waClient.SendDocumentToJID(cancelCtx, senderJID, pdfData, fmt.Sprintf("%s (%s)", mapel, source), mediaURL, true)
+		_, err = uc.waClient.SendDocumentToJID(cancelCtx, senderJID, pdfData, fmt.Sprintf("%s (%s)", mapel, source), mediaURL, true)
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Gagal mengirim PDF", true)
 			return

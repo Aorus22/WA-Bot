@@ -56,7 +56,7 @@ func (s *LuaService) ExecuteTriggers(ctx context.Context, senderJID string, mess
 
 		re, err := regexp.Compile(t.Pattern)
 		if err != nil {
-			fmt.Printf("LuaService: invalid regex pattern %s: %v\n", t.Pattern, err)
+			fmt.Printf("[LUA] Invalid regex pattern %s: %v\n", t.Pattern, err)
 			continue
 		}
 
@@ -92,7 +92,7 @@ func (s *LuaService) runScript(script string, sender string, content string, mat
 	L.SetGlobal("gemini_chat", L.NewFunction(s.luaGeminiChat))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
 	L.SetGlobal("set_state", L.NewFunction(s.luaSetState))
-	
+
 	// JSON functions
 	L.SetGlobal("json_decode", L.NewFunction(s.luaJSONDecode))
 	L.SetGlobal("json_encode", L.NewFunction(s.luaJSONEncode))
@@ -109,7 +109,7 @@ func (s *LuaService) runScript(script string, sender string, content string, mat
 	L.SetGlobal("ffprobe", L.NewFunction(s.luaFFprobe))
 
 	if err := L.DoString(script); err != nil {
-		fmt.Printf("Lua Error: %v\n", err)
+		fmt.Printf("[LUA] Script Error: %v\n", err)
 	}
 }
 
@@ -117,7 +117,7 @@ func (s *LuaService) luaSendText(L *lua.LState) int {
 	target := L.CheckString(1)
 	text := L.CheckString(2)
 
-	err := s.waClient.SendMessage(context.Background(), target, text, true)
+	_, err := s.waClient.SendMessage(context.Background(), target, text, true)
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
 		return 1
@@ -129,7 +129,6 @@ func (s *LuaService) luaSendSticker(L *lua.LState) int {
 	target := L.CheckString(1)
 	url := L.CheckString(2)
 
-	// We need to download the image first
 	resp, err := http.Get(url)
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
@@ -142,7 +141,7 @@ func (s *LuaService) luaSendSticker(L *lua.LState) int {
 		return 1
 	}
 
-	err = s.waClient.SendSticker(context.Background(), target, data, false, url, true)
+	_, err = s.waClient.SendSticker(context.Background(), target, data, false, url, true)
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
 		return 1
@@ -214,7 +213,6 @@ func (s *LuaService) luaFetch(L *lua.LState) int {
 	return 1
 }
 
-// Storage handlers
 func (s *LuaService) luaStorageSave(L *lua.LState) int {
 	filename := L.CheckString(1)
 	content := L.CheckString(2)
@@ -273,7 +271,6 @@ func (s *LuaService) luaStoragePath(L *lua.LState) int {
 	return 1
 }
 
-// FFmpeg and command handlers
 func (s *LuaService) luaFFmpeg(L *lua.LState) int {
 	argsTable := L.CheckTable(1)
 	var args []string
@@ -318,7 +315,6 @@ func (s *LuaService) luaFFprobe(L *lua.LState) int {
 	return 1
 }
 
-// TestTrigger simulates a trigger execution and returns logs/results
 func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message string) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
@@ -337,7 +333,6 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	matches := re.FindStringSubmatch(message)
 	result["matches"] = matches
 
-	// Setup Lua VM for testing
 	L := lua.NewState()
 	defer L.Close()
 
@@ -352,7 +347,6 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		return 0
 	}))
 
-	// Inject standard globals
 	L.SetGlobal("sender", lua.LString("628123456789@s.whatsapp.net"))
 	L.SetGlobal("content", lua.LString(message))
 	luaMatches := L.NewTable()
@@ -361,7 +355,6 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	}
 	L.SetGlobal("matches", luaMatches)
 
-	// Inject mock actions
 	var actions []string
 	L.SetGlobal("send_text", L.NewFunction(func(L *lua.LState) int {
 		target := L.CheckString(1)
@@ -390,7 +383,6 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		return 1
 	}))
 
-	// Real but safe functions
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
 	L.SetGlobal("set_state", L.NewFunction(s.luaSetState))
@@ -401,9 +393,7 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	L.SetGlobal("ffmpeg", L.NewFunction(s.luaFFmpeg))
 	L.SetGlobal("ffprobe", L.NewFunction(s.luaFFprobe))
 
-	// Execute
-	err = L.DoString(script)
-	if err != nil {
+	if err := L.DoString(script); err != nil {
 		result["error"] = err.Error()
 	}
 
@@ -416,7 +406,7 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 func (s *LuaService) luaSendMedia(L *lua.LState) int {
 	target := L.CheckString(1)
 	url := L.CheckString(2)
-	mediaType := L.OptString(3, "image") // image, video, document
+	mediaType := L.OptString(3, "image")
 	caption := L.OptString(4, "")
 
 	resp, err := http.Get(url)
@@ -435,11 +425,11 @@ func (s *LuaService) luaSendMedia(L *lua.LState) int {
 	var sendErr error
 	switch mediaType {
 	case "image":
-		sendErr = s.waClient.SendImage(ctx, target, data, caption, "", true)
+		_, sendErr = s.waClient.SendImage(ctx, target, data, caption, "", true)
 	case "video":
-		sendErr = s.waClient.SendVideo(ctx, target, data, caption, "", true)
+		_, sendErr = s.waClient.SendVideo(ctx, target, data, caption, "", true)
 	case "document":
-		sendErr = s.waClient.SendDocument(ctx, target, data, "document", "", true)
+		_, sendErr = s.waClient.SendDocument(ctx, target, data, "document", "", true)
 	default:
 		sendErr = fmt.Errorf("unsupported media type: %s", mediaType)
 	}
@@ -451,7 +441,6 @@ func (s *LuaService) luaSendMedia(L *lua.LState) int {
 	return 0
 }
 
-// JSON handlers
 func (s *LuaService) luaJSONDecode(L *lua.LState) int {
 	str := L.CheckString(1)
 	var data interface{}
@@ -507,7 +496,6 @@ func (s *LuaService) goValueToLua(L *lua.LState, val interface{}) lua.LValue {
 func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 	switch v := val.(type) {
 	case *lua.LTable:
-		// Check if it's an array or map
 		isArr := true
 		maxKey := 0
 		v.ForEach(func(k, val lua.LValue) {
@@ -515,7 +503,9 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 				isArr = false
 			} else {
 				key := int(k.(lua.LNumber))
-				if key > maxKey { maxKey = key }
+				if key > maxKey {
+					maxKey = key
+				}
 			}
 		})
 
@@ -546,7 +536,7 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 	prompt := L.CheckString(1)
 	modelName := L.OptString(2, "gemini-2.0-flash")
-	
+
 	if s.gemini == nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString("Gemini service not available"))

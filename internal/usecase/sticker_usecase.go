@@ -41,7 +41,8 @@ func NewStickerUseCase(waClient *whatsapp.WhatsAppClient, mediaDown *media.Media
 
 func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waTypes.JID, messageText string, role string, msg *entity.Message) error {
 	if role != "OWNER" && role != "COMMON" {
-		return uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command", true)
+		_, err := uc.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command", true)
+		return err
 	}
 
 	uc.waClient.SendMessageToJID(ctx, senderJID, "⏳ Loading...", true)
@@ -124,7 +125,7 @@ func (uc *StickerUseCase) ConvertToSticker(ctx context.Context, senderJID waType
 			mediaURL = "" // Fallback to empty if save fails
 		}
 
-		err = uc.waClient.SendStickerToJID(cancelCtx, senderJID, webpData, opt.IsAnimated, mediaURL, true)
+		_, err = uc.waClient.SendStickerToJID(cancelCtx, senderJID, webpData, opt.IsAnimated, mediaURL, true)
 		if err != nil {
 			uc.waClient.SendMessageToJID(cancelCtx, senderJID, "Server error: failed to send sticker", true)
 			return

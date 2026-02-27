@@ -63,7 +63,7 @@ func (w *WhatsAppClient) log(msgID string, to string, content string, msgType st
 	}
 }
 
-func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string, isAutomatic bool) (string, error) {
 	// Parse JID from string to preserve server part
 	targetJID, err := waTypes.ParseJID(to)
 	if err != nil {
@@ -76,61 +76,53 @@ func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string
 	})
 	if err == nil {
 		w.log(resp.ID, targetJID.String(), text, "text", "", isAutomatic)
+		return resp.ID, nil
 	}
-	return err
+	return "", err
 }
 
-func (w *WhatsAppClient) SendMessageToJID(ctx context.Context, to waTypes.JID, text string, isAutomatic bool) error {
-	fmt.Printf("📤 SendMessageToJID: to=%s text=%s\n", to.String(), text)
+func (w *WhatsAppClient) SendMessageToJID(ctx context.Context, to waTypes.JID, text string, isAutomatic bool) (string, error) {
+	fmt.Printf("[SEND] SendMessageToJID: to=%s\n", to.String())
 
 	// Handle LID format - convert to regular JID for sending
 	targetJID := to
 
 	if to.Server == "lid" {
-		fmt.Printf("⚠ LID format detected, attempting conversion...\n")
-
 		// For LID format, we need to find the actual JID
 		// Try to get user info and use the JID if available
 		userInfo, getErr := w.GetUserInfo(ctx, to.String())
-		if getErr != nil {
-			fmt.Printf("⚠ Could not get user info for LID: %v\n", getErr)
-		} else if userInfo != nil && userInfo.JID != "" {
+		if getErr == nil && userInfo != nil && userInfo.JID != "" {
 			// Parse the JID string
 			parsedJID, parseErr := waTypes.ParseJID(userInfo.JID)
 			if parseErr == nil {
 				targetJID = parsedJID
-				fmt.Printf("🔄 Using actual JID from user info: %s\n", targetJID.String())
 			} else {
 				// Fallback: convert LID user to regular JID
 				targetJID = waTypes.NewJID(to.User, waTypes.DefaultUserServer)
-				fmt.Printf("🔄 Converted LID to JID: %s\n", targetJID.String())
 			}
 		} else {
 			// Last resort: convert to default server
 			targetJID = waTypes.NewJID(to.User, waTypes.DefaultUserServer)
-			fmt.Printf("🔄 Using converted JID: %s\n", targetJID.String())
 		}
 	}
 
 	resp, sendErr := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		Conversation: proto.String(text),
 	})
-	if sendErr != nil {
-		fmt.Printf("❌ SendMessageToJID failed: %v\n", sendErr)
-	} else {
-		fmt.Printf("✓ SendMessageToJID success\n")
+	if sendErr == nil {
 		w.log(resp.ID, targetJID.String(), text, "text", "", isAutomatic)
+		return resp.ID, nil
 	}
-	return sendErr
+	return "", sendErr
 }
 
-func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) (string, error) {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaImage
 
 	uploaded, err := w.client.Upload(ctx, data, mediaType)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	targetJID, err := waTypes.ParseJID(to)
@@ -152,17 +144,18 @@ func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, 
 	})
 	if err == nil {
 		w.log(resp.ID, targetJID.String(), caption, "image", mediaURL, isAutomatic)
+		return resp.ID, nil
 	}
-	return err
+	return "", err
 }
 
-func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, caption string, mediaURL string, isAutomatic bool) (string, error) {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaVideo
 
 	uploaded, err := w.client.Upload(ctx, data, mediaType)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	targetJID, err := waTypes.ParseJID(to)
@@ -184,17 +177,18 @@ func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, 
 	})
 	if err == nil {
 		w.log(resp.ID, targetJID.String(), caption, "video", mediaURL, isAutomatic)
+		return resp.ID, nil
 	}
-	return err
+	return "", err
 }
 
-func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byte, title string, mediaURL string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byte, title string, mediaURL string, isAutomatic bool) (string, error) {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaDocument
 
 	uploaded, err := w.client.Upload(ctx, data, mediaType)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	targetJID, _ := waTypes.ParseJID(to)
@@ -217,17 +211,18 @@ func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byt
 	})
 	if err == nil {
 		w.log(resp.ID, targetJID.String(), title, "document", mediaURL, isAutomatic)
+		return resp.ID, nil
 	}
-	return err
+	return "", err
 }
 
-func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) (string, error) {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaImage
 
 	uploaded, err := w.client.Upload(ctx, data, mediaType)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	targetJID, _ := waTypes.ParseJID(to)
@@ -249,17 +244,18 @@ func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte
 	})
 	if err == nil {
 		w.log(resp.ID, targetJID.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
+		return resp.ID, nil
 	}
-	return err
+	return "", err
 }
 
-func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, data []byte, title string, mediaURL string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, data []byte, title string, mediaURL string, isAutomatic bool) (string, error) {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaDocument
 
 	uploaded, err := w.client.Upload(ctx, data, mediaType)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
@@ -277,17 +273,18 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 	})
 	if err == nil {
 		w.log(resp.ID, to.String(), title, "document", mediaURL, isAutomatic)
+		return resp.ID, nil
 	}
-	return err
+	return "", err
 }
 
-func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) error {
+func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) (string, error) {
 	var mediaType whatsmeow.MediaType
 	mediaType = whatsmeow.MediaImage
 
 	uploaded, err := w.client.Upload(ctx, data, mediaType)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
@@ -304,8 +301,9 @@ func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, d
 	})
 	if err == nil {
 		w.log(resp.ID, to.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
+		return resp.ID, nil
 	}
-	return err
+	return "", err
 }
 
 func (w *WhatsAppClient) DownloadMedia(ctx context.Context, msg *entity.Message) ([]byte, bool, error) {
@@ -360,7 +358,10 @@ func (w *WhatsAppClient) UploadMedia(ctx context.Context, data []byte, mediaType
 }
 
 func (w *WhatsAppClient) GetUserInfo(ctx context.Context, jid string) (*entity.UserInfo, error) {
-	targetJID := waTypes.NewJID(jid, waTypes.DefaultUserServer)
+	targetJID, err := waTypes.ParseJID(jid)
+	if err != nil {
+		targetJID = waTypes.NewJID(jid, waTypes.DefaultUserServer)
+	}
 	userInfo, err := w.client.GetUserInfo(ctx, []waTypes.JID{targetJID})
 	if err != nil {
 		return nil, err
@@ -383,12 +384,14 @@ func (w *WhatsAppClient) GetUserInfo(ctx context.Context, jid string) (*entity.U
 }
 
 func (w *WhatsAppClient) GetGroupInfo(ctx context.Context, jid string) (*entity.Group, error) {
-	targetJID := waTypes.NewJID(jid, waTypes.DefaultUserServer)
+	targetJID, _ := waTypes.ParseJID(jid)
+	if targetJID.IsEmpty() {
+		targetJID = waTypes.NewJID(jid, waTypes.DefaultUserServer)
+	}
 	groupInfo, err := w.client.GetGroupInfo(ctx, targetJID)
 	if err != nil {
 		return nil, err
 	}
-
 	participants := make([]*entity.Participant, len(groupInfo.Participants))
 	for i, p := range groupInfo.Participants {
 		participants[i] = &entity.Participant{

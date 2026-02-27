@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -140,66 +139,22 @@ func (s *HTTPServer) Start() error {
 	s.RegisterWSRoutes(r, s.hub)
 
 	// Static files for frontend
-	frontendPath := filepath.Join(".", "frontend", "my-app", "dist")
+	frontendPath := filepath.Join(".", "frontend", "dist")
 
-	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	r.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(frontendPath); err == nil {
-			// Serve index.html for root or non-file paths
-			if r.URL.Path == "/" {
-				w.Header().Set("Content-Type", "text/html")
-				http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
-				return
-			}
-
-			// Serve other files with correct MIME type
+			// Serve static files
 			filePath := filepath.Join(frontendPath, filepath.Clean(r.URL.Path))
-
-			// Check if file exists
-			if _, err := os.Stat(filePath); os.IsNotExist(err) {
-				// Fall back to index.html for SPA routing
-				w.Header().Set("Content-Type", "text/html")
-				http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
+			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+				http.ServeFile(w, r, filePath)
 				return
 			}
-
-			// Set correct MIME type
-			ext := strings.ToLower(filepath.Ext(filePath))
-			switch ext {
-			case ".css":
-				w.Header().Set("Content-Type", "text/css")
-			case ".js":
-				w.Header().Set("Content-Type", "application/javascript")
-			case ".html":
-				w.Header().Set("Content-Type", "text/html")
-			case ".json":
-				w.Header().Set("Content-Type", "application/json")
-			case ".png":
-				w.Header().Set("Content-Type", "image/png")
-			case ".jpg", ".jpeg":
-				w.Header().Set("Content-Type", "image/jpeg")
-			case ".svg":
-				w.Header().Set("Content-Type", "image/svg+xml")
-			case ".ico":
-				w.Header().Set("Content-Type", "image/x-icon")
-			case ".woff":
-				w.Header().Set("Content-Type", "font/woff")
-			case ".woff2":
-				w.Header().Set("Content-Type", "font/woff2")
-			case ".ttf":
-				w.Header().Set("Content-Type", "font/ttf")
-			default:
-				// Use mime package as fallback
-				if mimeType := mime.TypeByExtension(ext); mimeType != "" {
-					w.Header().Set("Content-Type", mimeType)
-				}
-			}
-
-			http.ServeFile(w, r, filePath)
+			// Fallback to index.html for SPA
+			http.ServeFile(w, r, filepath.Join(frontendPath, "index.html"))
 		} else {
-			fmt.Println("Frontend dist not found at:", frontendPath, "- serving Hello World")
-			w.Write([]byte("Hello, World!"))
+			w.Write([]byte("Frontend build not found"))
 		}
-	})
+	}))
 
 	// Start hub in background
 	go s.hub.Run()
@@ -275,7 +230,7 @@ func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 			fmt.Printf("Failed to save message: %v\n", err)
 			return
 		}
-		fmt.Printf("\u2713 Saved message to database (auto=%v)\n", msg.IsAutomatic)
+		fmt.Printf("[DB] Saved message to database (auto=%v)\n", msg.IsAutomatic)
 
 		// Broadcast via WebSocket
 		if s.hub != nil {
@@ -293,9 +248,10 @@ func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 					"mediaUrl":    msg.MediaURL,
 					"isAutomatic": msg.IsAutomatic,
 					"senderName":  msg.SenderName,
+					"chatName":    msg.ChatName,
 				},
 			})
-			fmt.Printf("\u2713 Broadcasted message via WebSocket\n")
+			fmt.Printf("[WS] Broadcasted message via WebSocket\n")
 		}
 	}
 }
@@ -360,7 +316,7 @@ func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("📤 Sending %s to: %s\n", mediaType, target)
+	fmt.Printf("[SEND] Sending %s to: %s\n", mediaType, target)
 
 	os.MkdirAll("media", 0755)
 	ext := filepath.Ext(header.Filename)
@@ -384,28 +340,32 @@ func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := context.Background()
+	var id string
 	var sendErr error
 
 	switch mediaType {
 	case "image":
-		sendErr = s.client.SendImage(ctx, target, data, message, mediaURL, false)
+		id, sendErr = s.client.SendImage(ctx, target, data, message, mediaURL, false)
 	case "video":
-		sendErr = s.client.SendVideo(ctx, target, data, message, mediaURL, false)
+		id, sendErr = s.client.SendVideo(ctx, target, data, message, mediaURL, false)
 	default: // document or anything else
-		sendErr = s.client.SendDocument(ctx, target, data, header.Filename, mediaURL, false)
+		id, sendErr = s.client.SendDocument(ctx, target, data, header.Filename, mediaURL, false)
 	}
 
 	if sendErr != nil {
-		fmt.Printf("\u23ec Failed to send media: %v\n", sendErr)
+		fmt.Printf("[ERR] Failed to send media: %v\n", sendErr)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": sendErr.Error()})
 		return
 	}
 
-	fmt.Printf("\u2713 Media sent successfully to %s\n", target)
+	fmt.Printf("[OK] Media sent successfully to %s\n", target)
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"id":     id,
+	})
 }
 
 func (s *HTTPServer) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -434,20 +394,23 @@ func (s *HTTPServer) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("📤 Sending message to: %s | Content: %s\n", req.Target, req.Message)
+	fmt.Printf("[SEND] Sending message to: %s | Content: %s\n", req.Target, req.Message)
 
-	err := s.client.SendMessage(context.Background(), req.Target, req.Message, false)
+	id, err := s.client.SendMessage(context.Background(), req.Target, req.Message, false)
 	if err != nil {
-		fmt.Printf("\u23ec Failed to send WhatsApp message: %v\n", err)
+		fmt.Printf("[ERR] Failed to send WhatsApp message: %v\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	fmt.Printf("\u2713 WhatsApp message sent to %s\n", req.Target)
+	fmt.Printf("[OK] WhatsApp message sent to %s\n", req.Target)
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"id":     id,
+	})
 }
 
 func (s *HTTPServer) handleBulkSendSameMessage(w http.ResponseWriter, r *http.Request) {
@@ -669,7 +632,7 @@ func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
 	localPath := strings.TrimPrefix(req.MediaURL, "/")
 	localPath = strings.TrimPrefix(localPath, "api/")
 
-	fmt.Printf("📤 Sending sticker to: %s | Path: %s\n", req.Target, localPath)
+	fmt.Printf("[SEND] Sending sticker to: %s | Path: %s\n", req.Target, localPath)
 
 	reader, err := s.storage.Get(context.Background(), localPath)
 	if err != nil {
@@ -685,7 +648,7 @@ func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.client.SendSticker(context.Background(), req.Target, data, req.IsAnimated, req.MediaURL, false)
+	id, err := s.client.SendSticker(context.Background(), req.Target, data, req.IsAnimated, req.MediaURL, false)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -693,7 +656,10 @@ func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"id":     id,
+	})
 }
 
 func (s *HTTPServer) handleGetStatus(w http.ResponseWriter, r *http.Request) {

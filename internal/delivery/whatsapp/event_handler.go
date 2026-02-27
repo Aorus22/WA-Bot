@@ -87,25 +87,45 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 	} else if evt.Type == events.ReceiptTypeRead || evt.Type == events.ReceiptTypeReadSelf {
 		status = "read"
 	} else {
-		// We only care about delivered and read status
 		return
 	}
 
 	for _, msgID := range evt.MessageIDs {
 		h.httpServer.UpdateMessageStatus(msgID, status)
-		fmt.Printf("\u2705 Updated status for %s to %s\n", msgID, status)
+		fmt.Printf("✅ Updated status for %s to %s\n", msgID, status)
 	}
 }
 
 func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
-	// --- LOGIC PENYIMPANAN (ALWAYS RUN FIRST) ---
-
-	// Extract sender JID
+	// Extract JIDs
 	var senderJID waTypes.JID
 	if evt.Info.IsGroup {
-		senderJID = evt.Info.Chat.ToNonAD()
-	} else {
 		senderJID = evt.Info.Sender.ToNonAD()
+	} else {
+		senderJID = evt.Info.Chat.ToNonAD()
+	}
+
+	chatID := evt.Info.Chat.String()
+	senderName := evt.Info.PushName
+
+	// If push name is missing, try to get from our contact store
+	if senderName == "" && h.msgStore != nil {
+		if storedName, err := h.msgStore.GetContactName(senderJID.String()); err == nil && storedName != "" {
+			senderName = storedName
+		}
+	}
+
+	// Update sender info in background
+	if h.msgStore != nil {
+		go func() {
+			avatar, _ := h.waClient.GetProfilePictureInfo(context.Background(), senderJID.String())
+			h.msgStore.SaveContact(&repository.Contact{
+				ID:     senderJID.String(),
+				Name:   senderName,
+				JID:    senderJID.String(),
+				Avatar: avatar,
+			})
+		}()
 	}
 
 	// Extract message text
@@ -120,61 +140,89 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 		messageText = evt.Message.GetConversation()
 	}
 
-	chatID := evt.Info.Chat.String()
-	senderName := evt.Info.PushName
+	// Determine what name to show in the Sidebar
+	displayChatName := ""
+	if !evt.Info.IsGroup {
+		displayChatName = senderName
+		if displayChatName == "" {
+			displayChatName = senderJID.User
+		}
+	}
 
-	// Save to DB and broadcast to FE immediately (NO FILTERS)
-	h.showMessage(evt, senderJID, messageText, chatID, senderName)
-	fmt.Printf("📩 Logged message: [%s] from=%s text=%s\n", chatID, senderJID.String(), messageText)
+	// 1. Show message immediately
+	// If it's a group, displayChatName is "" so SaveMessage won't overwrite existing group name
+	h.showMessage(evt, senderJID, messageText, chatID, displayChatName, senderName)
+	fmt.Printf("[MSG] Logged message: [%s] from=%s name=%s\n", chatID, senderJID.String(), senderName)
+
+	// 2. Update group name/avatar in background if it's a group
+	if evt.Info.IsGroup {
+		go func() {
+			groupInfo, err := h.waClient.GetGroupInfo(context.Background(), chatID)
+			if err == nil && groupInfo != nil {
+				// Update Group Name and Avatar
+				avatarURL, _ := h.waClient.GetProfilePictureInfo(context.Background(), chatID)
+				if h.msgStore != nil {
+					if groupInfo.Name != "" {
+						h.msgStore.UpdateChatName(chatID, groupInfo.Name)
+					}
+					if avatarURL != "" {
+						h.msgStore.UpdateChatAvatar(chatID, avatarURL)
+					}
+
+					// Broadcast updates to FE
+					if h.httpServer != nil {
+						h.httpServer.BroadcastMessage("chat_name_update", map[string]interface{}{
+							"chatId": chatID,
+							"name":   groupInfo.Name,
+							"avatar": avatarURL,
+						})
+					}
+				}
+			}
+		}()
+	} else {
+		// Update private chat avatar
+		go func() {
+			avatarURL, err := h.waClient.GetProfilePictureInfo(context.Background(), chatID)
+			if err == nil && avatarURL != "" && h.msgStore != nil {
+				h.msgStore.UpdateChatAvatar(chatID, avatarURL)
+			}
+		}()
+	}
 
 	// --- LOGIC BOT (RUN IN BACKGROUND WITH FILTERS) ---
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("🔥 Panic in bot logic: %v\n", r)
+				fmt.Printf("[PANIC] Panic in bot logic: %v\n", r)
 			}
 		}()
 
-		// Apply filters ONLY for bot responses
-		// 1. Skip blocked sender
 		if senderJID.UserInt() == 13135550002 {
 			return
 		}
 
-		// 2. Check message age
 		msgTime := evt.Info.Timestamp
 		now := time.Now()
 		if now.Sub(msgTime) > 1*time.Minute {
-			fmt.Printf("\u26a0 Message too old (%v), skipping bot response\n", now.Sub(msgTime))
+			fmt.Printf("⚠️ Message too old (%v), skipping bot response\n", now.Sub(msgTime))
 			return
 		}
 
-		// 3. Process the command
 		ctx := context.Background()
 		quickRole := h.getQuickRole(senderJID.String())
 		h.processCommand(ctx, evt, senderJID, messageText, chatID, quickRole)
 
-		// 4. Update role in background (accurate but slow)
 		accurateRole := h.getUserRole(senderJID.String())
 		if accurateRole != quickRole {
-			fmt.Printf("📄 Role updated: %s -> %s\n", quickRole, accurateRole)
+			fmt.Printf("[ROLE] Role updated: %s -> %s\n", quickRole, accurateRole)
 		}
 	}()
 }
 
-func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waTypes.JID, messageText, chatID, senderName string) {
+func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waTypes.JID, messageText, chatID, chatName, senderName string) {
 	ctx := context.Background()
 
-	// Save/update contact info with avatar
-	go func() {
-		if avatarURL, err := h.waClient.GetProfilePictureInfo(ctx, senderJID.String()); err == nil {
-			if h.msgStore != nil {
-				h.msgStore.UpdateChatAvatar(chatID, avatarURL)
-			}
-		}
-	}()
-
-	// Save to database
 	if h.msgStore != nil {
 		msgType := "text"
 		var mediaURL string
@@ -260,6 +308,7 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 			MediaURL:    mediaURL,
 			IsAutomatic: false,
 			SenderName:  senderName,
+			ChatName:    chatName,
 		}
 
 		if h.httpServer != nil {
@@ -289,7 +338,7 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 	// Check Lua Triggers
 	if h.luaService != nil {
 		if matched, err := h.luaService.ExecuteTriggers(ctx, senderJID.String(), messageText); err == nil && matched {
-			fmt.Printf("🔮 Lua Trigger Matched for: %s\n", messageText)
+			fmt.Printf("[LUA] Lua Trigger Matched for: %s\n", messageText)
 			return
 		}
 	}
@@ -354,7 +403,6 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 			return
 		}
 
-		// Show help for non-commands if they are in DMs (common WA bot behavior)
 		if !evt.Info.IsGroup {
 			if role == "COMMON" || role == "UNKNOWN" {
 				h.waClient.SendMessageToJID(ctx, senderJID, "!help to see the command list", true)
