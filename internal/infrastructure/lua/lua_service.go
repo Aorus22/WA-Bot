@@ -14,6 +14,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/infrastructure/ai"
 	"wa-bot/internal/infrastructure/whatsapp"
 )
 
@@ -22,14 +23,22 @@ type LuaService struct {
 	triggerRepo repository.TriggerRepository
 	stateRepo   repository.UserStateRepository
 	storage     repository.StorageRepository
+	gemini      *ai.GeminiService
 }
 
-func NewLuaService(waClient *whatsapp.WhatsAppClient, triggerRepo repository.TriggerRepository, stateRepo repository.UserStateRepository, storage repository.StorageRepository) *LuaService {
+func NewLuaService(
+	waClient *whatsapp.WhatsAppClient,
+	triggerRepo repository.TriggerRepository,
+	stateRepo repository.UserStateRepository,
+	storage repository.StorageRepository,
+	gemini *ai.GeminiService,
+) *LuaService {
 	return &LuaService{
 		waClient:    waClient,
 		triggerRepo: triggerRepo,
 		stateRepo:   stateRepo,
 		storage:     storage,
+		gemini:      gemini,
 	}
 }
 
@@ -79,6 +88,7 @@ func (s *LuaService) runScript(script string, sender string, content string, mat
 	L.SetGlobal("send_sticker", L.NewFunction(s.luaSendSticker))
 	L.SetGlobal("send_media", L.NewFunction(s.luaSendMedia))
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
+	L.SetGlobal("gemini_chat", L.NewFunction(s.luaGeminiChat))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
 	L.SetGlobal("set_state", L.NewFunction(s.luaSetState))
 	
@@ -371,6 +381,13 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		actions = append(actions, fmt.Sprintf("Action: send_media(to: %s, type: %s, url: %s)", target, mType, url))
 		return 0
 	}))
+	L.SetGlobal("gemini_chat", L.NewFunction(func(L *lua.LState) int {
+		prompt := L.CheckString(1)
+		modelName := L.OptString(2, "gemini-2.0-flash")
+		actions = append(actions, fmt.Sprintf("Action: gemini_chat(prompt: %s, model: %s)", prompt, modelName))
+		L.Push(lua.LString("[MOCK GEMINI RESPONSE]"))
+		return 1
+	}))
 
 	// Real but safe functions
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
@@ -523,4 +540,26 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 	default:
 		return nil
 	}
+}
+
+func (s *LuaService) luaGeminiChat(L *lua.LState) int {
+	prompt := L.CheckString(1)
+	modelName := L.OptString(2, "gemini-2.0-flash")
+	
+	if s.gemini == nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString("Gemini service not available"))
+		return 2
+	}
+
+	ctx := context.Background()
+	res, err := s.gemini.GenerateText(ctx, modelName, prompt)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	L.Push(lua.LString(res))
+	return 1
 }

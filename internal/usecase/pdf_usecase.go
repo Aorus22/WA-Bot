@@ -158,7 +158,7 @@ func (uc *PDFUseCase) fetchPDF(ctx context.Context, command, mapel, answerBody s
 		}
 		defer uc.storage.Delete(ctx, originalPdfPath)
 
-		answerBody, err = uc.geminiService.GenerateAnswer(ctx, originalPdfPath, mapel)
+		answerBody, err = uc.geminiService.GenerateAnswer(ctx, "gemini-2.0-flash", originalPdfPath, mapel)
 		if err != nil {
 			return "", "", err
 		}

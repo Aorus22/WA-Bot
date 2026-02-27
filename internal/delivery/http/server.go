@@ -23,13 +23,14 @@ import (
 )
 
 type HTTPServer struct {
-	client  *whatsappInfra.WhatsAppClient
-	config  repository.ConfigRepository
-	storage repository.StorageRepository
-	server  *http.Server
-	hub     *WSHub
-	msgRepo *repository.MessageStore
-	lua     LuaService
+	client      *whatsappInfra.WhatsAppClient
+	config      repository.ConfigRepository
+	storage     repository.StorageRepository
+	server      *http.Server
+	hub         *WSHub
+	msgRepo     *repository.MessageStore
+	triggerRepo repository.TriggerRepository
+	lua         LuaService
 }
 
 type LuaService interface {
@@ -51,6 +52,10 @@ func (s *HTTPServer) SetLuaService(lua LuaService) {
 
 func (s *HTTPServer) SetMessageRepo(repo *repository.MessageStore) {
 	s.msgRepo = repo
+}
+
+func (s *HTTPServer) SetTriggerRepo(repo repository.TriggerRepository) {
+	s.triggerRepo = repo
 }
 
 func (s *HTTPServer) GetHub() *WSHub {
@@ -840,12 +845,12 @@ func generateID() string {
 // Trigger Handlers
 func (s *HTTPServer) handleGetTriggers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if s.msgRepo == nil {
+	if s.triggerRepo == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Repository not configured"})
 		return
 	}
-	triggers, err := s.msgRepo.GetAll(r.Context())
+	triggers, err := s.triggerRepo.GetAll(r.Context())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -872,7 +877,7 @@ func (s *HTTPServer) handleCreateTrigger(w http.ResponseWriter, r *http.Request)
 	if t.ID == "" {
 		t.ID = generateID()
 	}
-	if err := s.msgRepo.Create(r.Context(), &t); err != nil {
+	if err := s.triggerRepo.Create(r.Context(), &t); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -896,7 +901,7 @@ func (s *HTTPServer) handleUpdateTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	t.ID = id
-	if err := s.msgRepo.Update(r.Context(), &t); err != nil {
+	if err := s.triggerRepo.Update(r.Context(), &t); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -912,7 +917,7 @@ func (s *HTTPServer) handleDeleteTrigger(w http.ResponseWriter, r *http.Request)
 	}
 	vars := mux.Vars(r)
 	id := vars["id"]
-	if err := s.msgRepo.Delete(r.Context(), id); err != nil {
+	if err := s.triggerRepo.Delete(r.Context(), id); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

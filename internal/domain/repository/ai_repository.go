@@ -5,5 +5,6 @@ import (
 )
 
 type AIRepository interface {
-	GenerateAnswer(ctx context.Context, filepath, mapel string) (string, error)
+	GenerateAnswer(ctx context.Context, modelName, filepath, mapel string) (string, error)
+	GenerateText(ctx context.Context, modelName, prompt string) (string, error)
 }

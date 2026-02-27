@@ -31,21 +31,20 @@ func NewGeminiService(apiKey string, storage repository.StorageRepository) (*Gem
 	}, nil
 }
 
-func (g *GeminiService) GenerateAnswer(ctx context.Context, filepath, mapel string) (string, error) {
-	if g.apiKey == "" {
-		fmt.Println("GEMINI_API_KEY tidak ditemukan di .env")
-		return "", fmt.Errorf("GEMINI_API_KEY tidak ditemukan di .env")
-	}
+func (g *GeminiService) GenerateAnswer(ctx context.Context, modelName, filepath, mapel string) (string, error) {     
+        if g.apiKey == "" {
+                fmt.Println("GEMINI_API_KEY tidak ditemukan di .env")
+                return "", fmt.Errorf("GEMINI_API_KEY tidak ditemukan di .env")
+        }
 
-	file, err := g.storage.Get(ctx, filepath)
-	if err != nil {
-		fmt.Printf("Gagal membuka file dari storage: %v\n", err)
-		return "", err
-	}
-	defer file.Close()
+        file, err := g.storage.Get(ctx, filepath)
+        if err != nil {
+                fmt.Printf("Gagal membuka file dari storage: %v\n", err)
+                return "", err
+        }
+        defer file.Close()
 
-	model := g.client.GenerativeModel("gemini-2.0-flash")
-
+        model := g.client.GenerativeModel(modelName)
 	re := regexp.MustCompile(`[^a-z0-9]+`)
 	fileName := re.ReplaceAllString(mapel, "")
 
@@ -93,4 +92,27 @@ func (g *GeminiService) GenerateAnswer(ctx context.Context, filepath, mapel stri
 
 func (g *GeminiService) Close() {
 	g.client.Close()
+}
+
+func (g *GeminiService) GenerateText(ctx context.Context, modelName, prompt string) (string, error) {
+	if g.apiKey == "" {
+		return "", fmt.Errorf("GEMINI_API_KEY not found")
+	}
+
+	model := g.client.GenerativeModel(modelName)
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", err
+	}
+
+	answer := ""
+	for _, cand := range resp.Candidates {
+		for _, part := range cand.Content.Parts {
+			if text, ok := part.(genai.Text); ok {
+				answer += string(text)
+			}
+		}
+	}
+
+	return answer, nil
 }

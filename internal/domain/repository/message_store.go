@@ -1,15 +1,13 @@
 package repository
 
 import (
-        "context"
-        "database/sql"
-        "fmt"
-        "strings"
-        "sync"
-        "time"
-        "wa-bot/internal/domain/entity"
+	"database/sql"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
 
-        _ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
 )
 type MessageStore struct {
 	db *sql.DB
@@ -31,14 +29,14 @@ type Message struct {
 }
 
 type Chat struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Avatar    string `json:"avatar"`
-	LastMsg   string `json:"lastMsg"`
-	LastTime  int64  `json:"lastTime"`
-	Unread    int    `json:"unread"`
-	IsActive  bool   `json:"isActive"`
-	IsGroup   bool   `json:"isGroup"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Avatar   string `json:"avatar"`
+	LastMsg  string `json:"lastMsg"`
+	LastTime int64  `json:"lastTime"`
+	Unread   int    `json:"unread"`
+	IsActive bool   `json:"isActive"`
+	IsGroup  bool   `json:"isGroup"`
 }
 
 type Contact struct {
@@ -69,62 +67,54 @@ func (s *MessageStore) init() error {
 
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS contacts (
-			id TEXT PRIMARY KEY,
-			name TEXT,
-			jid TEXT UNIQUE,
-			avatar TEXT,
-			created_at INTEGER DEFAULT (strftime('%s', 'now')),
-			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-		)`,
+                        id TEXT PRIMARY KEY,
+                        name TEXT,
+                        jid TEXT UNIQUE,
+                        avatar TEXT,
+                        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+                )`,
 		`CREATE TABLE IF NOT EXISTS chats (
-			id TEXT PRIMARY KEY,
-			name TEXT,
-			avatar TEXT,
-			last_msg TEXT,
-			last_time INTEGER,
-			unread INTEGER DEFAULT 0,
-			is_active INTEGER DEFAULT 0,
-			is_group INTEGER DEFAULT 0,
-			created_at INTEGER DEFAULT (strftime('%s', 'now')),
-			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-		)`,
+                        id TEXT PRIMARY KEY,
+                        name TEXT,
+                        avatar TEXT,
+                        last_msg TEXT,
+                        last_time INTEGER,
+                        unread INTEGER DEFAULT 0,
+                        is_active INTEGER DEFAULT 0,
+                        is_group INTEGER DEFAULT 0,
+                        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+                )`,
 		`CREATE TABLE IF NOT EXISTS messages (
-			id TEXT PRIMARY KEY,
-			chat_id TEXT,
-			sender_id TEXT,
-			receiver_id TEXT,
-			content TEXT,
-			timestamp INTEGER,
-			status TEXT DEFAULT 'sent',
-			msg_type TEXT DEFAULT 'text',
-			media_url TEXT,
-			is_automatic INTEGER DEFAULT 0,
-			metadata TEXT,
-			created_at INTEGER DEFAULT (strftime('%s', 'now')),
-			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
-		)`,
-		                `CREATE TABLE IF NOT EXISTS favorite_stickers (
-		                        id TEXT PRIMARY KEY,
-		                        media_url TEXT,
-		                        is_animated INTEGER DEFAULT 0,
-		                        created_at INTEGER DEFAULT (strftime('%s', 'now'))
-		                )`,
-		                `CREATE TABLE IF NOT EXISTS triggers (
-		                        id TEXT PRIMARY KEY,
-		                        name TEXT,
-		                        pattern TEXT,
-		                        script TEXT,
-		                        is_active INTEGER DEFAULT 1,
-		                        created_at INTEGER DEFAULT (strftime('%s', 'now')),
-		                        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-		                )`,
-		                `CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
+                        id TEXT PRIMARY KEY,
+                        chat_id TEXT,
+                        sender_id TEXT,
+                        receiver_id TEXT,
+                        content TEXT,
+                        timestamp INTEGER,
+                        status TEXT DEFAULT 'sent',
+                        msg_type TEXT DEFAULT 'text',
+                        media_url TEXT,
+                        is_automatic INTEGER DEFAULT 0,
+                        metadata TEXT,
+                        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                        FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+                )`,
+		`CREATE TABLE IF NOT EXISTS favorite_stickers (
+                        id TEXT PRIMARY KEY,
+                        media_url TEXT,
+                        is_animated INTEGER DEFAULT 0,
+                        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                )`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS update_chat_timestamp
-			AFTER INSERT ON messages
-			BEGIN
-				UPDATE chats SET last_msg = NEW.content, last_time = NEW.timestamp, updated_at = strftime('%s', 'now')
-				WHERE id = NEW.chat_id;
-			END`,
+                        AFTER INSERT ON messages
+                        BEGIN
+                                UPDATE chats SET last_msg = NEW.content, last_time = NEW.timestamp, updated_at = strftime('%s', 'now')
+                                WHERE id = NEW.chat_id;
+                        END`,
 	}
 
 	for _, query := range queries {
@@ -158,16 +148,16 @@ func (s *MessageStore) init() error {
 			}
 			rows.Close()
 		}
-		
+
 		if !idExists {
-			// Easiest fix: drop and recreate since it's a new feature and data is transient
+			// Easiest fix: drop and recreate since it's a new feature and data is transient  
 			_, _ = s.db.Exec("DROP TABLE favorite_stickers")
 			_, _ = s.db.Exec(`CREATE TABLE favorite_stickers (
-				id TEXT PRIMARY KEY,
-				media_url TEXT,
-				is_animated INTEGER DEFAULT 0,
-				created_at INTEGER DEFAULT (strftime('%s', 'now'))
-			)`)
+                                id TEXT PRIMARY KEY,
+                                media_url TEXT,
+                                is_animated INTEGER DEFAULT 0,
+                                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                        )`)
 		}
 	}
 
@@ -201,14 +191,14 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 			isGroup = 1
 		}
 		_, err = tx.Exec(`
-			INSERT INTO chats (id, name, last_msg, last_time, is_active, is_group)
-			VALUES (?, ?, ?, ?, 1, ?)
-		`, msg.ChatID, name, msg.Content, msg.Timestamp, isGroup)
+                        INSERT INTO chats (id, name, last_msg, last_time, is_active, is_group)
+                        VALUES (?, ?, ?, ?, 1, ?)
+                `, msg.ChatID, name, msg.Content, msg.Timestamp, isGroup)
 	} else {
 		_, err = tx.Exec(`
-			UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
-			WHERE id = ?
-		`, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+                        UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
+                        WHERE id = ?
+                `, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
 	}
 	if err != nil {
 		return err
@@ -216,9 +206,9 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 
 	// Insert message
 	_, err = tx.Exec(`
-		INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
+                INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
 		if msg.IsAutomatic {
 			return 1
 		}
@@ -236,12 +226,12 @@ func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) 
 	defer s.mu.RUnlock()
 
 	query := `
-		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic
-		FROM messages
-		WHERE chat_id = ?
-		ORDER BY timestamp DESC
-		LIMIT ?
-	`
+                SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic
+                FROM messages
+                WHERE chat_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+        `
 
 	rows, err := s.db.Query(query, chatID, limit)
 	if err != nil {
@@ -285,10 +275,10 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 	defer s.mu.RUnlock()
 
 	query := `
-		SELECT id, name, ifnull(avatar, '') as avatar, last_msg, last_time, unread, is_active, is_group
-		FROM chats
-		ORDER BY last_time DESC
-	`
+                SELECT id, name, ifnull(avatar, '') as avatar, last_msg, last_time, unread, is_active, is_group
+                FROM chats
+                ORDER BY last_time DESC
+        `
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -326,10 +316,10 @@ func (s *MessageStore) GetContacts() ([]Contact, error) {
 	defer s.mu.RUnlock()
 
 	query := `
-		SELECT id, name, jid, ifnull(avatar, '') as avatar
-		FROM contacts
-		ORDER BY name ASC
-	`
+                SELECT id, name, jid, ifnull(avatar, '') as avatar
+                FROM contacts
+                ORDER BY name ASC
+        `
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -360,9 +350,9 @@ func (s *MessageStore) SaveContact(contact *Contact) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		INSERT OR REPLACE INTO contacts (id, name, jid, avatar, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, contact.ID, contact.Name, contact.JID, contact.Avatar, time.Now().Unix())
+                INSERT OR REPLACE INTO contacts (id, name, jid, avatar, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+        `, contact.ID, contact.Name, contact.JID, contact.Avatar, time.Now().Unix())
 
 	return err
 }
@@ -372,10 +362,10 @@ func (s *MessageStore) UpdateChatLastMessage(chatID, content string, timestamp i
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		UPDATE chats
-		SET last_msg = ?, last_time = ?, updated_at = ?
-		WHERE id = ?
-	`, content, timestamp, time.Now().Unix(), chatID)
+                UPDATE chats
+                SET last_msg = ?, last_time = ?, updated_at = ?
+                WHERE id = ?
+        `, content, timestamp, time.Now().Unix(), chatID)
 
 	return err
 }
@@ -385,8 +375,8 @@ func (s *MessageStore) MarkAsRead(chatID string) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		UPDATE chats SET unread = 0, updated_at = ? WHERE id = ?
-	`, time.Now().Unix(), chatID)
+                UPDATE chats SET unread = 0, updated_at = ? WHERE id = ?
+        `, time.Now().Unix(), chatID)
 
 	return err
 }
@@ -396,8 +386,8 @@ func (s *MessageStore) UpdateChatAvatar(chatID, avatarURL string) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		UPDATE chats SET avatar = ?, updated_at = ? WHERE id = ?
-	`, avatarURL, time.Now().Unix(), chatID)
+                UPDATE chats SET avatar = ?, updated_at = ? WHERE id = ?
+        `, avatarURL, time.Now().Unix(), chatID)
 
 	return err
 }
@@ -407,8 +397,8 @@ func (s *MessageStore) UpdateChatName(chatID, name string) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		UPDATE chats SET name = ?, updated_at = ? WHERE id = ?
-	`, name, time.Now().Unix(), chatID)
+                UPDATE chats SET name = ?, updated_at = ? WHERE id = ?
+        `, name, time.Now().Unix(), chatID)
 
 	return err
 }
@@ -418,10 +408,12 @@ func (s *MessageStore) SaveFavoriteSticker(id, mediaURL string, isAnimated bool)
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		INSERT OR REPLACE INTO favorite_stickers (id, media_url, is_animated)
-		VALUES (?, ?, ?)
-	`, id, mediaURL, func() int {
-		if isAnimated { return 1 }
+                INSERT OR REPLACE INTO favorite_stickers (id, media_url, is_animated)
+                VALUES (?, ?, ?)
+        `, id, mediaURL, func() int {
+		if isAnimated {
+			return 1
+		}
 		return 0
 	}())
 
@@ -467,95 +459,12 @@ func (s *MessageStore) UpdateMessageStatus(msgID, status string) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-		UPDATE messages SET status = ? WHERE id = ?
-	`, status, msgID)
+                UPDATE messages SET status = ? WHERE id = ?
+        `, status, msgID)
 
 	return err
 }
 
 func (s *MessageStore) Close() error {
 	return s.db.Close()
-}
-
-// TriggerRepository implementation
-func (s *MessageStore) GetAll(ctx context.Context) ([]*entity.Trigger, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	query := `SELECT id, name, pattern, script, is_active, created_at, updated_at FROM triggers ORDER BY created_at DESC`
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var triggers []*entity.Trigger
-	for rows.Next() {
-		var t entity.Trigger
-		var isActive int
-		var createdAt, updatedAt int64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &isActive, &createdAt, &updatedAt); err != nil {
-			return nil, err
-		}
-		t.IsActive = isActive == 1
-		t.CreatedAt = time.Unix(createdAt, 0)
-		t.UpdatedAt = time.Unix(updatedAt, 0)
-		triggers = append(triggers, &t)
-	}
-	return triggers, nil
-}
-
-func (s *MessageStore) GetByID(ctx context.Context, id string) (*entity.Trigger, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	query := `SELECT id, name, pattern, script, is_active, created_at, updated_at FROM triggers WHERE id = ?`
-	var t entity.Trigger
-	var isActive int
-	var createdAt, updatedAt int64
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &isActive, &createdAt, &updatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	t.IsActive = isActive == 1
-	t.CreatedAt = time.Unix(createdAt, 0)
-	t.UpdatedAt = time.Unix(updatedAt, 0)
-	return &t, nil
-}
-
-func (s *MessageStore) Create(ctx context.Context, t *entity.Trigger) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	query := `INSERT INTO triggers (id, name, pattern, script, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	now := time.Now().Unix()
-	_, err := s.db.ExecContext(ctx, query, t.ID, t.Name, t.Pattern, t.Script, func() int {
-		if t.IsActive { return 1 }
-		return 0
-	}(), now, now)
-	return err
-}
-
-func (s *MessageStore) Update(ctx context.Context, t *entity.Trigger) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	query := `UPDATE triggers SET name = ?, pattern = ?, script = ?, is_active = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, t.Name, t.Pattern, t.Script, func() int {
-		if t.IsActive { return 1 }
-		return 0
-	}(), time.Now().Unix(), t.ID)
-	return err
-}
-
-func (s *MessageStore) Delete(ctx context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	query := `DELETE FROM triggers WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, id)
-	return err
 }
