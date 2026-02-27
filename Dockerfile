@@ -21,10 +21,10 @@ WORKDIR /root/
 RUN apk add --no-cache sqlite-libs libwebp-tools
 
 COPY --from=builder /app/wa-bot .
-COPY --from=builder /app/ffmpeg /usr/local/bin
-COPY --from=builder /app/ffprobe /usr/local/bin
-COPY --from=builder /app/yt-dlp /usr/local/bin
-COPY --from=builder /app/gallery-dl /usr/local/bin
+COPY --from=builder /app/bin/ffmpeg /usr/local/bin
+COPY --from=builder /app/bin/ffprobe /usr/local/bin
+COPY --from=builder /app/bin/yt-dlp /usr/local/bin
+COPY --from=builder /app/bin/gallery-dl /usr/local/bin
 
 RUN chmod +x ./wa-bot /usr/local/bin/ffmpeg /usr/local/bin/gallery-dl /usr/local/bin/yt-dlp /usr/local/bin/ffprobe
 

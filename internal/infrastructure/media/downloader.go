@@ -15,6 +15,7 @@ import (
 
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/domain/valueobject"
+	"wa-bot/internal/infrastructure/util"
 )
 
 type MediaDownloader struct {
@@ -40,7 +41,7 @@ func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (stri
 		cmd *exec.Cmd
 	}{
 		{
-			cmd: exec.CommandContext(ctx, "yt-dlp",
+			cmd: exec.CommandContext(ctx, util.GetBinaryPath("yt-dlp"),
 				"-o", fullPath,
 				"--no-playlist",
 				"-f", "best",
@@ -48,7 +49,7 @@ func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (stri
 			),
 		},
 		{
-			cmd: exec.CommandContext(ctx, "gallery-dl",
+			cmd: exec.CommandContext(ctx, util.GetBinaryPath("gallery-dl"),
 				"-D", m.storage.GetPath(""),
 				"-f", currentTime,
 				url,

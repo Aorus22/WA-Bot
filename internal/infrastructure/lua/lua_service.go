@@ -15,6 +15,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
+	"wa-bot/internal/infrastructure/util"
 	"wa-bot/internal/infrastructure/whatsapp"
 )
 
@@ -280,7 +281,7 @@ func (s *LuaService) luaFFmpeg(L *lua.LState) int {
 		args = append(args, v.String())
 	})
 
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(util.GetBinaryPath("ffmpeg"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -302,7 +303,7 @@ func (s *LuaService) luaFFprobe(L *lua.LState) int {
 		args = append(args, v.String())
 	})
 
-	cmd := exec.Command("ffprobe", args...)
+	cmd := exec.Command(util.GetBinaryPath("ffprobe"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 

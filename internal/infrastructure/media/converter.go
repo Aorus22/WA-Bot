@@ -15,6 +15,7 @@ import (
 
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/domain/valueobject"
+	"wa-bot/internal/infrastructure/util"
 )
 
 type FFmpegConverter struct {
@@ -105,7 +106,7 @@ func (f *FFmpegConverter) ConvertToWebP(ctx context.Context, mediaPath string, o
 		"-y", webpPath,
 	)
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, util.GetBinaryPath("ffmpeg"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -135,7 +136,7 @@ func (f *FFmpegConverter) ConvertToWebP(ctx context.Context, mediaPath string, o
 }
 
 func (f *FFmpegConverter) GetDuration(filePath string) (float64, error) {
-	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration",
+	cmd := exec.Command(util.GetBinaryPath("ffprobe"), "-v", "error", "-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1", filePath)
 
 	output, err := cmd.Output()
@@ -229,7 +230,7 @@ func (f *FFmpegConverter) WriteWebpExif(ctx context.Context, inputPath string, p
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, "webpmux", "-set", "exif", exifPath, inputPath, "-o", outputPath)
+	cmd := exec.CommandContext(ctx, util.GetBinaryPath("webpmux"), "-set", "exif", exifPath, inputPath, "-o", outputPath)
 	if err := cmd.Run(); err != nil {
 		return "", err
 	}
