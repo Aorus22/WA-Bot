@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 
+	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
@@ -28,6 +29,11 @@ type HTTPServer struct {
 	server  *http.Server
 	hub     *WSHub
 	msgRepo *repository.MessageStore
+	lua     LuaService
+}
+
+type LuaService interface {
+	TestTrigger(ctx context.Context, pattern, script, message string) (map[string]interface{}, error)
 }
 
 func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.ConfigRepository, storage repository.StorageRepository) *HTTPServer {
@@ -37,6 +43,10 @@ func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.Confi
 		storage: storage,
 		hub:     NewWSHub(),
 	}
+}
+
+func (s *HTTPServer) SetLuaService(lua LuaService) {
+	s.lua = lua
 }
 
 func (s *HTTPServer) SetMessageRepo(repo *repository.MessageStore) {
@@ -66,6 +76,13 @@ func (s *HTTPServer) Start() error {
 	api.HandleFunc("/contacts", s.handleGetContacts).Methods("GET")
 	api.HandleFunc("/status", s.handleGetStatus).Methods("GET")
 	api.HandleFunc("/logout", s.handleLogout).Methods("POST", "OPTIONS")
+
+	// Trigger Management
+	api.HandleFunc("/triggers", s.handleGetTriggers).Methods("GET")
+	api.HandleFunc("/triggers", s.handleCreateTrigger).Methods("POST", "OPTIONS")
+	api.HandleFunc("/triggers/test", s.handleTestTrigger).Methods("POST", "OPTIONS")
+	api.HandleFunc("/triggers/{id}", s.handleUpdateTrigger).Methods("PUT", "OPTIONS")
+	api.HandleFunc("/triggers/{id}", s.handleDeleteTrigger).Methods("DELETE", "OPTIONS")
 
 	// Media files - custom handler to URL decode filenames
 	api.PathPrefix("/media/").Handler(http.StripPrefix("/api/media/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,10 +125,6 @@ func (s *HTTPServer) Start() error {
 		}
 		defer reader.Close()
 
-		// Use io.Copy for simplicity, or we could implement a more sophisticated serve content
-		// but storage.Get returns a reader, not a file with Seek.
-		// If we want Seek, we might need a different interface or local temp file.
-		// For now, io.Copy is fine for small files.
 		io.Copy(w, reader)
 	})))
 
@@ -257,7 +270,7 @@ func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 			fmt.Printf("Failed to save message: %v\n", err)
 			return
 		}
-		fmt.Printf("✓ Saved message to database (auto=%v)\n", msg.IsAutomatic)
+		fmt.Printf("\u2713 Saved message to database (auto=%v)\n", msg.IsAutomatic)
 
 		// Broadcast via WebSocket
 		if s.hub != nil {
@@ -277,7 +290,7 @@ func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 					"senderName":  msg.SenderName,
 				},
 			})
-			fmt.Printf("✓ Broadcasted message via WebSocket\n")
+			fmt.Printf("\u2713 Broadcasted message via WebSocket\n")
 		}
 	}
 }
@@ -293,20 +306,6 @@ type sendRequest struct {
 	Secret  string `json:"secret"`
 	Target  string `json:"target"`
 	Message string `json:"message"`
-}
-
-type bulkMessageRequest struct {
-	Secret  string   `json:"secret"`
-	Targets []string `json:"targets"`
-	Message string   `json:"message"`
-}
-
-type bulkDifferentMessageRequest struct {
-	Secret   string `json:"secret"`
-	Messages []struct {
-		Targets string `json:"targets"`
-		Message string `json:"message"`
-	} `json:"messages"`
 }
 
 func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
@@ -358,7 +357,6 @@ func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("📤 Sending %s to: %s\n", mediaType, target)
 
-	// Create safe filename and save locally for historical view
 	os.MkdirAll("media", 0755)
 	ext := filepath.Ext(header.Filename)
 	if ext == "" {
@@ -393,13 +391,13 @@ func (s *HTTPServer) handleSendMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sendErr != nil {
-		fmt.Printf("❌ Failed to send media: %v\n", sendErr)
+		fmt.Printf("\u23ec Failed to send media: %v\n", sendErr)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": sendErr.Error()})
 		return
 	}
 
-	fmt.Printf("✓ Media sent successfully to %s\n", target)
+	fmt.Printf("\u2713 Media sent successfully to %s\n", target)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
@@ -433,33 +431,17 @@ func (s *HTTPServer) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("📤 Sending message to: %s | Content: %s\n", req.Target, req.Message)
 
-	// Send to WhatsApp first
 	err := s.client.SendMessage(context.Background(), req.Target, req.Message, false)
 	if err != nil {
-		fmt.Printf("❌ Failed to send WhatsApp message: %v\n", err)
+		fmt.Printf("\u23ec Failed to send WhatsApp message: %v\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	fmt.Printf("✓ WhatsApp message sent to %s\n", req.Target)
+	fmt.Printf("\u2713 WhatsApp message sent to %s\n", req.Target)
 
-	// Since LogSentMessage calls SaveAndBroadcastMessage, it already saved it to DB.
-	// We should return the message we just created to the FE so it knows the real ID.
-	// We'll need the ID from whatsmeow, which is not directly here but LogSentMessage
-	// was called by the client. We need to get that message back.
-	
-	// Actually, let's just find the last message for this chat to be safe, 
-	// or better, modify handleSendMessage to return the result.
-	// Since the client.SendMessage now calls logger.LogSentMessage, we can't easily get it back.
-	
-	// Alternative: Let's have handleSendMessage return a 200 OK, and the FE 
-	// will get the "new_message" event via WebSocket anyway.
-	// But the FE wants to replace its temporary message.
-	
 	w.WriteHeader(http.StatusOK)
-	// Return a placeholder or the actual message if we can.
-	// For now, let's just return success and let WebSocket handle the real update.
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
@@ -471,7 +453,11 @@ func (s *HTTPServer) handleBulkSendSameMessage(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var req bulkMessageRequest
+	var req struct {
+		Secret  string   `json:"secret"`
+		Targets []string `json:"targets"`
+		Message string   `json:"message"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
@@ -513,7 +499,13 @@ func (s *HTTPServer) handleBulkSendDifferentMessages(w http.ResponseWriter, r *h
 		return
 	}
 
-	var req bulkDifferentMessageRequest
+	var req struct {
+		Secret   string `json:"secret"`
+		Messages []struct {
+			Targets string `json:"targets"`
+			Message string `json:"message"`
+		} `json:"messages"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
@@ -570,13 +562,6 @@ func (s *HTTPServer) handleGetFavoriteStickers(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(stickers)
 }
 
-type favoriteRequest struct {
-	Secret     string `json:"secret"`
-	MessageID  string `json:"messageId"`
-	MediaURL   string `json:"mediaUrl"`
-	IsAnimated bool   `json:"isAnimated"`
-}
-
 func (s *HTTPServer) handleFavoriteSticker(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -585,7 +570,12 @@ func (s *HTTPServer) handleFavoriteSticker(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var req favoriteRequest
+	var req struct {
+		Secret     string `json:"secret"`
+		MessageID  string `json:"messageId"`
+		MediaURL   string `json:"mediaUrl"`
+		IsAnimated bool   `json:"isAnimated"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -603,8 +593,6 @@ func (s *HTTPServer) handleFavoriteSticker(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// We'll use the filename as the ID or a unique hash
-	// For now, let's just save it to the DB
 	if s.msgRepo != nil {
 		err := s.msgRepo.SaveFavoriteSticker(req.MessageID, req.MediaURL, req.IsAnimated)
 		if err != nil {
@@ -650,14 +638,12 @@ func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type stickerSendRequest struct {
+	var req struct {
 		Secret     string `json:"secret"`
 		Target     string `json:"target"`
 		MediaURL   string `json:"mediaUrl"`
 		IsAnimated bool   `json:"isAnimated"`
 	}
-
-	var req stickerSendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -675,9 +661,7 @@ func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up media URL to get local path
 	localPath := strings.TrimPrefix(req.MediaURL, "/")
-	// If it contains /api/ prefix from frontend
 	localPath = strings.TrimPrefix(localPath, "api/")
 
 	fmt.Printf("📤 Sending sticker to: %s | Path: %s\n", req.Target, localPath)
@@ -709,12 +693,12 @@ func (s *HTTPServer) handleSendSticker(w http.ResponseWriter, r *http.Request) {
 
 func (s *HTTPServer) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	isLoggedIn := false
 	if s.client != nil {
 		isLoggedIn = s.client.IsLoggedIn()
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"isLoggedIn": isLoggedIn,
 	})
@@ -722,25 +706,25 @@ func (s *HTTPServer) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *HTTPServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	
+
 	if s.client == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "WhatsApp client not initialized"})
 		return
 	}
-	
+
 	err := s.client.Logout()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
@@ -788,7 +772,6 @@ func (s *HTTPServer) handleGetChats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return empty array if no chats
 	if chats == nil {
 		chats = []repository.Chat{}
 	}
@@ -841,18 +824,134 @@ func (s *HTTPServer) handleAvatarProxy(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	jid := vars["jid"]
 
-	// Get profile picture URL from WhatsApp
 	avatarURL, err := s.client.GetProfilePictureInfo(context.Background(), jid)
 	if err != nil {
-		// Return 404 if no avatar found
 		http.Error(w, "Avatar not found", http.StatusNotFound)
 		return
 	}
 
-	// Redirect to the actual avatar URL
 	http.Redirect(w, r, avatarURL, http.StatusFound)
 }
 
 func generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixMilli())
+}
+
+// Trigger Handlers
+func (s *HTTPServer) handleGetTriggers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.msgRepo == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Repository not configured"})
+		return
+	}
+	triggers, err := s.msgRepo.GetAll(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if triggers == nil {
+		triggers = []*entity.Trigger{}
+	}
+	json.NewEncoder(w).Encode(triggers)
+}
+
+func (s *HTTPServer) handleCreateTrigger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	var t entity.Trigger
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if t.ID == "" {
+		t.ID = generateID()
+	}
+	if err := s.msgRepo.Create(r.Context(), &t); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(t)
+}
+
+func (s *HTTPServer) handleUpdateTrigger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	vars := mux.Vars(r)
+	id := vars["id"]
+	var t entity.Trigger
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	t.ID = id
+	if err := s.msgRepo.Update(r.Context(), &t); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(t)
+}
+
+func (s *HTTPServer) handleDeleteTrigger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if err := s.msgRepo.Delete(r.Context(), id); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *HTTPServer) handleTestTrigger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if s.lua == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Lua service not initialized"})
+		return
+	}
+
+	var req struct {
+		Pattern string `json:"pattern"`
+		Script  string `json:"script"`
+		Message string `json:"message"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	result, err := s.lua.TestTrigger(r.Context(), req.Pattern, req.Script, req.Message)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
 }

@@ -12,15 +12,15 @@ import (
 	"wa-bot/internal/delivery/cron"
 	"wa-bot/internal/delivery/http"
 	"wa-bot/internal/delivery/whatsapp"
-	"wa-bot/internal/domain/repository"
-	"wa-bot/internal/infrastructure/ai"
-	"wa-bot/internal/infrastructure/api"
-	infrastructureConfig "wa-bot/internal/infrastructure/config"
-	"wa-bot/internal/infrastructure/media"
-	"wa-bot/internal/infrastructure/storage"
-	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
-	"wa-bot/internal/usecase"
-)
+	        "wa-bot/internal/domain/repository"
+	        "wa-bot/internal/infrastructure/ai"
+	        "wa-bot/internal/infrastructure/api"
+	        infrastructureConfig "wa-bot/internal/infrastructure/config"
+	        "wa-bot/internal/infrastructure/lua"
+	        "wa-bot/internal/infrastructure/media"
+	        "wa-bot/internal/infrastructure/storage"
+	        whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
+	        "wa-bot/internal/usecase")
 
 type App struct {
 	waClient      *whatsappInfra.WhatsAppClient
@@ -148,15 +148,19 @@ func InitializeApp() (*App, error) {
 	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
 	cronScheduler := cron.NewCronScheduler(waClient, dbURL, cfg.Get("CRON_SCHEDULE"))
 
-	// Initialize message store
-	msgStore, err := repository.NewMessageStore("file:wa-bot-messages.db?_foreign_keys=on")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create message store: %w", err)
-	}
-	httpServer.SetMessageRepo(msgStore)
-
-	// Set http server as logger for WhatsApp client
-	waClient.SetLogger(httpServer)
+	        // Initialize message store
+	        msgStore, err := repository.NewMessageStore("file:wa-bot-messages.db?_foreign_keys=on")
+	        if err != nil {
+	                return nil, fmt.Errorf("failed to create message store: %w", err)
+	        }
+	                httpServer.SetMessageRepo(msgStore)
+	        
+	                        // Initialize Lua Service
+	                        luaService := lua.NewLuaService(waClient, msgStore, stateRepo, storageRepo)
+	                        eventHandler.SetLuaService(luaService)
+	                        httpServer.SetLuaService(luaService)
+	                
+	                        // Set http server as logger for WhatsApp client	waClient.SetLogger(httpServer)
 
 	// Set message store and http server to event handler
 	eventHandler.SetMessageStore(msgStore)

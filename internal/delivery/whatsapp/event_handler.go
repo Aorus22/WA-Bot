@@ -31,6 +31,12 @@ type WhatsAppEventHandler struct {
 	msgStore   *repository.MessageStore
 	httpServer HTTPServer
 	storage    repository.StorageRepository
+	luaService LuaService
+}
+
+type LuaService interface {
+	ExecuteTriggers(ctx context.Context, senderJID string, messageText string) (bool, error)
+	TestTrigger(ctx context.Context, pattern, script, message string) (map[string]interface{}, error)
 }
 
 func NewWhatsAppEventHandler(
@@ -55,6 +61,10 @@ func (h *WhatsAppEventHandler) SetMessageStore(msgStore *repository.MessageStore
 
 func (h *WhatsAppEventHandler) SetHTTPServer(server HTTPServer) {
 	h.httpServer = server
+}
+
+func (h *WhatsAppEventHandler) SetLuaService(luaService LuaService) {
+	h.luaService = luaService
 }
 
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
@@ -83,7 +93,7 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 
 	for _, msgID := range evt.MessageIDs {
 		h.httpServer.UpdateMessageStatus(msgID, status)
-		fmt.Printf("✅ Updated status for %s to %s\n", msgID, status)
+		fmt.Printf("\u2705 Updated status for %s to %s\n", msgID, status)
 	}
 }
 
@@ -135,7 +145,7 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 		msgTime := evt.Info.Timestamp
 		now := time.Now()
 		if now.Sub(msgTime) > 1*time.Minute {
-			fmt.Printf("⚠ Message too old (%v), skipping bot response\n", now.Sub(msgTime))
+			fmt.Printf("\u26a0 Message too old (%v), skipping bot response\n", now.Sub(msgTime))
 			return
 		}
 
@@ -147,7 +157,7 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 		// 4. Update role in background (accurate but slow)
 		accurateRole := h.getUserRole(senderJID.String())
 		if accurateRole != quickRole {
-			fmt.Printf("📊 Role updated: %s -> %s\n", quickRole, accurateRole)
+			fmt.Printf("📄 Role updated: %s -> %s\n", quickRole, accurateRole)
 		}
 	}()
 }
@@ -274,6 +284,14 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 		Timestamp: evt.Info.Timestamp,
 		IsGroup:   evt.Info.IsGroup,
 		SenderJID: senderJID.String(),
+	}
+
+	// Check Lua Triggers
+	if h.luaService != nil {
+		if matched, err := h.luaService.ExecuteTriggers(ctx, senderJID.String(), messageText); err == nil && matched {
+			fmt.Printf("🔮 Lua Trigger Matched for: %s\n", messageText)
+			return
+		}
 	}
 
 	// Check user state

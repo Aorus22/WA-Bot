@@ -1,15 +1,16 @@
 package repository
 
 import (
-	"database/sql"
-	"fmt"
-	"strings"
-	"sync"
-	"time"
+        "context"
+        "database/sql"
+        "fmt"
+        "strings"
+        "sync"
+        "time"
+        "wa-bot/internal/domain/entity"
 
-	_ "github.com/mattn/go-sqlite3"
+        _ "github.com/mattn/go-sqlite3"
 )
-
 type MessageStore struct {
 	db *sql.DB
 	mu sync.RWMutex
@@ -102,14 +103,22 @@ func (s *MessageStore) init() error {
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 		)`,
-		`CREATE TABLE IF NOT EXISTS favorite_stickers (
-			id TEXT PRIMARY KEY,
-			media_url TEXT,
-			is_animated INTEGER DEFAULT 0,
-			created_at INTEGER DEFAULT (strftime('%s', 'now'))
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
+		                `CREATE TABLE IF NOT EXISTS favorite_stickers (
+		                        id TEXT PRIMARY KEY,
+		                        media_url TEXT,
+		                        is_animated INTEGER DEFAULT 0,
+		                        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+		                )`,
+		                `CREATE TABLE IF NOT EXISTS triggers (
+		                        id TEXT PRIMARY KEY,
+		                        name TEXT,
+		                        pattern TEXT,
+		                        script TEXT,
+		                        is_active INTEGER DEFAULT 1,
+		                        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+		                        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+		                )`,
+		                `CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS update_chat_timestamp
 			AFTER INSERT ON messages
 			BEGIN
@@ -466,4 +475,87 @@ func (s *MessageStore) UpdateMessageStatus(msgID, status string) error {
 
 func (s *MessageStore) Close() error {
 	return s.db.Close()
+}
+
+// TriggerRepository implementation
+func (s *MessageStore) GetAll(ctx context.Context) ([]*entity.Trigger, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, pattern, script, is_active, created_at, updated_at FROM triggers ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var triggers []*entity.Trigger
+	for rows.Next() {
+		var t entity.Trigger
+		var isActive int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &isActive, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		t.IsActive = isActive == 1
+		t.CreatedAt = time.Unix(createdAt, 0)
+		t.UpdatedAt = time.Unix(updatedAt, 0)
+		triggers = append(triggers, &t)
+	}
+	return triggers, nil
+}
+
+func (s *MessageStore) GetByID(ctx context.Context, id string) (*entity.Trigger, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, pattern, script, is_active, created_at, updated_at FROM triggers WHERE id = ?`
+	var t entity.Trigger
+	var isActive int
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &isActive, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	t.IsActive = isActive == 1
+	t.CreatedAt = time.Unix(createdAt, 0)
+	t.UpdatedAt = time.Unix(updatedAt, 0)
+	return &t, nil
+}
+
+func (s *MessageStore) Create(ctx context.Context, t *entity.Trigger) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO triggers (id, name, pattern, script, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	now := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx, query, t.ID, t.Name, t.Pattern, t.Script, func() int {
+		if t.IsActive { return 1 }
+		return 0
+	}(), now, now)
+	return err
+}
+
+func (s *MessageStore) Update(ctx context.Context, t *entity.Trigger) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE triggers SET name = ?, pattern = ?, script = ?, is_active = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, t.Name, t.Pattern, t.Script, func() int {
+		if t.IsActive { return 1 }
+		return 0
+	}(), time.Now().Unix(), t.ID)
+	return err
+}
+
+func (s *MessageStore) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM triggers WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, id)
+	return err
 }
