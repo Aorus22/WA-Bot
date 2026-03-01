@@ -13,7 +13,6 @@ import (
 )
 
 type HandlerUseCase struct {
-	StickerUC *StickerUseCase
 	PDFUC     *PDFUseCase
 	TokenUC   *TokenUseCase
 	AdminUC   *AdminUseCase
@@ -22,9 +21,8 @@ type HandlerUseCase struct {
 	waClient  *whatsapp.WhatsAppClient
 }
 
-func NewHandlerUseCase(stickerUC *StickerUseCase, pdfUC *PDFUseCase, tokenUC *TokenUseCase, adminUC *AdminUseCase, waService *WhatsAppService, stateRepo repository.UserStateRepository, waClient *whatsapp.WhatsAppClient) *HandlerUseCase {
+func NewHandlerUseCase(pdfUC *PDFUseCase, tokenUC *TokenUseCase, adminUC *AdminUseCase, waService *WhatsAppService, stateRepo repository.UserStateRepository, waClient *whatsapp.WhatsAppClient) *HandlerUseCase {
 	return &HandlerUseCase{
-		StickerUC: stickerUC,
 		PDFUC:     pdfUC,
 		TokenUC:   tokenUC,
 		AdminUC:   adminUC,
@@ -33,7 +31,6 @@ func NewHandlerUseCase(stickerUC *StickerUseCase, pdfUC *PDFUseCase, tokenUC *To
 		waClient:  waClient,
 	}
 }
-
 type WhatsAppService struct {
 	waClient *whatsapp.WhatsAppClient
 	config   repository.ConfigRepository
@@ -74,11 +71,6 @@ func (uc *HandlerUseCase) HandleListMember(ctx interface{}, senderJID waTypes.JI
 func (uc *HandlerUseCase) HandlePDF(ctx interface{}, senderJID waTypes.JID, messageText string, role string, msg *entity.Message) {
 	ctxTyped := ctx.(context.Context)
 	uc.PDFUC.SendPDF(ctxTyped, senderJID, messageText, role, msg)
-}
-
-func (uc *HandlerUseCase) HandleSticker(ctx interface{}, senderJID waTypes.JID, messageText string, role string, msg *entity.Message) {
-	ctxTyped := ctx.(context.Context)
-	uc.StickerUC.ConvertToSticker(ctxTyped, senderJID, messageText, role, msg)
 }
 
 func (uc *HandlerUseCase) HandleHelp(ctx interface{}, senderJID waTypes.JID, role string, args map[string]interface{}) {

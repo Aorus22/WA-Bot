@@ -11,7 +11,7 @@ RUN go mod download
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o wa-bot
+    CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o wa-bot ./cmd/api/main.go
 
 # Runtime Stage
 FROM frolvlad/alpine-glibc:latest

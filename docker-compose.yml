@@ -1,0 +1,14 @@
+services:
+  wa-bot:
+    build: .
+    container_name: wa-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./media:/root/media
+      - ./database:/root/database
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Jakarta

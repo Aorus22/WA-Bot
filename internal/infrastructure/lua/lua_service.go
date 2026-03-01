@@ -14,9 +14,11 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+	"github.com/aorus22/instagramdl"
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
+	"wa-bot/internal/infrastructure/media"
 	"wa-bot/internal/infrastructure/util"
 	"wa-bot/internal/infrastructure/whatsapp"
 )
@@ -27,6 +29,7 @@ type LuaService struct {
 	stateRepo   repository.UserStateRepository
 	storage     repository.StorageRepository
 	gemini      *ai.GeminiService
+	mediaDown   *media.MediaDownloader
 }
 
 func NewLuaService(
@@ -35,6 +38,7 @@ func NewLuaService(
 	stateRepo repository.UserStateRepository,
 	storage repository.StorageRepository,
 	gemini *ai.GeminiService,
+	mediaDown *media.MediaDownloader,
 ) *LuaService {
 	return &LuaService{
 		waClient:    waClient,
@@ -42,6 +46,7 @@ func NewLuaService(
 		stateRepo:   stateRepo,
 		storage:     storage,
 		gemini:      gemini,
+		mediaDown:   mediaDown,
 	}
 }
 
@@ -129,8 +134,13 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
 	L.SetGlobal("fetch_to_file", L.NewFunction(s.luaFetchToFile))
 	L.SetGlobal("gemini_chat", L.NewFunction(s.luaGeminiChat))
+	L.SetGlobal("get_instagram_url", L.NewFunction(s.luaGetInstagramURL))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
 	L.SetGlobal("set_state", L.NewFunction(s.luaSetState))
+
+	// Media functions
+	L.SetGlobal("get_duration", L.NewFunction(s.luaGetDuration))
+	L.SetGlobal("get_mime_type", L.NewFunction(s.luaGetMimeType))
 
 	// JSON functions
 	L.SetGlobal("json_decode", L.NewFunction(s.luaJSONDecode))
@@ -146,6 +156,11 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 	// Command line functions
 	L.SetGlobal("ffmpeg", L.NewFunction(s.luaFFmpeg))
 	L.SetGlobal("ffprobe", L.NewFunction(s.luaFFprobe))
+	L.SetGlobal("ffprobe_json", L.NewFunction(s.luaFFprobeJSON))
+	L.SetGlobal("yt_dlp", L.NewFunction(s.luaYtDlp))
+	L.SetGlobal("gallery_dl", L.NewFunction(s.luaGalleryDlp))
+	L.SetGlobal("webpmux", L.NewFunction(s.luaWebpmux))
+	L.SetGlobal("whatsapp_exif", L.NewFunction(s.luaWhatsappExif))
 
 	if err := L.DoString(script); err != nil {
 		fmt.Printf("[LUA] Script Error: %v\n", err)
@@ -512,6 +527,20 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		L.Push(lua.LString("[MOCK GEMINI RESPONSE]"))
 		return 1
 	}))
+
+	L.SetGlobal("get_duration", L.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LNumber(10.5))
+		return 1
+	}))
+	L.SetGlobal("get_mime_type", L.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LString("image/jpeg"))
+		return 1
+	}))
+	L.SetGlobal("get_instagram_url", L.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LString("https://instagram.fsub1-1.fna.fbcdn.net/v/..."))
+		return 1
+	}))
+
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
 	L.SetGlobal("fetch_to_file", L.NewFunction(s.luaFetchToFile))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
@@ -525,6 +554,11 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	L.SetGlobal("storage_path", L.NewFunction(s.luaStoragePath))
 	L.SetGlobal("ffmpeg", L.NewFunction(s.luaFFmpeg))
 	L.SetGlobal("ffprobe", L.NewFunction(s.luaFFprobe))
+	L.SetGlobal("ffprobe_json", L.NewFunction(s.luaFFprobeJSON))
+	L.SetGlobal("yt_dlp", L.NewFunction(s.luaYtDlp))
+	L.SetGlobal("gallery_dl", L.NewFunction(s.luaGalleryDlp))
+	L.SetGlobal("webpmux", L.NewFunction(s.luaWebpmux))
+	L.SetGlobal("whatsapp_exif", L.NewFunction(s.luaWhatsappExif))
 
 	if err := L.DoString(script); err != nil {
 		result["error"] = err.Error()
@@ -534,6 +568,27 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	result["actions"] = actions
 
 	return result, nil
+}
+
+func (s *LuaService) luaGetInstagramURL(L *lua.LState) int {
+	url := L.CheckString(1)
+	fmt.Printf("[LUA] Fetching Instagram URL: %s\n", url)
+	urls, err := instagramdl.GetInstagramMediaURLs(url)
+	if err != nil {
+		fmt.Printf("[LUA] Instagram error: %v\n", err)
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	if len(urls) == 0 {
+		fmt.Printf("[LUA] Instagram error: no media found\n")
+		L.Push(lua.LNil)
+		L.Push(lua.LString("no media found in instagram post"))
+		return 2
+	}
+	fmt.Printf("[LUA] Instagram success: %s\n", urls[0])
+	L.Push(lua.LString(urls[0]))
+	return 1
 }
 
 func (s *LuaService) luaSendMedia(L *lua.LState) int {
@@ -674,6 +729,207 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 	default:
 		return nil
 	}
+}
+
+func (s *LuaService) luaDownloadMedia(L *lua.LState) int {
+	// Note: In runScript, this is overridden by a closure that captures the actual message.
+	// This method serves as a fallback or for shared structure.
+	L.Push(lua.LNil)
+	L.Push(lua.LString("download_media requires message context"))
+	return 2
+}
+
+func (s *LuaService) luaGetDuration(L *lua.LState) int {
+	path := L.CheckString(1)
+	safePath := s.storage.GetPath(path)
+	duration, err := s.mediaDown.GetDuration(safePath)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	L.Push(lua.LNumber(duration))
+	return 1
+}
+
+func (s *LuaService) luaGetMimeType(L *lua.LState) int {
+	path := L.CheckString(1)
+	safePath := s.storage.GetPath(path)
+	mime, err := s.mediaDown.GetMimeType(safePath)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	L.Push(lua.LString(mime))
+	return 1
+}
+
+func (s *LuaService) luaFFprobeJSON(L *lua.LState) int {
+	argsTable := L.CheckTable(1)
+	var args []string
+	argsTable.ForEach(func(k, v lua.LValue) {
+		args = append(args, v.String())
+	})
+
+	// Add JSON flags if not present
+	args = append(args, "-print_format", "json", "-show_format", "-show_streams")
+
+	cmd := exec.Command(util.GetBinaryPath("ffprobe"), args...)
+	output, err := cmd.Output()
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	var data interface{}
+	if err := json.Unmarshal(output, &data); err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	L.Push(s.goValueToLua(L, data))
+	return 1
+}
+
+func (s *LuaService) luaYtDlp(L *lua.LState) int {
+	argsTable := L.CheckTable(1)
+	var args []string
+	argsTable.ForEach(func(k, v lua.LValue) {
+		args = append(args, v.String())
+	})
+
+	// Security: Resolve file paths in common flags
+	for i, arg := range args {
+		if (arg == "-o" || arg == "--output" || arg == "--cookies") && i+1 < len(args) {
+			args[i+1] = s.storage.GetPath(args[i+1])
+		}
+	}
+
+	cmd := exec.Command(util.GetBinaryPath("yt-dlp"), args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	output, err := cmd.Output()
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(fmt.Sprintf("%s", stderr.String())))
+		return 2
+	}
+
+	L.Push(lua.LString(string(output)))
+	return 1
+}
+
+func (s *LuaService) luaGalleryDlp(L *lua.LState) int {
+	argsTable := L.CheckTable(1)
+	var args []string
+	argsTable.ForEach(func(k, v lua.LValue) {
+		args = append(args, v.String())
+	})
+
+	// Security: Force directory to storage or resolve specific flags
+	hasDir := false
+	for i, arg := range args {
+		if arg == "-D" || arg == "--directory" {
+			if i+1 < len(args) {
+				args[i+1] = s.storage.GetPath(args[i+1])
+				hasDir = true
+			}
+		}
+		if arg == "--cookies" && i+1 < len(args) {
+			args[i+1] = s.storage.GetPath(args[i+1])
+		}
+	}
+
+	if !hasDir {
+		args = append(args, "-D", s.storage.GetPath(""))
+	}
+
+	cmd := exec.Command(util.GetBinaryPath("gallery-dl"), args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	output, err := cmd.Output()
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(fmt.Sprintf("%s", stderr.String())))
+		return 2
+	}
+
+	L.Push(lua.LString(string(output)))
+	return 1
+}
+
+func (s *LuaService) luaWebpmux(L *lua.LState) int {
+	argsTable := L.CheckTable(1)
+	var args []string
+	argsTable.ForEach(func(k, v lua.LValue) {
+		args = append(args, v.String())
+	})
+
+	// Security: Resolve paths in args if they look like filenames
+	for i, arg := range args {
+		if !strings.HasPrefix(arg, "-") && len(arg) > 0 {
+			// If it's a file argument, make it safe
+			if _, err := os.Stat(s.storage.GetPath(arg)); err == nil {
+				args[i] = s.storage.GetPath(arg)
+			}
+		}
+	}
+
+	cmd := exec.Command(util.GetBinaryPath("webpmux"), args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	output, err := cmd.Output()
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(fmt.Sprintf("%v: %s", err, stderr.String())))
+		return 2
+	}
+
+	L.Push(lua.LString(string(output)))
+	return 1
+}
+
+func (s *LuaService) luaWhatsappExif(L *lua.LState) int {
+	packName := L.CheckString(1)
+	author := L.CheckString(2)
+
+	// WhatsApp Sticker Exif Format (TIFF based)
+	startingBytes := []byte{0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00}
+	endingBytes := []byte{0x16, 0x00, 0x00, 0x00}
+
+	meta := map[string]interface{}{
+		"sticker-pack-id":        "site.alyza.lua",
+		"sticker-pack-name":      packName,
+		"sticker-pack-publisher": author,
+	}
+	jsonBytes, _ := json.Marshal(meta)
+
+	// Length of JSON must be in LittleEndian (4 bytes)
+	lenBuf := make([]byte, 4)
+	importBinary := func() {
+		// We'll use a manual approach to avoid complex imports if possible
+		length := uint32(len(jsonBytes))
+		lenBuf[0] = byte(length)
+		lenBuf[1] = byte(length >> 8)
+		lenBuf[2] = byte(length >> 16)
+		lenBuf[3] = byte(length >> 24)
+	}
+	importBinary()
+
+	var b bytes.Buffer
+	b.Write(startingBytes)
+	b.Write(lenBuf)
+	b.Write(endingBytes)
+	b.Write(jsonBytes)
+
+	L.Push(lua.LString(b.String()))
+	return 1
 }
 
 func (s *LuaService) luaGeminiChat(L *lua.LState) int {

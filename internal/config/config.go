@@ -135,11 +135,10 @@ func InitializeApp() (*App, error) {
 
 	waService := usecase.NewWhatsAppService(waClient, cfg)
 
-	stickerUC := usecase.NewStickerUseCase(waClient, mediaDownloader, stateRepo, cfg, storageRepo)
 	pdfUC := usecase.NewPDFUseCase(waClient, apiRepository, geminiService, stateRepo, storageRepo)
 	tokenUC := usecase.NewTokenUseCase(waClient, apiRepository, stateRepo, cfg)
 	adminUC := usecase.NewAdminUseCase(waClient, apiRepository, cfg)
-	handlerUC := usecase.NewHandlerUseCase(stickerUC, pdfUC, tokenUC, adminUC, waService, stateRepo, waClient)
+	handlerUC := usecase.NewHandlerUseCase(pdfUC, tokenUC, adminUC, waService, stateRepo, waClient)
 
 	deliveryWaService := whatsapp.NewWhatsAppService(waClient, cfg)
 	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient, storageRepo)
@@ -163,7 +162,7 @@ func InitializeApp() (*App, error) {
 	}
 
 	// Initialize Lua Service
-	luaService := lua.NewLuaService(waClient, appStore, stateRepo, storageRepo, geminiService)
+	luaService := lua.NewLuaService(waClient, appStore, stateRepo, storageRepo, geminiService, mediaDownloader)        
 	eventHandler.SetLuaService(luaService)
 	httpServer.SetLuaService(luaService)
 	httpServer.SetTriggerRepo(appStore)

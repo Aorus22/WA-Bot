@@ -3,7 +3,6 @@ module wa-bot
 go 1.24.2
 
 require (
-	github.com/aorus22/instagramdl v0.0.0-20250413042826-610b92f59faf
 	github.com/google/generative-ai-go v0.20.1
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
@@ -12,6 +11,7 @@ require (
 	github.com/mdp/qrterminal v1.0.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/cors v1.11.1
+	github.com/yuin/gopher-lua v1.1.1
 	go.mau.fi/whatsmeow v0.0.0-20251120135021-071293c6b9f0
 	google.golang.org/api v0.256.0
 	google.golang.org/protobuf v1.36.10
@@ -25,6 +25,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/longrunning v0.7.0 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/aorus22/instagramdl v0.0.0-20250413042826-610b92f59faf // indirect
 	github.com/beeper/argo-go v1.1.2 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
@@ -40,7 +41,6 @@ require (
 	github.com/petermattis/goid v0.0.0-20251121121749-a11dd1a45f9a // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
 	github.com/vektah/gqlparser/v2 v2.5.31 // indirect
-	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.mau.fi/libsignal v0.2.1 // indirect
 	go.mau.fi/util v0.9.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

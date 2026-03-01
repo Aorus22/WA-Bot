@@ -380,11 +380,9 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 	}
 
 	// Command patterns
-	stickerRegex := regexp.MustCompile(`^!sticker(\s+\S+)*$`)
 	pdfRegex := regexp.MustCompile(`^!pdf\s+\S+$`)
 	answerPdfRegex := regexp.MustCompile(`^!answer(\s+\S+)*$`)
 	geminiRegex := regexp.MustCompile(`^!gemini(\s+\S+)*$`)
-
 	args := map[string]interface{}{
 		"senderJID":    senderJID,
 		"groupName":    "",
@@ -412,8 +410,6 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 		h.handlerUC.HandlePDF(ctx, senderJID, messageText, role, msg)
 	case geminiRegex.MatchString(messageText):
 		h.handlerUC.HandlePDF(ctx, senderJID, messageText, role, msg)
-	case stickerRegex.MatchString(messageText):
-		h.handlerUC.HandleSticker(ctx, senderJID, messageText, role, msg)
 	case messageText == "!help":
 		h.handlerUC.HandleHelp(ctx, senderJID, role, args)
 	default:
@@ -525,7 +521,6 @@ type HandlerUseCaseInterface interface {
 	HandleListMapel(ctx interface{}, senderJID waTypes.JID, role string)
 	HandleListMember(ctx interface{}, senderJID waTypes.JID, role string)
 	HandlePDF(ctx interface{}, senderJID waTypes.JID, messageText string, role string, msg *entity.Message)
-	HandleSticker(ctx interface{}, senderJID waTypes.JID, messageText string, role string, msg *entity.Message)
 	HandleHelp(ctx interface{}, senderJID waTypes.JID, role string, args map[string]interface{})
 	HandleCancel(senderJID string)
 	HandlePendingToken(ctx interface{}, senderJID waTypes.JID, messageText string)

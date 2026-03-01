@@ -2,19 +2,13 @@ package media
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/aorus22/instagramdl"
-
 	"wa-bot/internal/domain/repository"
-	"wa-bot/internal/domain/valueobject"
 	"wa-bot/internal/infrastructure/util"
 )
 
@@ -29,8 +23,6 @@ func NewMediaDownloader(storage repository.StorageRepository) *MediaDownloader {
 		storage:   storage,
 	}
 }
-
-var ErrorNotSupportedLink = errors.New("link not supported")
 
 func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (string, string, error) {
 	currentTime := fmt.Sprintf("%d", time.Now().UnixMilli())
@@ -103,56 +95,7 @@ func (m *MediaDownloader) DownloadFromURL(ctx context.Context, url string) (stri
 		return fullPath, "", err
 	}
 
-	if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "video/") {
-		m.storage.Delete(ctx, mediaPath)
-		return mediaPath, "", ErrorNotSupportedLink
-	}
-
 	return mediaPath, mimeType, nil
-}
-
-func (m *MediaDownloader) GetInstagramDirectURL(url string, page int) (string, error) {
-	urls, err := instagramdl.GetInstagramMediaURLs(url)
-	if err != nil || len(urls) == 0 {
-		return "", fmt.Errorf("failed to get direct url")
-	}
-
-	if len(urls) > 1 {
-		if page <= 0 {
-			return "", errors.New("no instagram page number given")
-		}
-		if page > len(urls) {
-			return "", errors.New("given page exceeded")
-		}
-		return urls[page-1], nil
-	}
-
-	return urls[0], nil
-}
-
-func (m *MediaDownloader) GetLinkFromString(input string) (string, error) {
-	urlRegex := regexp.MustCompile(`^(https?:\/\/)?([\w-]+\.)+[\w-]+(:\d+)?(\/[\w\-\.~!*'();:@&=+$,/?%#]*)?$`)
-	words := strings.Split(input, " ")
-	for _, word := range words {
-		if urlRegex.MatchString(word) {
-			return word, nil
-		}
-	}
-	return "", fmt.Errorf("no link found / invalid link")
-}
-
-func (m *MediaDownloader) GetPageFromMessage(messageText string) int {
-	re := regexp.MustCompile(`\s+page=(\d+)(\s+|$)`)
-	matches := re.FindStringSubmatch(messageText)
-
-	if len(matches) < 2 {
-		return 0
-	}
-	num, err := strconv.Atoi(matches[1])
-	if err != nil {
-		return 0
-	}
-	return num
 }
 
 func (m *MediaDownloader) GetDuration(path string) (float64, error) {
@@ -161,32 +104,4 @@ func (m *MediaDownloader) GetDuration(path string) (float64, error) {
 
 func (m *MediaDownloader) GetMimeType(filePath string) (string, error) {
 	return m.converter.GetMimeType(filePath)
-}
-
-func (m *MediaDownloader) IsValidTimeFormat(t string) bool {
-	return m.converter.IsValidTimeFormat(t)
-}
-
-func (m *MediaDownloader) ParseTimeFromString(t string) float64 {
-	return m.converter.ParseTimeFromString(t)
-}
-
-func (m *MediaDownloader) WriteWebpExif(ctx context.Context, input, packName, author string) (string, error) {
-	return m.converter.WriteWebpExif(ctx, input, packName, author)
-}
-
-func (m *MediaDownloader) WriteWebpExifBytes(ctx context.Context, input []byte, packName, author string) ([]byte, error) {
-	return input, nil
-}
-
-func (m *MediaDownloader) ConvertToWebP(ctx context.Context, input string, opt *valueobject.StickerOptions) (string, error) {
-	return m.converter.ConvertToWebP(ctx, input, opt)
-}
-
-func (m *MediaDownloader) ConvertToWebpBytes(ctx context.Context, input []byte, opt *valueobject.StickerOptions) ([]byte, error) {
-	return input, nil
-}
-
-func (m *MediaDownloader) GetMediaDuration(media []byte) (float64, error) {
-	return 0, nil
 }
