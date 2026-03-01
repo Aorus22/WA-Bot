@@ -11,6 +11,8 @@ type Message struct {
 	SenderJID string
 	ChatID    string
 	Text      string
+	Type      string
+	MediaURL  string
 	Media     *Media
 	VMessage  *waProto.Message
 	Timestamp time.Time

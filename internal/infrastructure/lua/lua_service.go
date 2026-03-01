@@ -86,8 +86,14 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 	L.RawSet(msgTable, lua.LString("sender"), lua.LString(msg.SenderJID))
 	L.RawSet(msgTable, lua.LString("chat_id"), lua.LString(msg.ChatID))
 	L.RawSet(msgTable, lua.LString("content"), lua.LString(msg.Text))
+	L.RawSet(msgTable, lua.LString("type"), lua.LString(msg.Type))
+	L.RawSet(msgTable, lua.LString("media_url"), lua.LString(msg.MediaURL))
 	L.RawSet(msgTable, lua.LString("timestamp"), lua.LNumber(msg.Timestamp.Unix()))
 	L.RawSet(msgTable, lua.LString("is_group"), lua.LBool(msg.IsGroup))
+	
+	isMedia := msg.Type == "image" || msg.Type == "video" || msg.Type == "sticker" || msg.Type == "document"
+	L.RawSet(msgTable, lua.LString("is_media"), lua.LBool(isMedia))
+	
 	L.SetGlobal("msg", msgTable)
 
 	luaMatches := L.NewTable()
@@ -100,6 +106,26 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 	L.SetGlobal("send_text", L.NewFunction(s.luaSendText))
 	L.SetGlobal("send_sticker", L.NewFunction(s.luaSendSticker))
 	L.SetGlobal("send_media", L.NewFunction(s.luaSendMedia))
+	
+	// download_media needs msg context, so we use a closure here
+	L.SetGlobal("download_media", L.NewFunction(func(L *lua.LState) int {
+		filename := L.CheckString(1)
+		data, _, err := s.waClient.DownloadMedia(context.Background(), msg)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		savedPath, err := s.storage.Save(context.Background(), filename, bytes.NewReader(data))
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LString(savedPath))
+		return 1
+	}))
+
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
 	L.SetGlobal("fetch_to_file", L.NewFunction(s.luaFetchToFile))
 	L.SetGlobal("gemini_chat", L.NewFunction(s.luaGeminiChat))
@@ -440,6 +466,8 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	L.RawSet(msgTable, lua.LString("sender"), lua.LString("628123456789@s.whatsapp.net"))
 	L.RawSet(msgTable, lua.LString("chat_id"), lua.LString("628123456789@s.whatsapp.net"))
 	L.RawSet(msgTable, lua.LString("content"), lua.LString(message))
+	L.RawSet(msgTable, lua.LString("type"), lua.LString("text"))
+	L.RawSet(msgTable, lua.LString("media_url"), lua.LString(""))
 	L.RawSet(msgTable, lua.LString("timestamp"), lua.LNumber(time.Now().Unix()))
 	L.RawSet(msgTable, lua.LString("is_group"), lua.LBool(false))
 	L.SetGlobal("msg", msgTable)
@@ -470,14 +498,20 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		actions = append(actions, fmt.Sprintf("Action: send_media(to: %s, type: %s, url: %s)", target, mType, url))
 		return 0
 	}))
+	L.SetGlobal("download_media", L.NewFunction(func(L *lua.LState) int {
+		filename := L.CheckString(1)
+		actions = append(actions, fmt.Sprintf("Action: download_media(filename: %s)", filename))
+		L.Push(lua.LString("media/" + filename))
+		return 1
+	}))
 	L.SetGlobal("gemini_chat", L.NewFunction(func(L *lua.LState) int {
 		prompt := L.CheckString(1)
 		modelName := L.OptString(2, "gemini-2.0-flash")
-		actions = append(actions, fmt.Sprintf("Action: gemini_chat(prompt: %s, model: %s)", prompt, modelName))
+		filePath := L.OptString(3, "")
+		actions = append(actions, fmt.Sprintf("Action: gemini_chat(prompt: %s, model: %s, file: %s)", prompt, modelName, filePath))
 		L.Push(lua.LString("[MOCK GEMINI RESPONSE]"))
 		return 1
 	}))
-
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
 	L.SetGlobal("fetch_to_file", L.NewFunction(s.luaFetchToFile))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
@@ -645,6 +679,7 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 	prompt := L.CheckString(1)
 	modelName := L.OptString(2, "gemini-2.0-flash")
+	filePath := L.OptString(3, "")
 
 	if s.gemini == nil {
 		L.Push(lua.LNil)
@@ -653,7 +688,16 @@ func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 	}
 
 	ctx := context.Background()
-	res, err := s.gemini.GenerateText(ctx, modelName, prompt)
+	var res string
+	var err error
+
+	if filePath != "" {
+		safePath := s.storage.GetPath(filePath)
+		res, err = s.gemini.GenerateWithFile(ctx, modelName, prompt, safePath)
+	} else {
+		res, err = s.gemini.GenerateText(ctx, modelName, prompt)
+	}
+
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))

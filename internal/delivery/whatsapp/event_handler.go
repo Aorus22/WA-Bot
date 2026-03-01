@@ -136,6 +136,8 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 		messageText = *evt.Message.ImageMessage.Caption
 	} else if evt.Message.VideoMessage != nil && evt.Message.VideoMessage.Caption != nil {
 		messageText = *evt.Message.VideoMessage.Caption
+	} else if evt.Message.DocumentMessage != nil && evt.Message.DocumentMessage.Caption != nil {
+		messageText = *evt.Message.DocumentMessage.Caption
 	} else {
 		messageText = evt.Message.GetConversation()
 	}
@@ -328,10 +330,29 @@ func (h *WhatsAppEventHandler) getQuickRole(senderJID string) string {
 }
 
 func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.Message, senderJID waTypes.JID, messageText, chatID, role string) {
+	msgType := "text"
+	mediaURL := ""
+
+	if evt.Message.GetStickerMessage() != nil {
+		msgType = "sticker"
+		mediaURL = "/media/stickers/" + evt.Info.ID + ".webp"
+	} else if evt.Message.GetImageMessage() != nil {
+		msgType = "image"
+		mediaURL = "/media/images/" + evt.Info.ID + ".jpg"
+	} else if evt.Message.GetVideoMessage() != nil {
+		msgType = "video"
+		mediaURL = "/media/videos/" + evt.Info.ID + ".mp4"
+	} else if evt.Message.GetDocumentMessage() != nil {
+		msgType = "document"
+		mediaURL = "/media/documents/" + evt.Info.ID + "_" + evt.Message.GetDocumentMessage().GetFileName()
+	}
+
 	msg := &entity.Message{
 		ID:        evt.Info.ID,
 		ChatID:    chatID,
 		Text:      messageText,
+		Type:      msgType,
+		MediaURL:  mediaURL,
 		VMessage:  evt.Message,
 		Timestamp: evt.Info.Timestamp,
 		IsGroup:   evt.Info.IsGroup,

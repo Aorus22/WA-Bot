@@ -319,6 +319,9 @@ func (w *WhatsAppClient) DownloadMedia(ctx context.Context, msg *entity.Message)
 	} else if msg.VMessage.GetStickerMessage() != nil {
 		downloadableMedia = msg.VMessage.GetStickerMessage()
 		isAnimated = msg.VMessage.GetStickerMessage().GetIsAnimated()
+	} else if msg.VMessage.GetDocumentMessage() != nil {
+		downloadableMedia = msg.VMessage.GetDocumentMessage()
+		isAnimated = false
 	}
 
 	if downloadableMedia == nil {

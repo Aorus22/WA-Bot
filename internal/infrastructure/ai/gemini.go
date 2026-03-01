@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
@@ -83,6 +84,50 @@ func (g *GeminiService) GenerateAnswer(ctx context.Context, modelName, filepath,
 		for _, part := range cand.Content.Parts {
 			if text, ok := part.(genai.Text); ok {
 				answer += string(text)
+			}
+		}
+	}
+
+	return answer, nil
+}
+
+func (g *GeminiService) GenerateWithFile(ctx context.Context, modelName, promptStr, filepathStr string) (string, error) {
+	if g.apiKey == "" {
+		return "", fmt.Errorf("GEMINI_API_KEY not found")
+	}
+
+	// 1. Get file from storage
+	file, err := g.storage.Get(ctx, filepathStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to get file from storage: %w", err)
+	}
+	defer file.Close()
+
+	// 2. Upload file to Gemini
+	uploadName := fmt.Sprintf("upload-%d", time.Now().UnixNano())
+	uploadedFile, err := g.client.UploadFile(ctx, "", file, &genai.UploadFileOptions{DisplayName: uploadName})
+	if err != nil {
+		fmt.Printf("[GEMINI] Upload error: %v\n", err)
+		return "", fmt.Errorf("failed to upload file to gemini: %w", err)
+	}
+	fmt.Printf("[GEMINI] File uploaded: %s\n", uploadedFile.URI)
+	defer g.client.DeleteFile(ctx, uploadedFile.Name)
+
+	// 3. Generate content
+	model := g.client.GenerativeModel(modelName)
+	resp, err := model.GenerateContent(ctx, genai.Text(promptStr), genai.FileData{URI: uploadedFile.URI})
+	if err != nil {
+		fmt.Printf("[GEMINI] Generation error: %v\n", err)
+		return "", fmt.Errorf("failed to generate content: %w", err)
+	}
+
+	answer := ""
+	for _, cand := range resp.Candidates {
+		if cand.Content != nil {
+			for _, part := range cand.Content.Parts {
+				if text, ok := part.(genai.Text); ok {
+					answer += string(text)
+				}
 			}
 		}
 	}
