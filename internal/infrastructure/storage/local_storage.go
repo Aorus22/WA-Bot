@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"wa-bot/internal/domain/repository"
 )
 
@@ -67,12 +68,36 @@ func (l *LocalStorage) Delete(ctx context.Context, path string) error {
 }
 
 func (l *LocalStorage) GetPath(path string) string {
+	// 1. Get absolute paths for comparison
+	absBase, _ := filepath.Abs(l.basePath)
+	
+	// Try to see if the path is already absolute or relative to the current working directory
+	var absTarget string
 	if filepath.IsAbs(path) {
-		return path
+		absTarget = path
+	} else {
+		// Join with current working directory to get an absolute path for comparison
+		cwd, _ := os.Getwd()
+		absTarget = filepath.Join(cwd, path)
 	}
-	// If path already has basePath as prefix, return it as is or clean it
-	// But to be safe and simple, we assume 'path' is the relative key.
-	return filepath.Join(l.basePath, path)
+
+	// 2. Check if the target is already inside our basePath
+	rel, err := filepath.Rel(absBase, absTarget)
+	if err == nil && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+		// It's already inside the storage directory, return as is (but cleaned)
+		return filepath.Clean(absTarget)
+	}
+
+	// 3. Otherwise, join it with basePath
+	fullPath := filepath.Join(l.basePath, path)
+
+	// 4. Verify the final result is still inside for security
+	rel, err = filepath.Rel(l.basePath, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return filepath.Join(l.basePath, filepath.Base(path))
+	}
+
+	return fullPath
 }
 
 func (l *LocalStorage) Exists(path string) bool {

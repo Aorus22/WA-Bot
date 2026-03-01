@@ -9,6 +9,7 @@ import (
 type Message struct {
 	ID        string
 	SenderJID string
+	ChatID    string
 	Text      string
 	Media     *Media
 	VMessage  *waProto.Message

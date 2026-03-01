@@ -35,7 +35,7 @@ type WhatsAppEventHandler struct {
 }
 
 type LuaService interface {
-	ExecuteTriggers(ctx context.Context, senderJID string, messageText string) (bool, error)
+	ExecuteTriggers(ctx context.Context, msg *entity.Message) (bool, error)
 	TestTrigger(ctx context.Context, pattern, script, message string) (map[string]interface{}, error)
 }
 
@@ -329,6 +329,9 @@ func (h *WhatsAppEventHandler) getQuickRole(senderJID string) string {
 
 func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.Message, senderJID waTypes.JID, messageText, chatID, role string) {
 	msg := &entity.Message{
+		ID:        evt.Info.ID,
+		ChatID:    chatID,
+		Text:      messageText,
 		VMessage:  evt.Message,
 		Timestamp: evt.Info.Timestamp,
 		IsGroup:   evt.Info.IsGroup,
@@ -337,7 +340,7 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 
 	// Check Lua Triggers
 	if h.luaService != nil {
-		if matched, err := h.luaService.ExecuteTriggers(ctx, senderJID.String(), messageText); err == nil && matched {
+		if matched, err := h.luaService.ExecuteTriggers(ctx, msg); err == nil && matched {
 			fmt.Printf("[LUA] Lua Trigger Matched for: %s\n", messageText)
 			return
 		}
