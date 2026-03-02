@@ -7,6 +7,7 @@ type Trigger struct {
 	Name      string    `json:"name"`
 	Pattern   string    `json:"pattern"`
 	Script    string    `json:"script"`
+	Priority  int       `json:"priority"`
 	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

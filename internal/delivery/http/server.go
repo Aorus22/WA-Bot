@@ -86,8 +86,8 @@ func (s *HTTPServer) Start() error {
 	api.HandleFunc("/triggers", s.handleCreateTrigger).Methods("POST", "OPTIONS")
 	api.HandleFunc("/triggers/test", s.handleTestTrigger).Methods("POST", "OPTIONS")
 	api.HandleFunc("/triggers/{id}", s.handleUpdateTrigger).Methods("PUT", "OPTIONS")
+	api.HandleFunc("/triggers", s.handleDeleteAllTriggers).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/triggers/{id}", s.handleDeleteTrigger).Methods("DELETE", "OPTIONS")
-
 	// Media files - custom handler to URL decode filenames
 	api.PathPrefix("/media/").Handler(http.StripPrefix("/api/media/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// URL decode the filename
@@ -892,8 +892,22 @@ func (s *HTTPServer) handleDeleteTrigger(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
-func (s *HTTPServer) handleTestTrigger(w http.ResponseWriter, r *http.Request) {
+func (s *HTTPServer) handleDeleteAllTriggers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := s.triggerRepo.DeleteAll(r.Context()); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *HTTPServer) handleTestTrigger(w http.ResponseWriter, r *http.Request) {	w.Header().Set("Content-Type", "application/json")
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return

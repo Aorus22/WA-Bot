@@ -41,6 +41,7 @@ func (s *AppStore) init() error {
 			name TEXT,
 			pattern TEXT,
 			script TEXT,
+			priority INTEGER DEFAULT 0,
 			is_active INTEGER DEFAULT 1,
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
 			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
@@ -53,6 +54,9 @@ func (s *AppStore) init() error {
 		}
 	}
 
+	// Add priority column if it doesn't exist (for existing databases)
+	_, _ = s.db.Exec("ALTER TABLE triggers ADD COLUMN priority INTEGER DEFAULT 0")
+
 	return nil
 }
 
@@ -61,7 +65,21 @@ func (s *AppStore) GetAll(ctx context.Context) ([]*entity.Trigger, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, pattern, script, is_active, created_at, updated_at FROM triggers ORDER BY created_at DESC`
+	// Logic:
+	// Tier 1: priority > 0 (sorted 1, 2, 3...)
+	// Tier 2: priority = 0 (default)
+	// Tier 3: priority < 0 (sorted -2, -1)
+	query := `
+		SELECT id, name, pattern, script, priority, is_active, created_at, updated_at 
+		FROM triggers 
+		ORDER BY 
+			(CASE 
+				WHEN priority > 0 THEN 1 
+				WHEN priority = 0 THEN 2 
+				ELSE 3 
+			END) ASC, 
+			priority ASC, 
+			created_at DESC`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -73,7 +91,7 @@ func (s *AppStore) GetAll(ctx context.Context) ([]*entity.Trigger, error) {
 		var t entity.Trigger
 		var isActive int
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &isActive, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &t.Priority, &isActive, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.IsActive = isActive == 1
@@ -88,11 +106,11 @@ func (s *AppStore) GetByID(ctx context.Context, id string) (*entity.Trigger, err
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, pattern, script, is_active, created_at, updated_at FROM triggers WHERE id = ?`
+	query := `SELECT id, name, pattern, script, priority, is_active, created_at, updated_at FROM triggers WHERE id = ?`
 	var t entity.Trigger
 	var isActive int
 	var createdAt, updatedAt int64
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &isActive, &createdAt, &updatedAt)
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &t.Priority, &isActive, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -109,9 +127,9 @@ func (s *AppStore) Create(ctx context.Context, t *entity.Trigger) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO triggers (id, name, pattern, script, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO triggers (id, name, pattern, script, priority, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().Unix()
-	_, err := s.db.ExecContext(ctx, query, t.ID, t.Name, t.Pattern, t.Script, func() int {
+	_, err := s.db.ExecContext(ctx, query, t.ID, t.Name, t.Pattern, t.Script, t.Priority, func() int {
 		if t.IsActive {
 			return 1
 		}
@@ -124,8 +142,8 @@ func (s *AppStore) Update(ctx context.Context, t *entity.Trigger) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `UPDATE triggers SET name = ?, pattern = ?, script = ?, is_active = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, t.Name, t.Pattern, t.Script, func() int {
+	query := `UPDATE triggers SET name = ?, pattern = ?, script = ?, priority = ?, is_active = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, t.Name, t.Pattern, t.Script, t.Priority, func() int {
 		if t.IsActive {
 			return 1
 		}
@@ -133,13 +151,21 @@ func (s *AppStore) Update(ctx context.Context, t *entity.Trigger) error {
 	}(), time.Now().Unix(), t.ID)
 	return err
 }
-
 func (s *AppStore) Delete(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	query := `DELETE FROM triggers WHERE id = ?`
 	_, err := s.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (s *AppStore) DeleteAll(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM triggers`
+	_, err := s.db.ExecContext(ctx, query)
 	return err
 }
 

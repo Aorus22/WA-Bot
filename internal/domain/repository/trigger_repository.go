@@ -11,4 +11,5 @@ type TriggerRepository interface {
 	Create(ctx context.Context, trigger *entity.Trigger) error
 	Update(ctx context.Context, trigger *entity.Trigger) error
 	Delete(ctx context.Context, id string) error
+	DeleteAll(ctx context.Context) error
 }
