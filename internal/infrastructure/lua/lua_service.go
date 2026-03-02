@@ -15,6 +15,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"github.com/aorus22/instagramdl"
+	waTypes "go.mau.fi/whatsmeow/types"
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
@@ -68,6 +69,7 @@ func (s *LuaService) ExecuteTriggers(ctx context.Context, msg *entity.Message) (
 		}
 
 		if re.MatchString(msg.Text) {
+			fmt.Printf("[LUA] Pattern '%s' matched for message: %s\n", t.Pattern, msg.Text)
 			matches := re.FindStringSubmatch(msg.Text)
 			go s.runScript(t.Script, msg, matches)
 			return true, nil
@@ -89,6 +91,7 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 	msgTable := L.NewTable()
 	L.RawSet(msgTable, lua.LString("id"), lua.LString(msg.ID))
 	L.RawSet(msgTable, lua.LString("sender"), lua.LString(msg.SenderJID))
+	L.RawSet(msgTable, lua.LString("lid"), lua.LString(msg.SenderLID))
 	L.RawSet(msgTable, lua.LString("chat_id"), lua.LString(msg.ChatID))
 	L.RawSet(msgTable, lua.LString("content"), lua.LString(msg.Text))
 	L.RawSet(msgTable, lua.LString("type"), lua.LString(msg.Type))
@@ -138,11 +141,12 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
 	L.SetGlobal("set_state", L.NewFunction(s.luaSetState))
 
-	// Media functions
+	L.SetGlobal("get_groups", L.NewFunction(s.luaGetGroups))
+	L.SetGlobal("get_participants", L.NewFunction(s.luaGetParticipants))
+
 	L.SetGlobal("get_duration", L.NewFunction(s.luaGetDuration))
 	L.SetGlobal("get_mime_type", L.NewFunction(s.luaGetMimeType))
 
-	// JSON functions
 	L.SetGlobal("json_decode", L.NewFunction(s.luaJSONDecode))
 	L.SetGlobal("json_encode", L.NewFunction(s.luaJSONEncode))
 
@@ -170,7 +174,6 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 func (s *LuaService) luaSendText(L *lua.LState) int {
 	target := L.CheckString(1)
 	text := L.CheckString(2)
-
 	_, err := s.waClient.SendMessage(context.Background(), target, text, true)
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
@@ -182,10 +185,8 @@ func (s *LuaService) luaSendText(L *lua.LState) int {
 func (s *LuaService) luaSendSticker(L *lua.LState) int {
 	target := L.CheckString(1)
 	urlOrPath := L.CheckString(2)
-
 	var data []byte
 	var err error
-
 	if strings.HasPrefix(urlOrPath, "http://") || strings.HasPrefix(urlOrPath, "https://") {
 		resp, hErr := http.Get(urlOrPath)
 		if hErr != nil {
@@ -198,12 +199,10 @@ func (s *LuaService) luaSendSticker(L *lua.LState) int {
 		safePath := s.storage.GetPath(urlOrPath)
 		data, err = os.ReadFile(safePath)
 	}
-
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
 		return 1
 	}
-
 	_, err = s.waClient.SendSticker(context.Background(), target, data, false, urlOrPath, true)
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
@@ -211,6 +210,7 @@ func (s *LuaService) luaSendSticker(L *lua.LState) int {
 	}
 	return 0
 }
+
 func (s *LuaService) luaGetState(L *lua.LState) int {
 	jid := L.CheckString(1)
 	state, _ := s.stateRepo.GetUserState(jid)
@@ -228,10 +228,8 @@ func (s *LuaService) luaSetState(L *lua.LState) int {
 func (s *LuaService) luaFetch(L *lua.LState) int {
 	url := L.CheckString(1)
 	options := L.OptTable(2, nil)
-
 	method := "GET"
 	var body io.Reader
-
 	if options != nil {
 		if m := options.RawGet(lua.LString("method")); m != lua.LNil {
 			method = m.String()
@@ -240,14 +238,12 @@ func (s *LuaService) luaFetch(L *lua.LState) int {
 			body = strings.NewReader(b.String())
 		}
 	}
-
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-
 	if options != nil {
 		if h := options.RawGet(lua.LString("headers")); h.Type() == lua.LTTable {
 			h.(*lua.LTable).ForEach(func(k, v lua.LValue) {
@@ -255,7 +251,6 @@ func (s *LuaService) luaFetch(L *lua.LState) int {
 			})
 		}
 	}
-
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -264,13 +259,10 @@ func (s *LuaService) luaFetch(L *lua.LState) int {
 		return 2
 	}
 	defer resp.Body.Close()
-
 	respBody, _ := io.ReadAll(resp.Body)
-
 	resTable := L.NewTable()
 	L.RawSet(resTable, lua.LString("status"), lua.LNumber(resp.StatusCode))
 	L.RawSet(resTable, lua.LString("body"), lua.LString(string(respBody)))
-
 	L.Push(resTable)
 	return 1
 }
@@ -279,10 +271,8 @@ func (s *LuaService) luaFetchToFile(L *lua.LState) int {
 	url := L.CheckString(1)
 	filename := L.CheckString(2)
 	options := L.OptTable(3, nil)
-
 	method := "GET"
 	var body io.Reader
-
 	if options != nil {
 		if m := options.RawGet(lua.LString("method")); m != lua.LNil {
 			method = m.String()
@@ -291,14 +281,12 @@ func (s *LuaService) luaFetchToFile(L *lua.LState) int {
 			body = strings.NewReader(b.String())
 		}
 	}
-
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-
 	if options != nil {
 		if h := options.RawGet(lua.LString("headers")); h.Type() == lua.LTTable {
 			h.(*lua.LTable).ForEach(func(k, v lua.LValue) {
@@ -306,7 +294,6 @@ func (s *LuaService) luaFetchToFile(L *lua.LState) int {
 			})
 		}
 	}
-
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -315,25 +302,21 @@ func (s *LuaService) luaFetchToFile(L *lua.LState) int {
 		return 2
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode >= 400 {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("HTTP Error: %d", resp.StatusCode)))
 		return 2
 	}
-
 	_, err = s.storage.Save(context.Background(), filename, resp.Body)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-
 	resTable := L.NewTable()
 	L.RawSet(resTable, lua.LString("status"), lua.LNumber(resp.StatusCode))
 	L.RawSet(resTable, lua.LString("path"), lua.LString(s.storage.GetPath(filename)))
 	L.RawSet(resTable, lua.LString("filename"), lua.LString(filename))
-
 	L.Push(resTable)
 	return 1
 }
@@ -341,7 +324,6 @@ func (s *LuaService) luaFetchToFile(L *lua.LState) int {
 func (s *LuaService) luaStorageSave(L *lua.LState) int {
 	filename := L.CheckString(1)
 	content := L.CheckString(2)
-
 	_, err := s.storage.Save(context.Background(), filename, strings.NewReader(content))
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
@@ -352,7 +334,6 @@ func (s *LuaService) luaStorageSave(L *lua.LState) int {
 
 func (s *LuaService) luaStorageGet(L *lua.LState) int {
 	filename := L.CheckString(1)
-
 	reader, err := s.storage.Get(context.Background(), filename)
 	if err != nil {
 		L.Push(lua.LNil)
@@ -360,14 +341,12 @@ func (s *LuaService) luaStorageGet(L *lua.LState) int {
 		return 2
 	}
 	defer reader.Close()
-
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-
 	L.Push(lua.LString(string(data)))
 	return 1
 }
@@ -402,18 +381,15 @@ func (s *LuaService) luaFFmpeg(L *lua.LState) int {
 	argsTable.ForEach(func(k, v lua.LValue) {
 		args = append(args, v.String())
 	})
-
 	cmd := exec.Command(util.GetBinaryPath("ffmpeg"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-
 	output, err := cmd.Output()
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("%v: %s", err, stderr.String())))
 		return 2
 	}
-
 	L.Push(lua.LString(string(output)))
 	return 1
 }
@@ -424,43 +400,34 @@ func (s *LuaService) luaFFprobe(L *lua.LState) int {
 	argsTable.ForEach(func(k, v lua.LValue) {
 		args = append(args, v.String())
 	})
-
 	cmd := exec.Command(util.GetBinaryPath("ffprobe"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-
 	output, err := cmd.Output()
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("%v: %s", err, stderr.String())))
 		return 2
 	}
-
 	L.Push(lua.LString(string(output)))
 	return 1
 }
 
 func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message string) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
-
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid regex: %v", err)
 	}
-
 	matched := re.MatchString(message)
 	result["matched"] = matched
-
 	if !matched {
 		return result, nil
 	}
-
 	matches := re.FindStringSubmatch(message)
 	result["matches"] = matches
-
 	L := lua.NewState()
 	defer L.Close()
-
 	var logs []string
 	L.SetGlobal("print", L.NewFunction(func(L *lua.LState) int {
 		top := L.GetTop()
@@ -471,28 +438,25 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		logs = append(logs, strings.Join(line, "\t"))
 		return 0
 	}))
-
 	L.SetGlobal("sender", lua.LString("628123456789@s.whatsapp.net"))
 	L.SetGlobal("content", lua.LString(message))
-
-	// Inject entire message state as a table
 	msgTable := L.NewTable()
 	L.RawSet(msgTable, lua.LString("id"), lua.LString("ABC123456789"))
 	L.RawSet(msgTable, lua.LString("sender"), lua.LString("628123456789@s.whatsapp.net"))
+	L.RawSet(msgTable, lua.LString("lid"), lua.LString("628123456789@lid"))
 	L.RawSet(msgTable, lua.LString("chat_id"), lua.LString("628123456789@s.whatsapp.net"))
 	L.RawSet(msgTable, lua.LString("content"), lua.LString(message))
 	L.RawSet(msgTable, lua.LString("type"), lua.LString("text"))
 	L.RawSet(msgTable, lua.LString("media_url"), lua.LString(""))
 	L.RawSet(msgTable, lua.LString("timestamp"), lua.LNumber(time.Now().Unix()))
 	L.RawSet(msgTable, lua.LString("is_group"), lua.LBool(false))
+	L.RawSet(msgTable, lua.LString("is_media"), lua.LBool(false))
 	L.SetGlobal("msg", msgTable)
-
 	luaMatches := L.NewTable()
 	for i, m := range matches {
 		L.RawSet(luaMatches, lua.LNumber(i), lua.LString(m))
 	}
 	L.SetGlobal("matches", luaMatches)
-
 	var actions []string
 	L.SetGlobal("send_text", L.NewFunction(func(L *lua.LState) int {
 		target := L.CheckString(1)
@@ -527,7 +491,6 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		L.Push(lua.LString("[MOCK GEMINI RESPONSE]"))
 		return 1
 	}))
-
 	L.SetGlobal("get_duration", L.NewFunction(func(L *lua.LState) int {
 		L.Push(lua.LNumber(10.5))
 		return 1
@@ -537,10 +500,27 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 		return 1
 	}))
 	L.SetGlobal("get_instagram_url", L.NewFunction(func(L *lua.LState) int {
-		L.Push(lua.LString("https://instagram.fsub1-1.fna.fbcdn.net/v/..."))
+		L.Push(lua.LString("https://instagram.com/mock"))
 		return 1
 	}))
-
+	L.SetGlobal("get_groups", L.NewFunction(func(L *lua.LState) int {
+		t := L.NewTable()
+		g := L.NewTable()
+		L.RawSet(g, lua.LString("jid"), lua.LString("12345@g.us"))
+		L.RawSet(g, lua.LString("name"), lua.LString("Test Group"))
+		L.RawSet(t, lua.LNumber(1), g)
+		L.Push(t)
+		return 1
+	}))
+	L.SetGlobal("get_participants", L.NewFunction(func(L *lua.LState) int {
+		t := L.NewTable()
+		p := L.NewTable()
+		L.RawSet(p, lua.LString("jid"), lua.LString("628123456789@s.whatsapp.net"))
+		L.RawSet(p, lua.LString("is_admin"), lua.LBool(true))
+		L.RawSet(t, lua.LNumber(1), p)
+		L.Push(t)
+		return 1
+	}))
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
 	L.SetGlobal("fetch_to_file", L.NewFunction(s.luaFetchToFile))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
@@ -559,34 +539,27 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	L.SetGlobal("gallery_dl", L.NewFunction(s.luaGalleryDlp))
 	L.SetGlobal("webpmux", L.NewFunction(s.luaWebpmux))
 	L.SetGlobal("whatsapp_exif", L.NewFunction(s.luaWhatsappExif))
-
 	if err := L.DoString(script); err != nil {
 		result["error"] = err.Error()
 	}
-
 	result["logs"] = logs
 	result["actions"] = actions
-
 	return result, nil
 }
 
 func (s *LuaService) luaGetInstagramURL(L *lua.LState) int {
 	url := L.CheckString(1)
-	fmt.Printf("[LUA] Fetching Instagram URL: %s\n", url)
 	urls, err := instagramdl.GetInstagramMediaURLs(url)
 	if err != nil {
-		fmt.Printf("[LUA] Instagram error: %v\n", err)
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
 	if len(urls) == 0 {
-		fmt.Printf("[LUA] Instagram error: no media found\n")
 		L.Push(lua.LNil)
-		L.Push(lua.LString("no media found in instagram post"))
+		L.Push(lua.LString("no media found"))
 		return 2
 	}
-	fmt.Printf("[LUA] Instagram success: %s\n", urls[0])
 	L.Push(lua.LString(urls[0]))
 	return 1
 }
@@ -596,10 +569,8 @@ func (s *LuaService) luaSendMedia(L *lua.LState) int {
 	urlOrPath := L.CheckString(2)
 	mediaType := L.OptString(3, "image")
 	caption := L.OptString(4, "")
-
 	var data []byte
 	var err error
-
 	if strings.HasPrefix(urlOrPath, "http://") || strings.HasPrefix(urlOrPath, "https://") {
 		resp, hErr := http.Get(urlOrPath)
 		if hErr != nil {
@@ -609,16 +580,13 @@ func (s *LuaService) luaSendMedia(L *lua.LState) int {
 		defer resp.Body.Close()
 		data, err = io.ReadAll(resp.Body)
 	} else {
-		// Use storage gatekeeper
 		safePath := s.storage.GetPath(urlOrPath)
 		data, err = os.ReadFile(safePath)
 	}
-
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
 		return 1
 	}
-
 	ctx := context.Background()
 	var sendErr error
 	switch mediaType {
@@ -631,7 +599,6 @@ func (s *LuaService) luaSendMedia(L *lua.LState) int {
 	default:
 		sendErr = fmt.Errorf("unsupported media type: %s", mediaType)
 	}
-
 	if sendErr != nil {
 		L.Push(lua.LString(sendErr.Error()))
 		return 1
@@ -706,7 +673,6 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 				}
 			}
 		})
-
 		if isArr && maxKey > 0 {
 			arr := make([]interface{}, maxKey)
 			v.ForEach(func(k, val lua.LValue) {
@@ -714,7 +680,6 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 			})
 			return arr
 		}
-
 		res := make(map[string]interface{})
 		v.ForEach(func(k, val lua.LValue) {
 			res[k.String()] = s.luaValueToGo(val)
@@ -729,14 +694,6 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 	default:
 		return nil
 	}
-}
-
-func (s *LuaService) luaDownloadMedia(L *lua.LState) int {
-	// Note: In runScript, this is overridden by a closure that captures the actual message.
-	// This method serves as a fallback or for shared structure.
-	L.Push(lua.LNil)
-	L.Push(lua.LString("download_media requires message context"))
-	return 2
 }
 
 func (s *LuaService) luaGetDuration(L *lua.LState) int {
@@ -771,10 +728,7 @@ func (s *LuaService) luaFFprobeJSON(L *lua.LState) int {
 	argsTable.ForEach(func(k, v lua.LValue) {
 		args = append(args, v.String())
 	})
-
-	// Add JSON flags if not present
 	args = append(args, "-print_format", "json", "-show_format", "-show_streams")
-
 	cmd := exec.Command(util.GetBinaryPath("ffprobe"), args...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -782,14 +736,12 @@ func (s *LuaService) luaFFprobeJSON(L *lua.LState) int {
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-
 	var data interface{}
 	if err := json.Unmarshal(output, &data); err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-
 	L.Push(s.goValueToLua(L, data))
 	return 1
 }
@@ -800,25 +752,20 @@ func (s *LuaService) luaYtDlp(L *lua.LState) int {
 	argsTable.ForEach(func(k, v lua.LValue) {
 		args = append(args, v.String())
 	})
-
-	// Security: Resolve file paths in common flags
 	for i, arg := range args {
 		if (arg == "-o" || arg == "--output" || arg == "--cookies") && i+1 < len(args) {
 			args[i+1] = s.storage.GetPath(args[i+1])
 		}
 	}
-
 	cmd := exec.Command(util.GetBinaryPath("yt-dlp"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-
 	output, err := cmd.Output()
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("%s", stderr.String())))
 		return 2
 	}
-
 	L.Push(lua.LString(string(output)))
 	return 1
 }
@@ -829,8 +776,6 @@ func (s *LuaService) luaGalleryDlp(L *lua.LState) int {
 	argsTable.ForEach(func(k, v lua.LValue) {
 		args = append(args, v.String())
 	})
-
-	// Security: Force directory to storage or resolve specific flags
 	hasDir := false
 	for i, arg := range args {
 		if arg == "-D" || arg == "--directory" {
@@ -843,22 +788,18 @@ func (s *LuaService) luaGalleryDlp(L *lua.LState) int {
 			args[i+1] = s.storage.GetPath(args[i+1])
 		}
 	}
-
 	if !hasDir {
 		args = append(args, "-D", s.storage.GetPath(""))
 	}
-
 	cmd := exec.Command(util.GetBinaryPath("gallery-dl"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-
 	output, err := cmd.Output()
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("%s", stderr.String())))
 		return 2
 	}
-
 	L.Push(lua.LString(string(output)))
 	return 1
 }
@@ -869,28 +810,22 @@ func (s *LuaService) luaWebpmux(L *lua.LState) int {
 	argsTable.ForEach(func(k, v lua.LValue) {
 		args = append(args, v.String())
 	})
-
-	// Security: Resolve paths in args if they look like filenames
 	for i, arg := range args {
 		if !strings.HasPrefix(arg, "-") && len(arg) > 0 {
-			// If it's a file argument, make it safe
 			if _, err := os.Stat(s.storage.GetPath(arg)); err == nil {
 				args[i] = s.storage.GetPath(arg)
 			}
 		}
 	}
-
 	cmd := exec.Command(util.GetBinaryPath("webpmux"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-
 	output, err := cmd.Output()
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("%v: %s", err, stderr.String())))
 		return 2
 	}
-
 	L.Push(lua.LString(string(output)))
 	return 1
 }
@@ -898,37 +833,69 @@ func (s *LuaService) luaWebpmux(L *lua.LState) int {
 func (s *LuaService) luaWhatsappExif(L *lua.LState) int {
 	packName := L.CheckString(1)
 	author := L.CheckString(2)
-
-	// WhatsApp Sticker Exif Format (TIFF based)
 	startingBytes := []byte{0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00}
 	endingBytes := []byte{0x16, 0x00, 0x00, 0x00}
-
 	meta := map[string]interface{}{
 		"sticker-pack-id":        "site.alyza.lua",
 		"sticker-pack-name":      packName,
 		"sticker-pack-publisher": author,
 	}
 	jsonBytes, _ := json.Marshal(meta)
-
-	// Length of JSON must be in LittleEndian (4 bytes)
 	lenBuf := make([]byte, 4)
-	importBinary := func() {
-		// We'll use a manual approach to avoid complex imports if possible
-		length := uint32(len(jsonBytes))
-		lenBuf[0] = byte(length)
-		lenBuf[1] = byte(length >> 8)
-		lenBuf[2] = byte(length >> 16)
-		lenBuf[3] = byte(length >> 24)
-	}
-	importBinary()
-
+	length := uint32(len(jsonBytes))
+	lenBuf[0] = byte(length)
+	lenBuf[1] = byte(length >> 8)
+	lenBuf[2] = byte(length >> 16)
+	lenBuf[3] = byte(length >> 24)
 	var b bytes.Buffer
 	b.Write(startingBytes)
 	b.Write(lenBuf)
 	b.Write(endingBytes)
 	b.Write(jsonBytes)
-
 	L.Push(lua.LString(b.String()))
+	return 1
+}
+
+func (s *LuaService) luaGetGroups(L *lua.LState) int {
+	groups, err := s.waClient.GetJoinedGroups()
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	table := L.NewTable()
+	for i, g := range groups {
+		gTable := L.NewTable()
+		L.RawSet(gTable, lua.LString("jid"), lua.LString(g.JID.String()))
+		L.RawSet(gTable, lua.LString("name"), lua.LString(g.Name))
+		L.RawSet(table, lua.LNumber(i+1), gTable)
+	}
+	L.Push(table)
+	return 1
+}
+
+func (s *LuaService) luaGetParticipants(L *lua.LState) int {
+	jidStr := L.CheckString(1)
+	groupJID, err := waTypes.ParseJID(jidStr)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	participants, err := s.waClient.GetGroupParticipants(groupJID)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	table := L.NewTable()
+	for i, p := range participants {
+		pTable := L.NewTable()
+		L.RawSet(pTable, lua.LString("jid"), lua.LString(p.JID.String()))
+		L.RawSet(pTable, lua.LString("is_admin"), lua.LBool(p.IsAdmin || p.IsSuperAdmin))
+		L.RawSet(table, lua.LNumber(i+1), pTable)
+	}
+	L.Push(table)
 	return 1
 }
 
@@ -936,30 +903,25 @@ func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 	prompt := L.CheckString(1)
 	modelName := L.OptString(2, "gemini-2.0-flash")
 	filePath := L.OptString(3, "")
-
 	if s.gemini == nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString("Gemini service not available"))
 		return 2
 	}
-
 	ctx := context.Background()
 	var res string
 	var err error
-
 	if filePath != "" {
 		safePath := s.storage.GetPath(filePath)
 		res, err = s.gemini.GenerateWithFile(ctx, modelName, prompt, safePath)
 	} else {
 		res, err = s.gemini.GenerateText(ctx, modelName, prompt)
 	}
-
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-
 	L.Push(lua.LString(res))
 	return 1
 }

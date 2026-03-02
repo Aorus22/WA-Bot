@@ -1,9 +1,8 @@
 package entity
 
 type User struct {
-	JID  string
-	LID  string
-	Role string
+	ID   string
+	Name string
 }
 
 type Group struct {

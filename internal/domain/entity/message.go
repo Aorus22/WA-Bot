@@ -9,6 +9,7 @@ import (
 type Message struct {
 	ID        string
 	SenderJID string
+	SenderLID string
 	ChatID    string
 	Text      string
 	Type      string

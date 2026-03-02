@@ -14,7 +14,6 @@ import (
 	"wa-bot/internal/delivery/whatsapp"
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
-	"wa-bot/internal/infrastructure/api"
 	infrastructureConfig "wa-bot/internal/infrastructure/config"
 	"wa-bot/internal/infrastructure/lua"
 	"wa-bot/internal/infrastructure/media"
@@ -129,21 +128,9 @@ func InitializeApp() (*App, error) {
 
 	mediaDownloader := media.NewMediaDownloader(storageRepo)
 
-	pdfClient := api.NewPDFClient(cfg.Get("PDF_URL"), storageRepo)
-	tokenClient := api.NewTokenClient(cfg.Get("API_URL"))
-	apiRepository := api.NewAPIRepository(pdfClient, tokenClient)
-
-	waService := usecase.NewWhatsAppService(waClient, cfg)
-
-	pdfUC := usecase.NewPDFUseCase(waClient, apiRepository, geminiService, stateRepo, storageRepo)
-	tokenUC := usecase.NewTokenUseCase(waClient, apiRepository, stateRepo, cfg)
-	adminUC := usecase.NewAdminUseCase(waClient, apiRepository, cfg)
-	handlerUC := usecase.NewHandlerUseCase(pdfUC, tokenUC, adminUC, waService, stateRepo, waClient)
-
+	handlerUC := usecase.NewHandlerUseCase(stateRepo, waClient)
 	deliveryWaService := whatsapp.NewWhatsAppService(waClient, cfg)
 	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient, storageRepo)
-	commandRouter := whatsapp.NewCommandRouter(handlerUC)
-	_ = commandRouter
 
 	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
 	cronScheduler := cron.NewCronScheduler(waClient, dbURL, cfg.Get("CRON_SCHEDULE"))

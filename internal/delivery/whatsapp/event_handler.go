@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -97,6 +96,11 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 }
 
 func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
+	// Ignore messages from self to prevent infinite loops
+	if evt.Info.IsFromMe {
+		return
+	}
+
 	// Extract JIDs
 	var senderJID waTypes.JID
 	if evt.Info.IsGroup {
@@ -106,6 +110,11 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	}
 
 	chatID := evt.Info.Chat.String()
+	// Ignore WhatsApp Status updates
+	if chatID == "status@broadcast" {
+		return
+	}
+
 	senderName := evt.Info.PushName
 
 	// If push name is missing, try to get from our contact store
@@ -152,7 +161,6 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	}
 
 	// 1. Show message immediately
-	// If it's a group, displayChatName is "" so SaveMessage won't overwrite existing group name
 	h.showMessage(evt, senderJID, messageText, chatID, displayChatName, senderName)
 	fmt.Printf("[MSG] Logged message: [%s] from=%s name=%s\n", chatID, senderJID.String(), senderName)
 
@@ -161,7 +169,6 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 		go func() {
 			groupInfo, err := h.waClient.GetGroupInfo(context.Background(), chatID)
 			if err == nil && groupInfo != nil {
-				// Update Group Name and Avatar
 				avatarURL, _ := h.waClient.GetProfilePictureInfo(context.Background(), chatID)
 				if h.msgStore != nil {
 					if groupInfo.Name != "" {
@@ -171,7 +178,6 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 						h.msgStore.UpdateChatAvatar(chatID, avatarURL)
 					}
 
-					// Broadcast updates to FE
 					if h.httpServer != nil {
 						h.httpServer.BroadcastMessage("chat_name_update", map[string]interface{}{
 							"chatId": chatID,
@@ -183,7 +189,6 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 			}
 		}()
 	} else {
-		// Update private chat avatar
 		go func() {
 			avatarURL, err := h.waClient.GetProfilePictureInfo(context.Background(), chatID)
 			if err == nil && avatarURL != "" && h.msgStore != nil {
@@ -207,18 +212,11 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 		msgTime := evt.Info.Timestamp
 		now := time.Now()
 		if now.Sub(msgTime) > 1*time.Minute {
-			fmt.Printf("⚠️ Message too old (%v), skipping bot response\n", now.Sub(msgTime))
 			return
 		}
 
 		ctx := context.Background()
-		quickRole := h.getQuickRole(senderJID.String())
-		h.processCommand(ctx, evt, senderJID, messageText, chatID, quickRole)
-
-		accurateRole := h.getUserRole(senderJID.String())
-		if accurateRole != quickRole {
-			fmt.Printf("[ROLE] Role updated: %s -> %s\n", quickRole, accurateRole)
-		}
+		h.processCommand(ctx, evt, senderJID, messageText, chatID)
 	}()
 }
 
@@ -321,15 +319,7 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 	}
 }
 
-func (h *WhatsAppEventHandler) getQuickRole(senderJID string) string {
-	owner := os.Getenv("OWNER_JID")
-	if owner != "" && strings.EqualFold(senderJID, owner) {
-		return "OWNER"
-	}
-	return "COMMON"
-}
-
-func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.Message, senderJID waTypes.JID, messageText, chatID, role string) {
+func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.Message, senderJID waTypes.JID, messageText, chatID string) {
 	msgType := "text"
 	mediaURL := ""
 
@@ -357,6 +347,12 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 		Timestamp: evt.Info.Timestamp,
 		IsGroup:   evt.Info.IsGroup,
 		SenderJID: senderJID.String(),
+		SenderLID: evt.Info.Sender.ToNonAD().String(),
+	}
+
+	// Try to get actual LID if available
+	if evt.Info.Sender.Server == waTypes.MessengerServer {
+		msg.SenderLID = evt.Info.Sender.String()
 	}
 
 	// Check Lua Triggers
@@ -367,163 +363,14 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 		}
 	}
 
-	// Check user state
-	userState, err := h.stateRepo.GetUserState(senderJID.String())
-	if err == nil && userState != "" {
-		if strings.HasPrefix(messageText, "!cancel") {
-			h.handlerUC.HandleCancel(senderJID.String())
-			return
-		} else if strings.HasPrefix(messageText, "!") {
-			h.waClient.SendMessageToJID(ctx, senderJID, "There is another process, !cancel to cancel it", true)
-			return
-		}
-	}
-
-	// Command patterns
-	pdfRegex := regexp.MustCompile(`^!pdf\s+\S+$`)
-	answerPdfRegex := regexp.MustCompile(`^!answer(\s+\S+)*$`)
-	geminiRegex := regexp.MustCompile(`^!gemini(\s+\S+)*$`)
-	args := map[string]interface{}{
-		"senderJID":    senderJID,
-		"groupName":    "",
-		"isFromGroup":  evt.Info.IsGroup,
-		"userRole":     role,
-		"userState":    userState,
-		"rawSenderJID": senderJID,
-	}
-
-	// Command routing
-	switch {
-	case messageText == "!check":
-		h.handlerUC.HandleCheck(ctx, senderJID, args)
-	case messageText == "!listgroups":
-		h.handlerUC.HandleListGroups(ctx, senderJID, role)
-	case messageText == "!token":
-		h.handlerUC.HandleToken(ctx, senderJID, role, evt.Info.IsGroup)
-	case messageText == "!listmapel":
-		h.handlerUC.HandleListMapel(ctx, senderJID, role)
-	case messageText == "!listmember":
-		h.handlerUC.HandleListMember(ctx, senderJID, role)
-	case pdfRegex.MatchString(messageText):
-		h.handlerUC.HandlePDF(ctx, senderJID, messageText, role, msg)
-	case answerPdfRegex.MatchString(messageText):
-		h.handlerUC.HandlePDF(ctx, senderJID, messageText, role, msg)
-	case geminiRegex.MatchString(messageText):
-		h.handlerUC.HandlePDF(ctx, senderJID, messageText, role, msg)
-	case messageText == "!help":
-		h.handlerUC.HandleHelp(ctx, senderJID, role, args)
-	default:
-		if userState == "PendingToken" {
-			h.handlerUC.HandlePendingToken(ctx, senderJID, messageText)
-			return
-		}
-
-		if strings.HasPrefix(messageText, "!") {
-			h.waClient.SendMessageToJID(ctx, senderJID, "Invalid Command", true)
-			return
-		}
-
-		if !evt.Info.IsGroup {
-			if role == "COMMON" || role == "UNKNOWN" {
-				h.waClient.SendMessageToJID(ctx, senderJID, "!help to see the command list", true)
-			} else if role == "USER" {
-				h.waClient.SendMessageToJID(ctx, senderJID, "!help untuk melihat list command", true)
-			}
-		}
-	}
-}
-
-func (h *WhatsAppEventHandler) getUserRole(senderJID string) string {
-	owner := os.Getenv("OWNER_JID")
-	adminGroups := strings.Split(os.Getenv("ADMIN_GROUPS_JID"), ",")
-	userGroups := strings.Split(os.Getenv("USER_GROUPS_JID"), ",")
-
-	if owner != "" && strings.EqualFold(senderJID, owner) {
-		return "OWNER"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var senderLID string
-	userInfo, err := h.waClient.GetUserInfo(ctx, senderJID)
-	if err == nil && userInfo != nil {
-		senderLID = userInfo.LID
-	}
-
-	for _, adminGroup := range adminGroups {
-		adminGroup = strings.TrimSpace(adminGroup)
-		if adminGroup == "" {
-			continue
-		}
-		gCtx, gCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		groupInfo, err := h.waClient.GetGroupInfo(gCtx, adminGroup)
-		gCancel()
-		if err != nil {
-			continue
-		}
-		for _, participant := range groupInfo.Participants {
-			if strings.Contains(participant.LID, "@lid") && senderLID != "" {
-				pLID, _ := waTypes.ParseJID(participant.LID)
-				sLID, _ := waTypes.ParseJID(senderLID)
-				if pLID.User == sLID.User {
-					return "ADMIN"
-				}
-			}
-			if strings.EqualFold(participant.JID, senderJID) {
-				return "ADMIN"
-			}
-		}
-	}
-
-	for _, userGroup := range userGroups {
-		userGroup = strings.TrimSpace(userGroup)
-		if userGroup == "" {
-			continue
-		}
-		gCtx, gCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		groupInfo, err := h.waClient.GetGroupInfo(gCtx, userGroup)
-		gCancel()
-		if err != nil {
-			continue
-		}
-		for _, participant := range groupInfo.Participants {
-			if strings.Contains(participant.LID, "@lid") && senderLID != "" {
-				pLID, _ := waTypes.ParseJID(participant.LID)
-				sLID, _ := waTypes.ParseJID(senderLID)
-				if pLID.User == sLID.User {
-					return "USER"
-				}
-			}
-			if strings.EqualFold(participant.JID, senderJID) {
-				return "USER"
-			}
-		}
-	}
-
-	return "COMMON"
-}
-
-type CommandRouter struct {
-	handlerUC HandlerUseCaseInterface
-}
-
-func NewCommandRouter(handlerUC HandlerUseCaseInterface) *CommandRouter {
-	return &CommandRouter{
-		handlerUC: handlerUC,
+	// Unknown Command Fallback (Optional)
+	if strings.HasPrefix(messageText, "!") && !evt.Info.IsGroup {
+		// h.waClient.SendMessageToJID(ctx, senderJID, "Unknown Command. Please use triggers configured in Dashboard.", true)
 	}
 }
 
 type HandlerUseCaseInterface interface {
-	HandleCheck(ctx interface{}, senderJID waTypes.JID, args map[string]interface{})
-	HandleListGroups(ctx interface{}, senderJID waTypes.JID, role string)
-	HandleToken(ctx interface{}, senderJID waTypes.JID, role string, isFromGroup bool)
-	HandleListMapel(ctx interface{}, senderJID waTypes.JID, role string)
-	HandleListMember(ctx interface{}, senderJID waTypes.JID, role string)
-	HandlePDF(ctx interface{}, senderJID waTypes.JID, messageText string, role string, msg *entity.Message)
-	HandleHelp(ctx interface{}, senderJID waTypes.JID, role string, args map[string]interface{})
 	HandleCancel(senderJID string)
-	HandlePendingToken(ctx interface{}, senderJID waTypes.JID, messageText string)
 }
 
 type WhatsAppService struct {
