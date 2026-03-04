@@ -10,6 +10,7 @@ import (
 
 	waTypes "go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	waProto "go.mau.fi/whatsmeow/proto/waE2E"
 
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
@@ -113,6 +114,44 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	// Ignore WhatsApp Status updates
 	if chatID == "status@broadcast" {
 		return
+	}
+
+	// Handle Protocol Messages (Edit/Revoke)
+	if evt.Message.GetProtocolMessage() != nil {
+		pm := evt.Message.GetProtocolMessage()
+		if pm.GetType() == 14 { // REVOKE is 14
+			targetID := pm.GetKey().GetID()
+			if h.msgStore != nil {
+				h.msgStore.DeleteMessage(targetID)
+			}
+			if h.httpServer != nil {
+				h.httpServer.BroadcastMessage("message_deleted", map[string]string{
+					"chatId": chatID,
+					"id":     targetID,
+				})
+			}
+			return
+		} else if pm.GetType() == 16 { // MESSAGE_EDIT is 16
+			targetID := pm.GetKey().GetID()
+			newContent := ""
+			if pm.GetEditedMessage().GetConversation() != "" {
+				newContent = pm.GetEditedMessage().GetConversation()
+			} else if pm.GetEditedMessage().GetExtendedTextMessage() != nil {
+				newContent = pm.GetEditedMessage().GetExtendedTextMessage().GetText()
+			}
+
+			if h.msgStore != nil {
+				h.msgStore.UpdateMessageContent(targetID, newContent)
+			}
+			if h.httpServer != nil {
+				h.httpServer.BroadcastMessage("message_edited", map[string]string{
+					"chatId":  chatID,
+					"id":      targetID,
+					"content": newContent,
+				})
+			}
+			return
+		}
 	}
 
 	senderName := evt.Info.PushName
@@ -297,7 +336,7 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 		}
 
 		msg := &repository.Message{
-			ID:          fmt.Sprintf("msg_%d_%s", time.Now().UnixMilli(), senderJID.String()),
+			ID:          evt.Info.ID,
 			ChatID:      chatID,
 			From:        senderJID.String(),
 			To:          "me",
@@ -309,6 +348,13 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 			IsAutomatic: false,
 			SenderName:  senderName,
 			ChatName:    chatName,
+			ReplyToID: func() string {
+				ctxInfo := getContextInfo(evt.Message)
+				if ctxInfo != nil {
+					return ctxInfo.GetStanzaID()
+				}
+				return ""
+			}(),
 		}
 
 		if h.httpServer != nil {
@@ -394,4 +440,44 @@ func (h *WhatsAppEventHandler) isFromAllowedGroups(vInfo *waTypes.MessageInfo) b
 		}
 	}
 	return false
+}
+
+func getContextInfo(msg *waProto.Message) *waProto.ContextInfo {
+	if msg == nil {
+		return nil
+	}
+	if msg.ExtendedTextMessage != nil {
+		return msg.ExtendedTextMessage.ContextInfo
+	}
+	if msg.ImageMessage != nil {
+		return msg.ImageMessage.ContextInfo
+	}
+	if msg.VideoMessage != nil {
+		return msg.VideoMessage.ContextInfo
+	}
+	if msg.AudioMessage != nil {
+		return msg.AudioMessage.ContextInfo
+	}
+	if msg.DocumentMessage != nil {
+		return msg.DocumentMessage.ContextInfo
+	}
+	if msg.StickerMessage != nil {
+		return msg.StickerMessage.ContextInfo
+	}
+	if msg.ContactMessage != nil {
+		return msg.ContactMessage.ContextInfo
+	}
+	if msg.ContactsArrayMessage != nil {
+		return msg.ContactsArrayMessage.ContextInfo
+	}
+	if msg.ListMessage != nil {
+		return msg.ListMessage.ContextInfo
+	}
+	if msg.ButtonsMessage != nil {
+		return msg.ButtonsMessage.ContextInfo
+	}
+	if msg.TemplateMessage != nil {
+		return msg.TemplateMessage.ContextInfo
+	}
+	return nil
 }

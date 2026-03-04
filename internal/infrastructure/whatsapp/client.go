@@ -16,7 +16,7 @@ import (
 )
 
 type MessageLogger interface {
-	LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool)
+	LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string)
 }
 
 type QREvent struct {
@@ -57,9 +57,9 @@ func (w *WhatsAppClient) SetLogger(logger MessageLogger) {
 	w.logger = logger
 }
 
-func (w *WhatsAppClient) log(msgID string, to string, content string, msgType string, mediaURL string, isAutomatic bool) {
+func (w *WhatsAppClient) log(msgID string, to string, content string, msgType string, mediaURL string, isAutomatic bool, replyToID string) {
 	if w.logger != nil {
-		w.logger.LogSentMessage(msgID, to, "me", to, content, msgType, mediaURL, isAutomatic)
+		w.logger.LogSentMessage(msgID, to, "me", to, content, msgType, mediaURL, isAutomatic, replyToID)
 	}
 }
 
@@ -73,7 +73,7 @@ func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string
 		Conversation: proto.String(text),
 	})
 	if err == nil {
-		w.log(resp.ID, targetJID.String(), text, "text", "", isAutomatic)
+		w.log(resp.ID, targetJID.String(), text, "text", "", isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", err
@@ -84,7 +84,7 @@ func (w *WhatsAppClient) SendMessageToJID(ctx context.Context, to waTypes.JID, t
 		Conversation: proto.String(text),
 	})
 	if sendErr == nil {
-		w.log(resp.ID, to.String(), text, "text", "", isAutomatic)
+		w.log(resp.ID, to.String(), text, "text", "", isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", sendErr
@@ -114,7 +114,7 @@ func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, 
 		},
 	})
 	if err == nil {
-		w.log(resp.ID, targetJID.String(), caption, "image", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), caption, "image", mediaURL, isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", err
@@ -144,7 +144,7 @@ func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, 
 		},
 	})
 	if err == nil {
-		w.log(resp.ID, targetJID.String(), caption, "video", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), caption, "video", mediaURL, isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", err
@@ -175,7 +175,7 @@ func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byt
 		},
 	})
 	if err == nil {
-		w.log(resp.ID, targetJID.String(), title, "document", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), title, "document", mediaURL, isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", err
@@ -205,7 +205,7 @@ func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte
 		},
 	})
 	if err == nil {
-		w.log(resp.ID, targetJID.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
+		w.log(resp.ID, targetJID.String(), "[Sticker]", "sticker", mediaURL, isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", err
@@ -231,7 +231,7 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 		},
 	})
 	if err == nil {
-		w.log(resp.ID, to.String(), title, "document", mediaURL, isAutomatic)
+		w.log(resp.ID, to.String(), title, "document", mediaURL, isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", err
@@ -256,10 +256,51 @@ func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, d
 		},
 	})
 	if err == nil {
-		w.log(resp.ID, to.String(), "[Sticker]", "sticker", mediaURL, isAutomatic)
+		w.log(resp.ID, to.String(), "[Sticker]", "sticker", mediaURL, isAutomatic, "")
 		return resp.ID, nil
 	}
 	return "", err
+}
+
+func (w *WhatsAppClient) DeleteMessage(ctx context.Context, to string, msgID string) error {
+	targetJID, err := waTypes.ParseJID(to)
+	if err != nil {
+		return err
+	}
+	senderJID := w.client.Store.ID.ToNonAD()
+	_, err = w.client.SendMessage(ctx, targetJID, w.client.BuildRevoke(targetJID, senderJID, msgID))
+	return err
+}
+
+func (w *WhatsAppClient) EditMessage(ctx context.Context, to string, msgID string, newText string) error {
+	targetJID, err := waTypes.ParseJID(to)
+	if err != nil {
+		return err
+	}
+	_, err = w.client.SendMessage(ctx, targetJID, w.client.BuildEdit(targetJID, msgID, &waProto.Message{
+		Conversation: proto.String(newText),
+	}))
+	return err
+}
+
+func (w *WhatsAppClient) ReplyMessage(ctx context.Context, to string, msgID string, text string) error {
+	targetJID, err := waTypes.ParseJID(to)
+	if err != nil {
+		return err
+	}
+
+	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+		ExtendedTextMessage: &waProto.ExtendedTextMessage{
+			Text: proto.String(text),
+			ContextInfo: &waProto.ContextInfo{
+				StanzaID: proto.String(msgID),
+			},
+		},
+	})
+	if err == nil {
+		w.log(resp.ID, targetJID.String(), text, "text", "", false, msgID)
+	}
+	return err
 }
 
 func (w *WhatsAppClient) DownloadMedia(ctx context.Context, msg *entity.Message) ([]byte, bool, error) {

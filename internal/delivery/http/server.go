@@ -74,6 +74,9 @@ func (s *HTTPServer) Start() error {
 	api.HandleFunc("/chats", s.handleGetChats).Methods("GET")
 	api.HandleFunc("/chats/{id}/messages", s.handleGetMessages).Methods("GET")
 	api.HandleFunc("/chats/{id}/read", s.handleMarkAsRead).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/delete", s.handleDeleteMessage).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/edit", s.handleEditMessage).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/reply", s.handleReplyMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/stickers/favorites", s.handleGetFavoriteStickers).Methods("GET")
 	api.HandleFunc("/stickers/favorite", s.handleFavoriteSticker).Methods("POST", "OPTIONS")
 	api.HandleFunc("/stickers/favorites/{id}", s.handleDeleteFavoriteSticker).Methods("DELETE", "OPTIONS")
@@ -188,7 +191,7 @@ func (s *HTTPServer) BroadcastMessage(msgType string, payload interface{}) {
 	})
 }
 
-func (s *HTTPServer) LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool) {
+func (s *HTTPServer) LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string) {
 	msg := &repository.Message{
 		ID:          msgID,
 		ChatID:      chatID,
@@ -200,6 +203,7 @@ func (s *HTTPServer) LogSentMessage(msgID, chatID, from, to, content, msgType, m
 		Type:        msgType,
 		MediaURL:    mediaURL,
 		IsAutomatic: isAutomatic,
+		ReplyToID:   replyToID,
 	}
 	s.SaveAndBroadcastMessage(msg)
 }
@@ -249,6 +253,7 @@ func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 					"isAutomatic": msg.IsAutomatic,
 					"senderName":  msg.SenderName,
 					"chatName":    msg.ChatName,
+					"replyToId":   msg.ReplyToID,
 				},
 			})
 			fmt.Printf("[WS] Broadcasted message via WebSocket\n")
@@ -804,6 +809,116 @@ func (s *HTTPServer) handleAvatarProxy(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, avatarURL, http.StatusFound)
 }
 
+func (s *HTTPServer) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["chatId"]
+	msgID := vars["id"]
+
+	err := s.client.DeleteMessage(r.Context(), chatID, msgID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Update local store
+	if s.msgRepo != nil {
+		s.msgRepo.DeleteMessage(msgID)
+	}
+
+	// Broadcast deletion
+	s.hub.Broadcast(WSMessage{
+		Type: "message_deleted",
+		Payload: map[string]string{
+			"chatId": chatID,
+			"id":     msgID,
+		},
+	})
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *HTTPServer) handleEditMessage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["chatId"]
+	msgID := vars["id"]
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	err := s.client.EditMessage(r.Context(), chatID, msgID, req.Content)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Update local store
+	if s.msgRepo != nil {
+		s.msgRepo.UpdateMessageContent(msgID, req.Content)
+	}
+
+	// Broadcast edit
+	s.hub.Broadcast(WSMessage{
+		Type: "message_edited",
+		Payload: map[string]string{
+			"chatId":  chatID,
+			"id":      msgID,
+			"content": req.Content,
+		},
+	})
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *HTTPServer) handleReplyMessage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["chatId"]
+	msgID := vars["id"]
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	err := s.client.ReplyMessage(r.Context(), chatID, msgID, req.Content)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
 func generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixMilli())
 }
@@ -907,7 +1022,8 @@ func (s *HTTPServer) handleDeleteAllTriggers(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
-func (s *HTTPServer) handleTestTrigger(w http.ResponseWriter, r *http.Request) {	w.Header().Set("Content-Type", "application/json")
+func (s *HTTPServer) handleTestTrigger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return

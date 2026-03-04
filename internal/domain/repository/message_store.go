@@ -27,6 +27,7 @@ type Message struct {
 	IsAutomatic bool   `json:"isAutomatic"`
 	SenderName  string `json:"senderName,omitempty"`
 	ChatName    string `json:"chatName,omitempty"`
+	ReplyToID   string `json:"replyToId,omitempty"`
 }
 
 type Chat struct {
@@ -219,14 +220,14 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 
 	// Insert message
 	_, err = tx.Exec(`
-                INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
 		if msg.IsAutomatic {
 			return 1
 		}
 		return 0
-	}(), msg.SenderName)
+	}(), msg.SenderName, msg.ReplyToID)
 	if err != nil {
 		return err
 	}
@@ -238,7 +239,7 @@ func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) 
 	defer s.mu.RUnlock()
 
 	query := `
-                SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name
+                SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
                 FROM messages
                 WHERE chat_id = ?
                 ORDER BY timestamp DESC
@@ -267,6 +268,7 @@ func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) 
 			&msg.MediaURL,
 			&isAuto,
 			&msg.SenderName,
+			&msg.ReplyToID,
 		)
 		if err != nil {
 			return nil, err
@@ -474,6 +476,28 @@ func (s *MessageStore) UpdateMessageStatus(msgID, status string) error {
 	_, err := s.db.Exec(`
                 UPDATE messages SET status = ? WHERE id = ?
         `, status, msgID)
+
+	return err
+}
+
+func (s *MessageStore) UpdateMessageContent(msgID, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+                UPDATE messages SET content = ? WHERE id = ?
+        `, content, msgID)
+
+	return err
+}
+
+func (s *MessageStore) DeleteMessage(msgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+                DELETE FROM messages WHERE id = ?
+        `, msgID)
 
 	return err
 }
