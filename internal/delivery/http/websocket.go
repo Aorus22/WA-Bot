@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
 
@@ -90,6 +89,14 @@ func (h *WSHub) Run() {
 	}
 }
 
+func (h *WSHub) Broadcast(message WSMessage) {
+	h.broadcast <- message
+}
+
+func (h *WSHub) BroadcastMessage(msgType string, payload interface{}) {
+	h.broadcast <- WSMessage{Type: msgType, Payload: payload}
+}
+
 func (h *WSHub) SendToUser(userID string, message WSMessage) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -102,8 +109,16 @@ func (h *WSHub) SendToUser(userID string, message WSMessage) {
 	}
 }
 
-func (h *WSHub) Broadcast(message WSMessage) {
-	h.broadcast <- message
+func (h *WSHub) SendMessageToUser(userID string, msgType string, payload interface{}) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if client, ok := h.byUser[userID]; ok {
+		select {
+		case client.Send <- WSMessage{Type: msgType, Payload: payload}:
+		default:
+			log.Printf("Failed to send message to user %s", userID)
+		}
+	}
 }
 
 func (c *WSClient) ReadPump() {
@@ -219,8 +234,4 @@ func randomString(n int) string {
 		time.Sleep(time.Nanosecond)
 	}
 	return string(b)
-}
-
-func (s *HTTPServer) RegisterWSRoutes(r *mux.Router, hub *WSHub) {
-	r.HandleFunc("/ws", s.handleWebSocket(hub))
 }

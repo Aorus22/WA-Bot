@@ -1,0 +1,102 @@
+package handlers
+
+import (
+	"fmt"
+	"net/http"
+
+	"github.com/gorilla/mux"
+
+	"wa-bot/internal/domain/repository"
+)
+
+type ChatHandler struct {
+	handler *Handler
+}
+
+func NewChatHandler(h *Handler) *ChatHandler {
+	return &ChatHandler{handler: h}
+}
+
+func (ch *ChatHandler) GetChats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, "Message repository not configured")
+		return
+	}
+
+	chats, err := ch.handler.msgRepo.GetChats()
+	if err != nil {
+		fmt.Printf("Error getting chats: %v\n", err)
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if chats == nil {
+		chats = []repository.Chat{}
+	}
+
+	ch.handler.sendJSON(w, chats)
+}
+
+func (ch *ChatHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+
+	messages, err := ch.handler.msgRepo.GetMessages(chatID, 100)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, messages)
+}
+
+func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+
+	err := ch.handler.msgRepo.MarkAsRead(chatID)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendSuccess(w, nil)
+}
+
+func (ch *ChatHandler) GetContacts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	contacts, err := ch.handler.msgRepo.GetContacts()
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, contacts)
+}
