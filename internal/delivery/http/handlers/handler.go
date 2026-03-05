@@ -185,7 +185,7 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 		fmt.Printf("[DB] Saved message to database (auto=%v)\n", msg.IsAutomatic)
 
 		if hub, ok := h.hub.(wsHub); ok && hub != nil {
-			hub.BroadcastMessage("new_message", map[string]interface{}{
+			payload := map[string]interface{}{
 				"id":          msg.ID,
 				"chatId":      msg.ChatID,
 				"from":        msg.From,
@@ -198,9 +198,12 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 				"isAutomatic": msg.IsAutomatic,
 				"senderName":  msg.SenderName,
 				"chatName":    msg.ChatName,
-				"replyToId":   msg.ReplyToID,
-			})
-			fmt.Printf("[WS] Broadcasted message via WebSocket\n")
+			}
+			if msg.ReplyToID != "" {
+				payload["replyToId"] = msg.ReplyToID
+			}
+			fmt.Printf("[WS] Broadcasted message via WebSocket (id=%s, replyToId=%s)\n", msg.ID, msg.ReplyToID)
+			hub.BroadcastMessage("new_message", payload)
 		}
 	}
 }

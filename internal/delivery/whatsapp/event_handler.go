@@ -97,8 +97,9 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 }
 
 func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
-	// Ignore messages from self to prevent infinite loops
+	// Ignore messages from self to prevent duplicate broadcasts (already handled by LogSentMessage)
 	if evt.Info.IsFromMe {
+		fmt.Printf("[DEBUG] Skipping self-message: %s (chat=%s)\n", evt.Info.ID, evt.Info.Chat.String())
 		return
 	}
 
@@ -260,6 +261,7 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 }
 
 func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waTypes.JID, messageText, chatID, chatName, senderName string) {
+	fmt.Printf("[DEBUG] showMessage called: msgID=%s, IsFromMe=%v, chat=%s\n", evt.Info.ID, evt.Info.IsFromMe, chatID)
 	ctx := context.Background()
 
 	if h.msgStore != nil {

@@ -40,25 +40,30 @@ func (ch *ChatHandler) GetChats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ch *ChatHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+        w.Header().Set("Content-Type", "application/json")
 
-	if ch.handler.msgRepo == nil {
-		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
-		return
-	}
+        if ch.handler.msgRepo == nil {
+                ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+                return
+        }
 
-	vars := mux.Vars(r)
-	chatID := vars["id"]
+        vars := mux.Vars(r)
+        chatID := vars["id"]
 
-	messages, err := ch.handler.msgRepo.GetMessages(chatID, 100)
-	if err != nil {
-		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+        limit := 100
+        limitStr := r.URL.Query().Get("limit")
+        if limitStr != "" {
+                fmt.Sscanf(limitStr, "%d", &limit)
+        }
 
-	ch.handler.sendJSON(w, messages)
+        messages, err := ch.handler.msgRepo.GetMessages(chatID, limit)
+        if err != nil {
+                ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+                return
+        }
+
+        ch.handler.sendJSON(w, messages)
 }
-
 func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
