@@ -79,74 +79,32 @@ func (s *LuaService) ExecuteTriggers(ctx context.Context, msg *entity.Message) (
 	return false, nil
 }
 
-func (s *LuaService) runScript(script string, msg *entity.Message, matches []string) {
-	L := lua.NewState()
+func (s *LuaService) RunCronScript(ctx context.Context, script string) {
+	L := s.newLuaState(ctx)
 	defer L.Close()
 
-	// Inject globals
-	L.SetGlobal("sender", lua.LString(msg.SenderJID))
-	L.SetGlobal("content", lua.LString(msg.Text))
-
-	// Inject entire message state as a table
-	msgTable := L.NewTable()
-	L.RawSet(msgTable, lua.LString("id"), lua.LString(msg.ID))
-	L.RawSet(msgTable, lua.LString("sender"), lua.LString(msg.SenderJID))
-	L.RawSet(msgTable, lua.LString("lid"), lua.LString(msg.SenderLID))
-	L.RawSet(msgTable, lua.LString("chat_id"), lua.LString(msg.ChatID))
-	L.RawSet(msgTable, lua.LString("content"), lua.LString(msg.Text))
-	L.RawSet(msgTable, lua.LString("type"), lua.LString(msg.Type))
-	L.RawSet(msgTable, lua.LString("media_url"), lua.LString(msg.MediaURL))
-	L.RawSet(msgTable, lua.LString("timestamp"), lua.LNumber(msg.Timestamp.Unix()))
-	L.RawSet(msgTable, lua.LString("is_group"), lua.LBool(msg.IsGroup))
-	
-	isMedia := msg.Type == "image" || msg.Type == "video" || msg.Type == "sticker" || msg.Type == "document"
-	L.RawSet(msgTable, lua.LString("is_media"), lua.LBool(isMedia))
-	
-	L.SetGlobal("msg", msgTable)
-
-	luaMatches := L.NewTable()
-	for i, m := range matches {
-		L.RawSet(luaMatches, lua.LNumber(i), lua.LString(m))
+	if err := L.DoString(script); err != nil {
+		fmt.Printf("[LUA CRON] Script Error: %v\n", err)
 	}
-	L.SetGlobal("matches", luaMatches)
+}
 
-	// Inject functions
+func (s *LuaService) newLuaState(ctx context.Context) *lua.LState {
+	L := lua.NewState()
+
+	// Inject core functions
 	L.SetGlobal("send_text", L.NewFunction(s.luaSendText))
 	L.SetGlobal("send_sticker", L.NewFunction(s.luaSendSticker))
 	L.SetGlobal("send_media", L.NewFunction(s.luaSendMedia))
-	
-	// download_media needs msg context, so we use a closure here
-	L.SetGlobal("download_media", L.NewFunction(func(L *lua.LState) int {
-		filename := L.CheckString(1)
-		data, _, err := s.waClient.DownloadMedia(context.Background(), msg)
-		if err != nil {
-			L.Push(lua.LNil)
-			L.Push(lua.LString(err.Error()))
-			return 2
-		}
-		savedPath, err := s.storage.Save(context.Background(), filename, bytes.NewReader(data))
-		if err != nil {
-			L.Push(lua.LNil)
-			L.Push(lua.LString(err.Error()))
-			return 2
-		}
-		L.Push(lua.LString(savedPath))
-		return 1
-	}))
-
 	L.SetGlobal("fetch", L.NewFunction(s.luaFetch))
 	L.SetGlobal("fetch_to_file", L.NewFunction(s.luaFetchToFile))
 	L.SetGlobal("gemini_chat", L.NewFunction(s.luaGeminiChat))
 	L.SetGlobal("get_instagram_url", L.NewFunction(s.luaGetInstagramURL))
 	L.SetGlobal("get_state", L.NewFunction(s.luaGetState))
 	L.SetGlobal("set_state", L.NewFunction(s.luaSetState))
-
 	L.SetGlobal("get_groups", L.NewFunction(s.luaGetGroups))
 	L.SetGlobal("get_participants", L.NewFunction(s.luaGetParticipants))
-
 	L.SetGlobal("get_duration", L.NewFunction(s.luaGetDuration))
 	L.SetGlobal("get_mime_type", L.NewFunction(s.luaGetMimeType))
-
 	L.SetGlobal("json_decode", L.NewFunction(s.luaJSONDecode))
 	L.SetGlobal("json_encode", L.NewFunction(s.luaJSONEncode))
 
@@ -165,6 +123,62 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 	L.SetGlobal("gallery_dl", L.NewFunction(s.luaGalleryDlp))
 	L.SetGlobal("webpmux", L.NewFunction(s.luaWebpmux))
 	L.SetGlobal("whatsapp_exif", L.NewFunction(s.luaWhatsappExif))
+	L.SetGlobal("sh", L.NewFunction(s.luaShell))
+
+	s.RegisterCheerio(L)
+	s.RegisterBrowser(L)
+
+	return L
+}
+
+func (s *LuaService) runScript(script string, msg *entity.Message, matches []string) {
+	L := s.newLuaState(context.Background())
+	defer L.Close()
+
+	// Inject message-specific globals
+	L.SetGlobal("sender", lua.LString(msg.SenderJID))
+	L.SetGlobal("content", lua.LString(msg.Text))
+
+	msgTable := L.NewTable()
+	L.RawSet(msgTable, lua.LString("id"), lua.LString(msg.ID))
+	L.RawSet(msgTable, lua.LString("sender"), lua.LString(msg.SenderJID))
+	L.RawSet(msgTable, lua.LString("lid"), lua.LString(msg.SenderLID))
+	L.RawSet(msgTable, lua.LString("chat_id"), lua.LString(msg.ChatID))
+	L.RawSet(msgTable, lua.LString("content"), lua.LString(msg.Text))
+	L.RawSet(msgTable, lua.LString("type"), lua.LString(msg.Type))
+	L.RawSet(msgTable, lua.LString("media_url"), lua.LString(msg.MediaURL))
+	L.RawSet(msgTable, lua.LString("timestamp"), lua.LNumber(msg.Timestamp.Unix()))
+	L.RawSet(msgTable, lua.LString("is_group"), lua.LBool(msg.IsGroup))
+
+	isMedia := msg.Type == "image" || msg.Type == "video" || msg.Type == "sticker" || msg.Type == "document"
+	L.RawSet(msgTable, lua.LString("is_media"), lua.LBool(isMedia))
+
+	L.SetGlobal("msg", msgTable)
+
+	luaMatches := L.NewTable()
+	for i, m := range matches {
+		L.RawSet(luaMatches, lua.LNumber(i), lua.LString(m))
+	}
+	L.SetGlobal("matches", luaMatches)
+
+	// download_media needs msg context, so we use a closure here
+	L.SetGlobal("download_media", L.NewFunction(func(L *lua.LState) int {
+		filename := L.CheckString(1)
+		data, _, err := s.waClient.DownloadMedia(context.Background(), msg)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		savedPath, err := s.storage.Save(context.Background(), filename, bytes.NewReader(data))
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LString(savedPath))
+		return 1
+	}))
 
 	if err := L.DoString(script); err != nil {
 		fmt.Printf("[LUA] Script Error: %v\n", err)
@@ -539,6 +553,10 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	L.SetGlobal("gallery_dl", L.NewFunction(s.luaGalleryDlp))
 	L.SetGlobal("webpmux", L.NewFunction(s.luaWebpmux))
 	L.SetGlobal("whatsapp_exif", L.NewFunction(s.luaWhatsappExif))
+
+	s.RegisterCheerio(L)
+	s.RegisterBrowser(L)
+
 	if err := L.DoString(script); err != nil {
 		result["error"] = err.Error()
 	}
@@ -923,5 +941,30 @@ func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 		return 2
 	}
 	L.Push(lua.LString(res))
+	return 1
+}
+
+func (s *LuaService) luaShell(L *lua.LState) int {
+	command := L.CheckString(1)
+	var cmd *exec.Cmd
+	if os.PathSeparator == '\\' {
+		cmd = exec.Command("powershell.exe", "-NoProfile", "-Command", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	resTable := L.NewTable()
+	L.RawSet(resTable, lua.LString("stdout"), lua.LString(stdout.String()))
+	L.RawSet(resTable, lua.LString("stderr"), lua.LString(stderr.String()))
+	if err != nil {
+		L.RawSet(resTable, lua.LString("error"), lua.LString(err.Error()))
+		L.RawSet(resTable, lua.LString("success"), lua.LBool(false))
+	} else {
+		L.RawSet(resTable, lua.LString("success"), lua.LBool(true))
+	}
+	L.Push(resTable)
 	return 1
 }

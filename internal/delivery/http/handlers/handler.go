@@ -23,13 +23,15 @@ type LuaService interface {
 }
 
 type Handler struct {
-	client      *whatsappInfra.WhatsAppClient
-	config      repository.ConfigRepository
-	storage     repository.StorageRepository
-	msgRepo     *repository.MessageStore
-	triggerRepo repository.TriggerRepository
-	lua         LuaService
-	hub         any
+	client        *whatsappInfra.WhatsAppClient
+	config        repository.ConfigRepository
+	storage       repository.StorageRepository
+	msgRepo       *repository.MessageStore
+	triggerRepo   repository.TriggerRepository
+	cronRepo      repository.CronJobRepository
+	cronScheduler any // to avoid circular import if needed, or use interface
+	lua           LuaService
+	hub           any
 }
 
 func NewHandler(
@@ -52,8 +54,28 @@ func (h *Handler) SetTriggerRepo(repo repository.TriggerRepository) {
 	h.triggerRepo = repo
 }
 
+func (h *Handler) SetCronRepo(repo repository.CronJobRepository) {
+	h.cronRepo = repo
+}
+
+func (h *Handler) SetCronScheduler(scheduler any) {
+	h.cronScheduler = scheduler
+}
+
 func (h *Handler) SetLuaService(lua LuaService) {
 	h.lua = lua
+}
+
+func (h *Handler) GetCronRepo() repository.CronJobRepository {
+	return h.cronRepo
+}
+
+func (h *Handler) GetCronScheduler() any {
+	return h.cronScheduler
+}
+
+func (h *Handler) GetLuaService() LuaService {
+	return h.lua
 }
 
 func (h *Handler) SetHub(hub any) {
