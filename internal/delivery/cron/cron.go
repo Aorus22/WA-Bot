@@ -1,91 +1,113 @@
 package cron
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"time"
+	"sync"
+	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/infrastructure/lua"
 
-	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
-
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/robfig/cron/v3"
 )
 
 type CronScheduler struct {
-	client   *whatsappInfra.WhatsAppClient
-	dbURL    string
-	schedule string
-	cron     *cron.Cron
+	cronRepo   repository.CronJobRepository
+	luaService *lua.LuaService
+	cron       *cron.Cron
+	entryIDs   map[string]cron.EntryID
+	mu         sync.Mutex
 }
 
-func NewCronScheduler(client *whatsappInfra.WhatsAppClient, dbURL, schedule string) *CronScheduler {
+func NewCronScheduler(cronRepo repository.CronJobRepository, luaService *lua.LuaService) *CronScheduler {
+	// Custom parser: seconds optional, support standard 5-field and 6-field
+	parser := cron.NewParser(
+		cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+	)
 	return &CronScheduler{
-		client:   client,
-		dbURL:    dbURL,
-		schedule: schedule,
-		cron:     cron.New(),
+		cronRepo:   cronRepo,
+		luaService: luaService,
+		cron:       cron.New(cron.WithParser(parser)),
+		entryIDs:   make(map[string]cron.EntryID),
 	}
 }
 
 func (c *CronScheduler) Start() error {
-	_, err := c.cron.AddFunc(c.schedule, func() {
-		err := c.clearChatHistory()
-		if err != nil {
-			fmt.Printf("Error while clearing messages via cron: %v\n", err)
-		}
-	})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Initialize cron if stopped (optional safety)
+	if c.cron == nil {
+		parser := cron.NewParser(
+			cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+		)
+		c.cron = cron.New(cron.WithParser(parser))
+	}
+
+	err := c.loadJobs()
 	if err != nil {
-		return fmt.Errorf("failed to add cron job: %v", err)
+		return err
 	}
 
 	c.cron.Start()
-	fmt.Printf("Cron job set up to clear messages on schedule: %s\n", c.schedule)
+	fmt.Println("Cron scheduler started")
 	return nil
 }
 
 func (c *CronScheduler) Stop() {
-	c.cron.Stop()
+	if c.cron != nil {
+		c.cron.Stop()
+	}
 }
 
-func (c *CronScheduler) clearChatHistory() error {
-	c.client.Disconnect()
-	fmt.Println("Client disconnected for cron job")
+func (c *CronScheduler) Reload() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	db, err := sql.Open("sqlite3", c.dbURL)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %v", err)
+	// Stop current cron and clear entries
+	if c.cron != nil {
+		c.cron.Stop()
 	}
-	defer db.Close()
+	parser := cron.NewParser(
+		cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+	)
+	c.cron = cron.New(cron.WithParser(parser))
+	c.entryIDs = make(map[string]cron.EntryID)
 
-	tx, err := db.Begin()
+	err := c.loadJobs()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %v", err)
-	}
-
-	query1 := "DELETE FROM whatsmeow_message_secrets"
-	_, err = tx.Exec(query1)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to delete message secrets: %v", err)
+		return err
 	}
 
-	query2 := "DELETE FROM whatsmeow_app_state_mutation_macs"
-	_, err = tx.Exec(query2)
+	c.cron.Start()
+	fmt.Println("Cron scheduler reloaded")
+	return nil
+}
+
+func (c *CronScheduler) loadJobs() error {
+	jobs, err := c.cronRepo.GetAllCron(context.Background())
 	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to delete app state mutation macs: %v", err)
+		return fmt.Errorf("failed to fetch cron jobs: %v", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("failed to commit transaction: %v", err)
+	for _, job := range jobs {
+		if !job.IsActive {
+			continue
+		}
+
+		jobCopy := job // Create local copy for closure
+		entryID, err := c.cron.AddFunc(job.Schedule, func() {
+			fmt.Printf("[CRON] Running job: %s\n", jobCopy.Name)
+			c.luaService.RunCronScript(context.Background(), jobCopy.Script)
+		})
+
+		if err != nil {
+			fmt.Printf("[CRON] Failed to schedule job %s: %v\n", job.Name, err)
+			continue
+		}
+
+		c.entryIDs[job.ID] = entryID
+		fmt.Printf("[CRON] Scheduled job: %s (%s)\n", job.Name, job.Schedule)
 	}
 
-	err = c.client.Connect()
-	if err != nil {
-		return fmt.Errorf("failed to reconnect client: %v", err)
-	}
-
-	fmt.Printf("Message history and app state mutation macs successfully cleared and client reconnected at %s\n", time.Now().Format(time.RFC1123))
 	return nil
 }

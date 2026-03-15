@@ -52,6 +52,14 @@ func (s *HTTPServer) SetTriggerRepo(repo repository.TriggerRepository) {
 	s.handler.SetTriggerRepo(repo)
 }
 
+func (s *HTTPServer) SetCronRepo(repo repository.CronJobRepository) {
+	s.handler.SetCronRepo(repo)
+}
+
+func (s *HTTPServer) SetCronScheduler(scheduler any) {
+	s.handler.SetCronScheduler(scheduler)
+}
+
 func (s *HTTPServer) GetHub() *WSHub {
 	return s.hub
 }
@@ -65,14 +73,14 @@ func (s *HTTPServer) Start() error {
 	go s.hub.Run()
 
 	s.server = &http.Server{
-		Addr:         ":3000",
+		Addr:         ":3090",
 		Handler:      s.createHandler(muxRouter),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	fmt.Println("Server running on port 3000")
+	fmt.Println("Server running on port 3090")
 	return s.server.ListenAndServe()
 }
 
