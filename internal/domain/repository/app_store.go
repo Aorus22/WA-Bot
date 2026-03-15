@@ -46,6 +46,15 @@ func (s *AppStore) init() error {
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
 			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS cron_jobs (
+			id TEXT PRIMARY KEY,
+			name TEXT,
+			schedule TEXT,
+			script TEXT,
+			is_active INTEGER DEFAULT 1,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+		)`,
 	}
 
 	for _, query := range queries {
@@ -151,6 +160,7 @@ func (s *AppStore) Update(ctx context.Context, t *entity.Trigger) error {
 	}(), time.Now().Unix(), t.ID)
 	return err
 }
+
 func (s *AppStore) Delete(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -160,12 +170,108 @@ func (s *AppStore) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+func (s *AppStore) DeleteCron(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM cron_jobs WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query)
+	return err
+}
+
+func (s *AppStore) DeleteAllCron(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM cron_jobs`
+	_, err := s.db.ExecContext(ctx, query)
+	return err
+}
+
 func (s *AppStore) DeleteAll(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	query := `DELETE FROM triggers`
 	_, err := s.db.ExecContext(ctx, query)
+	return err
+}
+
+// CronJobRepository implementation for AppStore
+func (s *AppStore) GetAllCron(ctx context.Context) ([]*entity.CronJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, schedule, script, is_active, created_at, updated_at FROM cron_jobs ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*entity.CronJob
+	for rows.Next() {
+		var j entity.CronJob
+		var isActive int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&j.ID, &j.Name, &j.Schedule, &j.Script, &isActive, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		j.IsActive = isActive == 1
+		j.CreatedAt = time.Unix(createdAt, 0)
+		j.UpdatedAt = time.Unix(updatedAt, 0)
+		jobs = append(jobs, &j)
+	}
+	return jobs, nil
+}
+
+func (s *AppStore) GetCronByID(ctx context.Context, id string) (*entity.CronJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, schedule, script, is_active, created_at, updated_at FROM cron_jobs WHERE id = ?`
+	var j entity.CronJob
+	var isActive int
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&j.ID, &j.Name, &j.Schedule, &j.Script, &isActive, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	j.IsActive = isActive == 1
+	j.CreatedAt = time.Unix(createdAt, 0)
+	j.UpdatedAt = time.Unix(updatedAt, 0)
+	return &j, nil
+}
+
+func (s *AppStore) CreateCron(ctx context.Context, j *entity.CronJob) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO cron_jobs (id, name, schedule, script, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	now := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx, query, j.ID, j.Name, j.Schedule, j.Script, func() int {
+		if j.IsActive {
+			return 1
+		}
+		return 0
+	}(), now, now)
+	return err
+}
+
+func (s *AppStore) UpdateCron(ctx context.Context, j *entity.CronJob) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE cron_jobs SET name = ?, schedule = ?, script = ?, is_active = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, j.Name, j.Schedule, j.Script, func() int {
+		if j.IsActive {
+			return 1
+		}
+		return 0
+	}(), time.Now().Unix(), j.ID)
 	return err
 }
 

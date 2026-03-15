@@ -10,8 +10,10 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"wa-bot/internal/delivery/cron"
 	"wa-bot/internal/delivery/http/handlers"
 	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/infrastructure/lua"
 )
 
 type Router struct {
@@ -37,6 +39,8 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	messageHandler := handlers.NewMessageHandler(r.handler)
 	chatHandler := handlers.NewChatHandler(r.handler)
 	triggerHandler := handlers.NewTriggerHandler(r.handler)
+	cronHandler := handlers.NewCronHandler(r.handler.GetCronRepo(), r.handler.GetCronScheduler().(*cron.CronScheduler), r.handler.GetLuaService().(*lua.LuaService))
+	cronHandler.SetHandler(r.handler)
 	stickerHandler := handlers.NewStickerHandler(r.handler)
 	systemHandler := handlers.NewSystemHandler(r.handler)
 	msgMgmtHandler := handlers.NewMessageManagementHandler(r.handler)
@@ -73,6 +77,13 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/triggers/{id}", triggerHandler.UpdateTrigger).Methods("PUT", "OPTIONS")
 	api.HandleFunc("/triggers", triggerHandler.DeleteAllTriggers).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/triggers/{id}", triggerHandler.DeleteTrigger).Methods("DELETE", "OPTIONS")
+
+	api.HandleFunc("/cron", cronHandler.GetAll).Methods("GET")
+	api.HandleFunc("/cron", cronHandler.Create).Methods("POST", "OPTIONS")
+	api.HandleFunc("/cron", cronHandler.DeleteAll).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/cron/test", cronHandler.Test).Methods("POST", "OPTIONS")
+	api.HandleFunc("/cron/{id}", cronHandler.Update).Methods("PUT", "OPTIONS")
+	api.HandleFunc("/cron/{id}", cronHandler.Delete).Methods("DELETE", "OPTIONS")
 
 	api.HandleFunc("/avatar/{jid}", systemHandler.AvatarProxy).Methods("GET")
 
