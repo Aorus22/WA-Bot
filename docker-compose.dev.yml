@@ -12,9 +12,18 @@ services:
       - .env
     environment:
       - TZ=Asia/Jakarta
+      - LIGHTPANDA_CDP_URL=http://localhost:9222
+    depends_on:
+      - lightpanda
     stdin_open: true
     tty: true
     command: tail -f /dev/null
+
+  lightpanda:
+    image: lightpanda/browser:nightly
+    container_name: wa-bot-lightpanda
+    network_mode: host
+    restart: always
 
   frontend:
     build:
