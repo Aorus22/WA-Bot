@@ -18,7 +18,7 @@ FROM frolvlad/alpine-glibc:latest
 
 WORKDIR /root/
 
-RUN apk add --no-cache sqlite-libs libwebp-tools
+RUN apk add --no-cache sqlite-libs libwebp-tools curl
 
 COPY --from=builder /app/wa-bot .
 COPY --from=builder /app/bin/ffmpeg /usr/local/bin

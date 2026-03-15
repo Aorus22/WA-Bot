@@ -1,14 +1,23 @@
 services:
-  wa-bot:
-    build: .
-    container_name: wa-bot
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wa-bot-api
+    restart: always
     volumes:
-      - ./media:/root/media
-      - ./database:/root/database
+      - ./database:/app/database
+    ports:
+      - "3090:3090"
     env_file:
       - .env
     environment:
       - TZ=Asia/Jakarta
+      - LIGHTPANDA_CDP_URL=http://lightpanda:9222
+    depends_on:
+      - lightpanda
+
+  lightpanda:
+    image: lightpanda/browser:nightly
+    container_name: wa-bot-lightpanda
+    restart: always

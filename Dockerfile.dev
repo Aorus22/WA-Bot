@@ -2,7 +2,7 @@ FROM golang:1.24-alpine
 
 WORKDIR /app
 
-# Instal dependensi sistem yang dibutuhkan untuk build (CGO) dan tool eksternal
+# Install base dependencies
 RUN apk add --no-cache \
     gcc \
     musl-dev \
@@ -15,8 +15,8 @@ RUN apk add --no-cache \
     curl \
     git
 
-# Instal air untuk hot-reload (opsional)
-RUN go install github.com/air-verse/air@latest
+# Install air for hot-reload
+RUN go install github.com/air-verse/air@v1.61.7
 
-# Command agar container tetap menyala
+# Command to keep container running
 CMD ["tail", "-f", "/dev/null"]
