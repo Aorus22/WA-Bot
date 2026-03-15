@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: wa-bot-api-dev
+    network_mode: host
+    volumes:
+      - .:/app
+      - /home/aorus/bimalord-bot/database:/app/database
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Jakarta
+    stdin_open: true
+    tty: true
+    command: tail -f /dev/null
+
+  frontend:
+    build:
+      context: ./Wa-Bot-FE
+      dockerfile: Dockerfile.dev
+    container_name: wa-bot-fe-dev
+    network_mode: host
+    volumes:
+      - ./Wa-Bot-FE:/app
+    stdin_open: true
+    tty: true
+    command: tail -f /dev/null
