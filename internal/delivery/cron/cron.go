@@ -19,10 +19,14 @@ type CronScheduler struct {
 }
 
 func NewCronScheduler(cronRepo repository.CronJobRepository, luaService *lua.LuaService) *CronScheduler {
+	// Custom parser: seconds optional, support standard 5-field and 6-field
+	parser := cron.NewParser(
+		cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+	)
 	return &CronScheduler{
 		cronRepo:   cronRepo,
 		luaService: luaService,
-		cron:       cron.New(),
+		cron:       cron.New(cron.WithParser(parser)),
 		entryIDs:   make(map[string]cron.EntryID),
 	}
 }
@@ -30,6 +34,14 @@ func NewCronScheduler(cronRepo repository.CronJobRepository, luaService *lua.Lua
 func (c *CronScheduler) Start() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// Initialize cron if stopped (optional safety)
+	if c.cron == nil {
+		parser := cron.NewParser(
+			cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+		)
+		c.cron = cron.New(cron.WithParser(parser))
+	}
 
 	err := c.loadJobs()
 	if err != nil {
@@ -42,7 +54,9 @@ func (c *CronScheduler) Start() error {
 }
 
 func (c *CronScheduler) Stop() {
-	c.cron.Stop()
+	if c.cron != nil {
+		c.cron.Stop()
+	}
 }
 
 func (c *CronScheduler) Reload() error {
@@ -50,8 +64,13 @@ func (c *CronScheduler) Reload() error {
 	defer c.mu.Unlock()
 
 	// Stop current cron and clear entries
-	c.cron.Stop()
-	c.cron = cron.New()
+	if c.cron != nil {
+		c.cron.Stop()
+	}
+	parser := cron.NewParser(
+		cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+	)
+	c.cron = cron.New(cron.WithParser(parser))
 	c.entryIDs = make(map[string]cron.EntryID)
 
 	err := c.loadJobs()
