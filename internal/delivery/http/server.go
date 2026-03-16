@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/delivery/cron"
 	"wa-bot/internal/delivery/http/handlers"
 	"wa-bot/internal/delivery/http/middleware"
 	"wa-bot/internal/delivery/http/routes"
@@ -20,11 +21,13 @@ type LuaService interface {
 }
 
 type HTTPServer struct {
-	server   *http.Server
-	handler  *handlers.Handler
-	router   *routes.Router
-	hub      *WSHub
-	msgRepo  *repository.MessageStore
+	server        *http.Server
+	handler       *handlers.Handler
+	router        *routes.Router
+	hub           *WSHub
+	msgRepo       *repository.MessageStore
+	config        repository.ConfigRepository
+	cronScheduler *cron.CronScheduler
 }
 
 func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.ConfigRepository, storage repository.StorageRepository) *HTTPServer {
@@ -36,6 +39,7 @@ func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.Confi
 		handler: h,
 		router:  r,
 		hub:     hub,
+		config:  config,
 	}
 }
 
@@ -56,8 +60,9 @@ func (s *HTTPServer) SetCronRepo(repo repository.CronJobRepository) {
 	s.handler.SetCronRepo(repo)
 }
 
-func (s *HTTPServer) SetCronScheduler(scheduler any) {
-	s.handler.SetCronScheduler(scheduler)
+func (s *HTTPServer) SetCronScheduler(cs *cron.CronScheduler) {
+	s.cronScheduler = cs
+	s.handler.SetCronScheduler(cs)
 }
 
 func (s *HTTPServer) GetHub() *WSHub {
@@ -72,15 +77,20 @@ func (s *HTTPServer) Start() error {
 
 	go s.hub.Run()
 
+	port := s.config.Get("PORT")
+	if port == "" {
+		port = "3000"
+	}
+
 	s.server = &http.Server{
-		Addr:         ":3090",
+		Addr:         ":" + port,
 		Handler:      s.createHandler(muxRouter),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	fmt.Println("Server running on port 3090")
+	fmt.Printf("Server running on port %s\n", port)
 	return s.server.ListenAndServe()
 }
 

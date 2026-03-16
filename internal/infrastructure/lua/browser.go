@@ -3,6 +3,7 @@ package lua
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -108,22 +109,12 @@ func (s *LuaService) browserRun(L *lua.LState) int {
 				actions = append(actions, chromedp.SendKeys(sel, key))
 			}
 
-		case "hover":
-			sel := getString(tbl, "selector")
-			actions = append(actions, chromedp.Hover(sel))
-
 		case "evaluate":
 			script := getString(tbl, "script")
 			key := getString(tbl, "key")
 			if key == "" {
 				key = "eval_result"
 			}
-			actions = append(actions, chromedp.Evaluate(script, nil, func(p *chromedp.EvaluateParams) *chromedp.EvaluateParams {
-				return p.WithAwaitPromise(true)
-			}))
-			// Note: For complex return values, we'd need more logic, 
-			// but for now let's support simple string returns via a different pattern if needed.
-			// Implementing a simplified version that captures the result:
 			var res interface{}
 			actions = append(actions, chromedp.Evaluate(script, &res))
 			actions = append(actions, chromedp.ActionFunc(func(c context.Context) error {
@@ -187,18 +178,14 @@ func (s *LuaService) browserRun(L *lua.LState) int {
 				if sel != "" {
 					err = chromedp.Screenshot(sel, &buf, chromedp.NodeVisible).Do(c)
 				} else {
-					// Use CaptureScreenshot instead of FullScreenshot for better compatibility
-					// format defaults to png
 					err = chromedp.CaptureScreenshot(&buf).Do(c)
 				}
 				
 				if err != nil {
-					// Don't fail the whole chain, just log the error
 					results[filename] = "Screenshot failed: " + err.Error()
 					return nil 
 				}
 				
-				// Save to storage
 				_, err = s.storage.Save(context.Background(), filename, bytes.NewReader(buf))
 				if err == nil {
 					results[filename] = s.storage.GetPath(filename)

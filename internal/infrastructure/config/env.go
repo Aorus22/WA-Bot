@@ -31,3 +31,19 @@ func (e *EnvConfig) GetBool(key string) bool {
 	val := os.Getenv(key)
 	return val == "true" || val == "1"
 }
+
+func (e *EnvConfig) GetRedisURL() string {
+	val := os.Getenv("REDIS_URL")
+	if val == "" {
+		return "localhost:6379"
+	}
+	return val
+}
+
+func (e *EnvConfig) GetRedisPassword() string {
+	return os.Getenv("REDIS_PASSWORD")
+}
+
+func (e *EnvConfig) GetRedisDB() int {
+	return e.GetInt("REDIS_DB")
+}

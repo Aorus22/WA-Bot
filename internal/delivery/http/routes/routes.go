@@ -10,7 +10,6 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"wa-bot/internal/delivery/cron"
 	"wa-bot/internal/delivery/http/handlers"
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/lua"
@@ -39,7 +38,11 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	messageHandler := handlers.NewMessageHandler(r.handler)
 	chatHandler := handlers.NewChatHandler(r.handler)
 	triggerHandler := handlers.NewTriggerHandler(r.handler)
-	cronHandler := handlers.NewCronHandler(r.handler.GetCronRepo(), r.handler.GetCronScheduler().(*cron.CronScheduler), r.handler.GetLuaService().(*lua.LuaService))
+	
+	// Type assertion needed because handler interface doesn't match concrete type directly in struct initialization
+	luaSvc := r.handler.GetLuaService().(*lua.LuaService)
+	
+	cronHandler := handlers.NewCronHandler(r.handler.GetCronRepo(), r.handler.GetCronScheduler(), luaSvc)
 	cronHandler.SetHandler(r.handler)
 	stickerHandler := handlers.NewStickerHandler(r.handler)
 	systemHandler := handlers.NewSystemHandler(r.handler)
