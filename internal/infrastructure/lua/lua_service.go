@@ -20,6 +20,7 @@ import (
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
 	"wa-bot/internal/infrastructure/media"
+	"wa-bot/internal/infrastructure/storage"
 	"wa-bot/internal/infrastructure/util"
 	"wa-bot/internal/infrastructure/whatsapp"
 )
@@ -31,6 +32,7 @@ type LuaService struct {
 	storage     repository.StorageRepository
 	gemini      *ai.GeminiService
 	mediaDown   *media.MediaDownloader
+	redis       *storage.RedisService
 }
 
 func NewLuaService(
@@ -40,6 +42,7 @@ func NewLuaService(
 	storage repository.StorageRepository,
 	gemini *ai.GeminiService,
 	mediaDown *media.MediaDownloader,
+	redis *storage.RedisService,
 ) *LuaService {
 	return &LuaService{
 		waClient:    waClient,
@@ -48,6 +51,7 @@ func NewLuaService(
 		storage:     storage,
 		gemini:      gemini,
 		mediaDown:   mediaDown,
+		redis:       redis,
 	}
 }
 
@@ -114,6 +118,15 @@ func (s *LuaService) newLuaState(ctx context.Context) *lua.LState {
 	L.SetGlobal("storage_delete", L.NewFunction(s.luaStorageDelete))
 	L.SetGlobal("storage_exists", L.NewFunction(s.luaStorageExists))
 	L.SetGlobal("storage_path", L.NewFunction(s.luaStoragePath))
+
+	// Redis functions
+	L.SetGlobal("redis_set", L.NewFunction(s.luaRedisSet))
+	L.SetGlobal("redis_get", L.NewFunction(s.luaRedisGet))
+	L.SetGlobal("redis_del", L.NewFunction(s.luaRedisDel))
+	L.SetGlobal("redis_exists", L.NewFunction(s.luaRedisExists))
+	L.SetGlobal("redis_hset", L.NewFunction(s.luaRedisHSet))
+	L.SetGlobal("redis_hget", L.NewFunction(s.luaRedisHGet))
+	L.SetGlobal("redis_hgetall", L.NewFunction(s.luaRedisHGetAll))
 
 	// Command line functions
 	L.SetGlobal("ffmpeg", L.NewFunction(s.luaFFmpeg))
@@ -554,6 +567,15 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	L.SetGlobal("webpmux", L.NewFunction(s.luaWebpmux))
 	L.SetGlobal("whatsapp_exif", L.NewFunction(s.luaWhatsappExif))
 
+	// Redis Mocks for testing
+	L.SetGlobal("redis_set", L.NewFunction(func(L *lua.LState) int { return 0 }))
+	L.SetGlobal("redis_get", L.NewFunction(func(L *lua.LState) int { L.Push(lua.LString("mock_val")); return 1 }))
+	L.SetGlobal("redis_del", L.NewFunction(func(L *lua.LState) int { return 0 }))
+	L.SetGlobal("redis_exists", L.NewFunction(func(L *lua.LState) int { L.Push(lua.LBool(true)); return 1 }))
+	L.SetGlobal("redis_hset", L.NewFunction(func(L *lua.LState) int { return 0 }))
+	L.SetGlobal("redis_hget", L.NewFunction(func(L *lua.LState) int { L.Push(lua.LString("mock_val")); return 1 }))
+	L.SetGlobal("redis_hgetall", L.NewFunction(func(L *lua.LState) int { L.Push(L.NewTable()); return 1 }))
+
 	s.RegisterCheerio(L)
 	s.RegisterBrowser(L)
 
@@ -941,6 +963,94 @@ func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 		return 2
 	}
 	L.Push(lua.LString(res))
+	return 1
+}
+
+func (s *LuaService) luaRedisSet(L *lua.LState) int {
+	key := L.CheckString(1)
+	value := L.CheckString(2)
+	ttl := L.OptInt(3, 0) // In seconds, 0 = no expiration
+
+	err := s.redis.Set(context.Background(), key, value, time.Duration(ttl)*time.Second)
+	if err != nil {
+		L.Push(lua.LString(err.Error()))
+		return 1
+	}
+	return 0
+}
+
+func (s *LuaService) luaRedisGet(L *lua.LState) int {
+	key := L.CheckString(1)
+	val, err := s.redis.Get(context.Background(), key)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	L.Push(lua.LString(val))
+	return 1
+}
+
+func (s *LuaService) luaRedisDel(L *lua.LState) int {
+	key := L.CheckString(1)
+	err := s.redis.Del(context.Background(), key)
+	if err != nil {
+		L.Push(lua.LString(err.Error()))
+		return 1
+	}
+	return 0
+}
+
+func (s *LuaService) luaRedisExists(L *lua.LState) int {
+	key := L.CheckString(1)
+	exists, err := s.redis.Exists(context.Background(), key)
+	if err != nil {
+		L.Push(lua.LBool(false))
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	L.Push(lua.LBool(exists))
+	return 1
+}
+
+func (s *LuaService) luaRedisHSet(L *lua.LState) int {
+	key := L.CheckString(1)
+	field := L.CheckString(2)
+	value := L.CheckString(3)
+	err := s.redis.HSet(context.Background(), key, field, value)
+	if err != nil {
+		L.Push(lua.LString(err.Error()))
+		return 1
+	}
+	return 0
+}
+
+func (s *LuaService) luaRedisHGet(L *lua.LState) int {
+	key := L.CheckString(1)
+	field := L.CheckString(2)
+	val, err := s.redis.HGet(context.Background(), key, field)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	L.Push(lua.LString(val))
+	return 1
+}
+
+func (s *LuaService) luaRedisHGetAll(L *lua.LState) int {
+	key := L.CheckString(1)
+	vals, err := s.redis.HGetAll(context.Background(), key)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	table := L.NewTable()
+	for k, v := range vals {
+		L.RawSet(table, lua.LString(k), lua.LString(v))
+	}
+	L.Push(table)
 	return 1
 }
 

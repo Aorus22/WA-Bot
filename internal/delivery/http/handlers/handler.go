@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/delivery/cron"
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
@@ -29,7 +30,7 @@ type Handler struct {
 	msgRepo       *repository.MessageStore
 	triggerRepo   repository.TriggerRepository
 	cronRepo      repository.CronJobRepository
-	cronScheduler any // to avoid circular import if needed, or use interface
+	cronScheduler *cron.CronScheduler
 	lua           LuaService
 	hub           any
 }
@@ -58,7 +59,7 @@ func (h *Handler) SetCronRepo(repo repository.CronJobRepository) {
 	h.cronRepo = repo
 }
 
-func (h *Handler) SetCronScheduler(scheduler any) {
+func (h *Handler) SetCronScheduler(scheduler *cron.CronScheduler) {
 	h.cronScheduler = scheduler
 }
 
@@ -70,7 +71,7 @@ func (h *Handler) GetCronRepo() repository.CronJobRepository {
 	return h.cronRepo
 }
 
-func (h *Handler) GetCronScheduler() any {
+func (h *Handler) GetCronScheduler() *cron.CronScheduler {
 	return h.cronScheduler
 }
 

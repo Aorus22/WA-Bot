@@ -15,6 +15,7 @@ services:
       - LIGHTPANDA_CDP_URL=http://localhost:9222
     depends_on:
       - lightpanda
+      - redis
     stdin_open: true
     tty: true
     command: tail -f /dev/null
@@ -24,6 +25,14 @@ services:
     container_name: wa-bot-lightpanda
     network_mode: host
     restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: wa-bot-redis-dev
+    network_mode: host
+    restart: always
+    volumes:
+      - redis_data_dev:/data
 
   frontend:
     build:
@@ -36,3 +45,6 @@ services:
     stdin_open: true
     tty: true
     command: tail -f /dev/null
+
+volumes:
+  redis_data_dev:

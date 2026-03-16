@@ -47,7 +47,11 @@ func (a *App) Run() error {
 	go a.HandleSession()
 
 	// Start HTTP server (this is blocking)
-	fmt.Printf("Starting HTTP server on port %s...\n", a.config.Get("PORT"))
+	port := a.config.Get("PORT")
+	if port == "" {
+		port = "3000"
+	}
+	fmt.Printf("Starting HTTP server on port %s...\n", port)
 	if err := a.httpServer.Start(); err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
@@ -108,7 +112,7 @@ func InitializeApp() (*App, error) {
 
 	logLevel := cfg.Get("LOG_LEVEL")
 	if logLevel == "" {
-		logLevel = "DEBUG"
+		logLevel = "INFO"
 	}
 	dbURL := "file:database/wa-bot-session.db?_foreign_keys=on"
 	dbLog := waLog.Stdout("Database", "WARN", true)
@@ -125,6 +129,7 @@ func InitializeApp() (*App, error) {
 	}
 
 	mediaDownloader := media.NewMediaDownloader(storageRepo)
+	redisService := storage.NewRedisService(cfg)
 
 	handlerUC := usecase.NewHandlerUseCase(stateRepo, waClient)
 	deliveryWaService := whatsapp.NewWhatsAppService(waClient, cfg)
@@ -143,7 +148,7 @@ func InitializeApp() (*App, error) {
 		return nil, fmt.Errorf("failed to create app store: %w", err)
 	}
 
-	luaService := lua.NewLuaService(waClient, appStore, stateRepo, storageRepo, geminiService, mediaDownloader)
+	luaService := lua.NewLuaService(waClient, appStore, stateRepo, storageRepo, geminiService, mediaDownloader, redisService)
 	eventHandler.SetLuaService(luaService)
 	httpServer.SetLuaService(luaService)
 	httpServer.SetTriggerRepo(appStore)
