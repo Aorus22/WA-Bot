@@ -271,26 +271,49 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 
 	return tx.Commit()
 }
-func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) {
+func (s *MessageStore) GetMessages(chatID string, limit int, before int64) ([]Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `
-                WITH linked_chats AS (
-                    SELECT ? as id
-                    UNION
-                    SELECT lid FROM lid_mapping WHERE pn_jid = ?
-                    UNION
-                    SELECT pn_jid FROM lid_mapping WHERE lid = ?
-                )
-                SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
-                FROM messages
-                WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
-                ORDER BY timestamp DESC
-                LIMIT ?
-        `
+	var query string
+	var args []interface{}
 
-	rows, err := s.db.Query(query, chatID, chatID, chatID, limit)
+	if before > 0 {
+		query = `
+			WITH linked_chats AS (
+				SELECT ? as id
+				UNION
+				SELECT lid FROM lid_mapping WHERE pn_jid = ?
+				UNION
+				SELECT pn_jid FROM lid_mapping WHERE lid = ?
+			)
+			SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+			FROM messages
+			WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+			AND timestamp < ?
+			ORDER BY timestamp DESC
+			LIMIT ?
+		`
+		args = []interface{}{chatID, chatID, chatID, before, limit}
+	} else {
+		query = `
+			WITH linked_chats AS (
+				SELECT ? as id
+				UNION
+				SELECT lid FROM lid_mapping WHERE pn_jid = ?
+				UNION
+				SELECT pn_jid FROM lid_mapping WHERE lid = ?
+			)
+			SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+			FROM messages
+			WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+			ORDER BY timestamp DESC
+			LIMIT ?
+		`
+		args = []interface{}{chatID, chatID, chatID, limit}
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

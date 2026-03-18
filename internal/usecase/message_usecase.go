@@ -39,8 +39,8 @@ func (uc *MessageUseCase) SendMessage(chatID, content string) error {
 	return uc.msgStore.SaveMessage(msg)
 }
 
-func (uc *MessageUseCase) GetMessages(chatID string, limit int) ([]repository.Message, error) {
-	return uc.msgStore.GetMessages(chatID, limit)
+func (uc *MessageUseCase) GetMessages(chatID string, limit int, before int64) ([]repository.Message, error) {
+	return uc.msgStore.GetMessages(chatID, limit, before)
 }
 
 func (uc *MessageUseCase) GetChats() ([]repository.Chat, error) {
