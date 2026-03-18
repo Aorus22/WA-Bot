@@ -271,45 +271,33 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 
 	return tx.Commit()
 }
-func (s *MessageStore) GetMessages(chatID string, limit int, before int64) ([]Message, error) {
+func (s *MessageStore) GetMessages(chatID string, limit int, before int64, after int64) ([]Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var query string
 	var args []interface{}
 
+	baseQuery := `
+		WITH linked_chats AS (
+			SELECT ? as id
+			UNION
+			SELECT lid FROM lid_mapping WHERE pn_jid = ?
+			UNION
+			SELECT pn_jid FROM lid_mapping WHERE lid = ?
+		)
+		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		FROM messages
+		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)`
+
 	if before > 0 {
-		query = `
-			WITH linked_chats AS (
-				SELECT ? as id
-				UNION
-				SELECT lid FROM lid_mapping WHERE pn_jid = ?
-				UNION
-				SELECT pn_jid FROM lid_mapping WHERE lid = ?
-			)
-			SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
-			FROM messages
-			WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
-			AND timestamp < ?
-			ORDER BY timestamp DESC
-			LIMIT ?
-		`
+		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, before, limit}
+	} else if after > 0 {
+		query = baseQuery + ` AND timestamp > ? ORDER BY timestamp ASC LIMIT ?`
+		args = []interface{}{chatID, chatID, chatID, after, limit}
 	} else {
-		query = `
-			WITH linked_chats AS (
-				SELECT ? as id
-				UNION
-				SELECT lid FROM lid_mapping WHERE pn_jid = ?
-				UNION
-				SELECT pn_jid FROM lid_mapping WHERE lid = ?
-			)
-			SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
-			FROM messages
-			WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
-			ORDER BY timestamp DESC
-			LIMIT ?
-		`
+		query = baseQuery + ` ORDER BY timestamp DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, limit}
 	}
 
@@ -344,12 +332,124 @@ func (s *MessageStore) GetMessages(chatID string, limit int, before int64) ([]Me
 		messages = append(messages, msg)
 	}
 
-	// Reverse to get chronological order
-	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
-		messages[i], messages[j] = messages[j], messages[i]
+	// Reverse to get chronological order if we were fetching "before" or the latest
+	if after == 0 {
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
 	}
 
 	return messages, nil
+}
+
+func (s *MessageStore) SearchMessages(chatID string, query string, limit int) ([]Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	sql := `
+		WITH linked_chats AS (
+			SELECT ? as id
+			UNION
+			SELECT lid FROM lid_mapping WHERE pn_jid = ?
+			UNION
+			SELECT pn_jid FROM lid_mapping WHERE lid = ?
+		)
+		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		FROM messages
+		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND content LIKE ?
+		ORDER BY timestamp DESC
+		LIMIT ?
+	`
+	args := []interface{}{chatID, chatID, chatID, "%" + query + "%", limit}
+
+	rows, err := s.db.Query(sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		var isAuto int
+		err := rows.Scan(
+			&msg.ID,
+			&msg.ChatID,
+			&msg.From,
+			&msg.To,
+			&msg.Content,
+			&msg.Timestamp,
+			&msg.Status,
+			&msg.Type,
+			&msg.MediaURL,
+			&isAuto,
+			&msg.SenderName,
+			&msg.ReplyToID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		msg.IsAutomatic = isAuto == 1
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+func (s *MessageStore) GetMessageContext(chatID string, messageID string, limit int) ([]Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var targetTimestamp int64
+	err := s.db.QueryRow("SELECT timestamp FROM messages WHERE id = ?", messageID).Scan(&targetTimestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	half := limit / 2
+
+	// Get messages before
+	before, err := s.GetMessages(chatID, half, targetTimestamp, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get target message
+	var targetMsg Message
+	var isAuto int
+	err = s.db.QueryRow(`
+		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		FROM messages WHERE id = ?
+	`, messageID).Scan(
+		&targetMsg.ID,
+		&targetMsg.ChatID,
+		&targetMsg.From,
+		&targetMsg.To,
+		&targetMsg.Content,
+		&targetMsg.Timestamp,
+		&targetMsg.Status,
+		&targetMsg.Type,
+		&targetMsg.MediaURL,
+		&isAuto,
+		&targetMsg.SenderName,
+		&targetMsg.ReplyToID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	targetMsg.IsAutomatic = isAuto == 1
+
+	// Get messages after
+	after, err := s.GetMessages(chatID, half, 0, targetTimestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	result := append(before, targetMsg)
+	result = append(result, after...)
+
+	return result, nil
 }
 
 func (s *MessageStore) GetChats() ([]Chat, error) {

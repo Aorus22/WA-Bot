@@ -40,35 +40,95 @@ func (ch *ChatHandler) GetChats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ch *ChatHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
-        if ch.handler.msgRepo == nil {
-                ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
-                return
-        }
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
 
-        vars := mux.Vars(r)
-        chatID := vars["id"]
+	vars := mux.Vars(r)
+	chatID := vars["id"]
 
-        limit := 100
-        limitStr := r.URL.Query().Get("limit")
-        if limitStr != "" {
-                fmt.Sscanf(limitStr, "%d", &limit)
-        }
+	limit := 100
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+	}
 
-        var before int64
-        beforeStr := r.URL.Query().Get("before")
-        if beforeStr != "" {
-                fmt.Sscanf(beforeStr, "%d", &before)
-        }
+	var before int64
+	beforeStr := r.URL.Query().Get("before")
+	if beforeStr != "" {
+		fmt.Sscanf(beforeStr, "%d", &before)
+	}
 
-        messages, err := ch.handler.msgRepo.GetMessages(chatID, limit, before)
-        if err != nil {
-                ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
-                return
-        }
+	var after int64
+	afterStr := r.URL.Query().Get("after")
+	if afterStr != "" {
+		fmt.Sscanf(afterStr, "%d", &after)
+	}
 
-        ch.handler.sendJSON(w, messages)
+	messages, err := ch.handler.msgRepo.GetMessages(chatID, limit, before, after)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, messages)
+}
+
+func (ch *ChatHandler) SearchMessages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+	query := r.URL.Query().Get("q")
+
+	limit := 50
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+	}
+
+	messages, err := ch.handler.msgRepo.SearchMessages(chatID, query, limit)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, messages)
+}
+
+func (ch *ChatHandler) GetMessageContext(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+	msgID := vars["msgId"]
+
+	limit := 50
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+	}
+
+	messages, err := ch.handler.msgRepo.GetMessageContext(chatID, msgID, limit)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, messages)
 }
 func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
