@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
@@ -161,10 +162,12 @@ func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byt
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
+	mimetype := http.DetectContentType(data)
+
 	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:         proto.String(title),
-			Mimetype:      proto.String("application/pdf"),
+			Mimetype:      proto.String(mimetype),
 			URL:           proto.String(uploaded.URL),
 			DirectPath:    proto.String(uploaded.DirectPath),
 			MediaKey:      uploaded.MediaKey,
@@ -217,10 +220,12 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 		return "", err
 	}
 
+	mimetype := http.DetectContentType(data)
+
 	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:         proto.String(title),
-			Mimetype:      proto.String("application/pdf"),
+			Mimetype:      proto.String(mimetype),
 			URL:           proto.String(uploaded.URL),
 			DirectPath:    proto.String(uploaded.DirectPath),
 			MediaKey:      uploaded.MediaKey,
