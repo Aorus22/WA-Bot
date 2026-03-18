@@ -128,6 +128,8 @@ func (s *MessageStore) init() error {
 	// Migration: Add is_automatic column if it doesn't exist
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN is_automatic INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN sender_name TEXT")
+	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN unread INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("UPDATE chats SET unread = 0 WHERE unread IS NULL")
 
 	// Migration: Ensure favorite_stickers has the 'id' column (handling old implementation)
 	var tableExists bool
@@ -196,22 +198,40 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 		if strings.HasSuffix(msg.ChatID, "@g.us") {
 			isGroup = 1
 		}
+		unread := 0
+		if msg.Status == "received" {
+			unread = 1
+		}
 		_, err = tx.Exec(`
-                        INSERT INTO chats (id, name, last_msg, last_time, is_active, is_group)
-                        VALUES (?, ?, ?, ?, 1, ?)
-                `, msg.ChatID, name, msg.Content, msg.Timestamp, isGroup)
+                        INSERT INTO chats (id, name, last_msg, last_time, unread, is_active, is_group)
+                        VALUES (?, ?, ?, ?, ?, 1, ?)
+                `, msg.ChatID, name, msg.Content, msg.Timestamp, unread, isGroup)
 	} else {
 		// Update chat name if provided
 		if msg.ChatName != "" {
-			_, err = tx.Exec(`
-                                UPDATE chats SET name = ?, last_msg = ?, last_time = ?, updated_at = ?
-                                WHERE id = ?
-                        `, msg.ChatName, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+			if msg.Status == "received" {
+				_, err = tx.Exec(`
+                                        UPDATE chats SET name = ?, last_msg = ?, last_time = ?, unread = ifnull(unread, 0) + 1, updated_at = ?
+                                        WHERE id = ?
+                                `, msg.ChatName, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+			} else {
+				_, err = tx.Exec(`
+                                        UPDATE chats SET name = ?, last_msg = ?, last_time = ?, updated_at = ?
+                                        WHERE id = ?
+                                `, msg.ChatName, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+			}
 		} else {
-			_, err = tx.Exec(`
-                                UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
-                                WHERE id = ?
-                        `, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+			if msg.Status == "received" {
+				_, err = tx.Exec(`
+                                        UPDATE chats SET last_msg = ?, last_time = ?, unread = ifnull(unread, 0) + 1, updated_at = ?
+                                        WHERE id = ?
+                                `, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+			} else {
+				_, err = tx.Exec(`
+                                        UPDATE chats SET last_msg = ?, last_time = ?, updated_at = ?
+                                        WHERE id = ?
+                                `, msg.Content, msg.Timestamp, time.Now().Unix(), msg.ChatID)
+			}
 		}
 	}
 	if err != nil {
@@ -290,7 +310,7 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 	defer s.mu.RUnlock()
 
 	query := `
-                SELECT id, name, ifnull(avatar, '') as avatar, last_msg, last_time, unread, is_active, is_group
+                SELECT id, name, ifnull(avatar, '') as avatar, last_msg, last_time, ifnull(unread, 0) as unread, is_active, is_group
                 FROM chats
                 ORDER BY last_time DESC
         `
