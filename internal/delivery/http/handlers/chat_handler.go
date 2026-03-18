@@ -56,7 +56,13 @@ func (ch *ChatHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
                 fmt.Sscanf(limitStr, "%d", &limit)
         }
 
-        messages, err := ch.handler.msgRepo.GetMessages(chatID, limit)
+        var before int64
+        beforeStr := r.URL.Query().Get("before")
+        if beforeStr != "" {
+                fmt.Sscanf(beforeStr, "%d", &before)
+        }
+
+        messages, err := ch.handler.msgRepo.GetMessages(chatID, limit, before)
         if err != nil {
                 ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
                 return
