@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -329,9 +330,35 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 		} else if evt.Message.GetDocumentMessage() != nil {
 			msgType = "document"
 			doc := evt.Message.GetDocumentMessage()
-			content = doc.GetTitle()
-			if content == "" {
-				content = "[Document]"
+			msg := &entity.Message{
+				VMessage:  evt.Message,
+				Timestamp: evt.Info.Timestamp,
+				IsGroup:   evt.Info.IsGroup,
+				SenderJID: senderJID.String(),
+			}
+
+			data, _, err := h.waClient.DownloadMedia(ctx, msg)
+			if err == nil && len(data) > 0 {
+				ext := filepath.Ext(doc.GetFileName())
+				if ext == "" {
+					ext = ".bin"
+				}
+				safeJID := strings.ReplaceAll(senderJID.String(), "@", "_")
+				safeJID = strings.ReplaceAll(safeJID, ".", "_")
+				filename := fmt.Sprintf("doc_%d_%s%s", time.Now().UnixMilli(), safeJID, ext)
+
+				if _, err := h.storage.Save(ctx, filename, bytes.NewReader(data)); err == nil {
+					mediaURL = fmt.Sprintf("/media/%s", filename)
+				}
+				content = doc.GetFileName()
+				if content == "" {
+					content = doc.GetTitle()
+				}
+			} else {
+				content = doc.GetTitle()
+				if content == "" {
+					content = "[Document]"
+				}
 			}
 		} else {
 			content = messageText
