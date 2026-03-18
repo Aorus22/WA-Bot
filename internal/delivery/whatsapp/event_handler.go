@@ -71,6 +71,28 @@ func (h *WhatsAppEventHandler) SetLuaService(luaService LuaService) {
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
+		fmt.Printf("\n📩 [MSG_IN] ID: %s | From: %s | Alt: %s\n", v.Info.ID, v.Info.Sender.String(), v.Info.SenderAlt.String())
+		if h.msgStore != nil && !v.Info.IsGroup {
+			sender := v.Info.Sender.ToNonAD()
+			alt := v.Info.SenderAlt.ToNonAD()
+
+			if !alt.IsEmpty() {
+				fmt.Printf("[MAP_DEBUG] Checking: %s | Alt: %s\n", sender.String(), alt.String())
+
+				// Server-agnostic mapping: if one is PN (s.whatsapp.net) and other is not, it's a mapping
+				if sender.Server == "s.whatsapp.net" && alt.Server != "s.whatsapp.net" {
+					h.msgStore.SaveLIDMapping(alt.String(), sender.String())
+					fmt.Printf("✅ [MAP_SAVE] Linked LID %s to PN %s\n", alt.String(), sender.String())
+				} else if alt.Server == "s.whatsapp.net" && sender.Server != "s.whatsapp.net" {
+					h.msgStore.SaveLIDMapping(sender.String(), alt.String())
+					fmt.Printf("✅ [MAP_SAVE] Linked LID %s to PN %s\n", sender.String(), alt.String())
+				}
+			} else {
+				fmt.Printf("⚠️ [MAP_SKIP] SenderAlt is empty\n")
+			}
+		}
+
+
 		h.handleMessage(v)
 	case *events.Receipt:
 		h.handleReceipt(v)

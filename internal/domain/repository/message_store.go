@@ -109,6 +109,10 @@ func (s *MessageStore) init() error {
                         is_animated INTEGER DEFAULT 0,
                         created_at INTEGER DEFAULT (strftime('%s', 'now'))
                 )`,
+		`CREATE TABLE IF NOT EXISTS lid_mapping (
+                        lid TEXT PRIMARY KEY,
+                        pn_jid TEXT
+                )`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS update_chat_timestamp
@@ -167,6 +171,19 @@ func (s *MessageStore) init() error {
 	}
 
 	return nil
+}
+
+func (s *MessageStore) SaveLIDMapping(lid, pnJID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	fmt.Printf("[DB] Saving LID mapping: %s -> %s\n", lid, pnJID)
+	_, err := s.db.Exec(`
+                INSERT OR REPLACE INTO lid_mapping (lid, pn_jid)
+                VALUES (?, ?)
+        `, lid, pnJID)
+
+	return err
 }
 
 func (s *MessageStore) SaveMessage(msg *Message) error {
@@ -259,14 +276,21 @@ func (s *MessageStore) GetMessages(chatID string, limit int) ([]Message, error) 
 	defer s.mu.RUnlock()
 
 	query := `
+                WITH linked_chats AS (
+                    SELECT ? as id
+                    UNION
+                    SELECT lid FROM lid_mapping WHERE pn_jid = ?
+                    UNION
+                    SELECT pn_jid FROM lid_mapping WHERE lid = ?
+                )
                 SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
                 FROM messages
-                WHERE chat_id = ?
+                WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
                 ORDER BY timestamp DESC
                 LIMIT ?
         `
 
-	rows, err := s.db.Query(query, chatID, limit)
+	rows, err := s.db.Query(query, chatID, chatID, chatID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -310,9 +334,46 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 	defer s.mu.RUnlock()
 
 	query := `
-                SELECT id, name, ifnull(avatar, '') as avatar, last_msg, last_time, ifnull(unread, 0) as unread, is_active, is_group
-                FROM chats
-                ORDER BY last_time DESC
+                WITH normalized_chats AS (
+                    SELECT 
+                        CASE 
+                            WHEN c.id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = c.id), c.id)
+                            WHEN c.id LIKE '%@s.whatsapp.net' THEN c.id
+                            ELSE c.id
+                        END as target_id,
+                        c.name,
+                        c.avatar,
+                        c.last_msg,
+                        c.last_time,
+                        c.unread,
+                        c.is_active,
+                        c.is_group,
+                        c.id as original_id
+                    FROM chats c
+                ),
+                grouped_chats AS (
+                    SELECT 
+                        target_id, 
+                        COALESCE(MAX(CASE WHEN name != target_id AND name != '' AND name NOT LIKE '%@%' THEN name END), MAX(name)) as name, 
+                        COALESCE(MAX(CASE WHEN avatar != '' THEN avatar END), '') as avatar,
+                        MAX(last_time) as last_time,
+                        SUM(unread) as unread,
+                        MAX(is_active) as is_active,
+                        MAX(is_group) as is_group
+                    FROM normalized_chats
+                    GROUP BY target_id
+                )
+                SELECT 
+                    g.target_id, 
+                    g.name, 
+                    g.avatar, 
+                    COALESCE((SELECT last_msg FROM normalized_chats nc2 WHERE nc2.target_id = g.target_id ORDER BY last_time DESC LIMIT 1), '') as last_msg,
+                    g.last_time,
+                    g.unread,
+                    g.is_active,
+                    g.is_group
+                FROM grouped_chats g
+                ORDER BY g.last_time DESC
         `
 
 	rows, err := s.db.Query(query)
