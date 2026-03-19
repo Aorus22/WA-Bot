@@ -186,6 +186,27 @@ func (s *MessageStore) SaveLIDMapping(lid, pnJID string) error {
 	return err
 }
 
+func (s *MessageStore) ResolveChatID(chatID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if strings.HasSuffix(chatID, "@lid") {
+		var pnJID string
+		err := s.db.QueryRow("SELECT pn_jid FROM lid_mapping WHERE lid = ?", chatID).Scan(&pnJID)
+		if err == nil && pnJID != "" {
+			return pnJID
+		}
+	} else if strings.HasSuffix(chatID, "@s.whatsapp.net") || strings.HasSuffix(chatID, "@g.us") {
+		var lid string
+		err := s.db.QueryRow("SELECT lid FROM lid_mapping WHERE pn_jid = ?", chatID).Scan(&lid)
+		if err == nil && lid != "" {
+			return chatID
+		}
+	}
+
+	return chatID
+}
+
 func (s *MessageStore) SaveMessage(msg *Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
