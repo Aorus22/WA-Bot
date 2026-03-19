@@ -61,6 +61,9 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/chats/{id}/messages", chatHandler.GetMessages).Methods("GET")
 	api.HandleFunc("/chats/{id}/search", chatHandler.SearchMessages).Methods("GET")
 	api.HandleFunc("/chats/{id}/messages/{msgId}/context", chatHandler.GetMessageContext).Methods("GET")
+	api.HandleFunc("/chats/{id}/media", chatHandler.GetChatMedia).Methods("GET")
+	api.HandleFunc("/chats/{id}/docs", chatHandler.GetChatDocs).Methods("GET")
+	api.HandleFunc("/chats/{id}/links", chatHandler.GetChatLinks).Methods("GET")
 	api.HandleFunc("/chats/{id}/read", chatHandler.MarkAsRead).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/chats/{chatId}/messages/{id}/delete", msgMgmtHandler.DeleteMessage).Methods("POST", "OPTIONS")
