@@ -869,8 +869,8 @@ func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]M
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND msg_type = 'text'
-		AND content LIKE '%http%://%'"`
-
+		AND content LIKE '%http%://%'
+	`
 	if before > 0 {
 		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, before, limit}
