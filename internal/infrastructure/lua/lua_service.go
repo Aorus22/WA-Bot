@@ -512,7 +512,7 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	}))
 	L.SetGlobal("gemini_chat", L.NewFunction(func(L *lua.LState) int {
 		prompt := L.CheckString(1)
-		modelName := L.OptString(2, "gemini-2.0-flash")
+		modelName := L.OptString(2, "gemma-3-27b-it")
 		filePath := L.OptString(3, "")
 		actions = append(actions, fmt.Sprintf("Action: gemini_chat(prompt: %s, model: %s, file: %s)", prompt, modelName, filePath))
 		L.Push(lua.LString("[MOCK GEMINI RESPONSE]"))
@@ -941,7 +941,7 @@ func (s *LuaService) luaGetParticipants(L *lua.LState) int {
 
 func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 	prompt := L.CheckString(1)
-	modelName := L.OptString(2, "gemini-2.0-flash")
+	modelName := L.OptString(2, "gemma-3-27b-it")
 	filePath := L.OptString(3, "")
 	if s.gemini == nil {
 		L.Push(lua.LNil)

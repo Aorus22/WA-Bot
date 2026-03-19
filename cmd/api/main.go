@@ -136,6 +136,7 @@ func InitializeApp() (*App, error) {
 	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient, storageRepo)
 
 	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
+	httpServer.SetGeminiService(geminiService)
 
 	msgStore, err := repository.NewMessageStore("file:database/wa-bot-messages.db?_foreign_keys=on")
 	if err != nil {
