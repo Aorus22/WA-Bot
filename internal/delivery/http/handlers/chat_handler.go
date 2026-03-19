@@ -171,3 +171,99 @@ func (ch *ChatHandler) GetContacts(w http.ResponseWriter, r *http.Request) {
 
 	ch.handler.sendJSON(w, contacts)
 }
+
+func (ch *ChatHandler) GetChatMedia(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+
+	limit := 30
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+	}
+
+	var before int64
+	beforeStr := r.URL.Query().Get("before")
+	if beforeStr != "" {
+		fmt.Sscanf(beforeStr, "%d", &before)
+	}
+
+	messages, err := ch.handler.msgRepo.GetChatMedia(chatID, limit, before)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, messages)
+}
+
+func (ch *ChatHandler) GetChatDocs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+
+	limit := 30
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+	}
+
+	var before int64
+	beforeStr := r.URL.Query().Get("before")
+	if beforeStr != "" {
+		fmt.Sscanf(beforeStr, "%d", &before)
+	}
+
+	messages, err := ch.handler.msgRepo.GetChatDocs(chatID, limit, before)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, messages)
+}
+
+func (ch *ChatHandler) GetChatLinks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+
+	limit := 30
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+	}
+
+	var before int64
+	beforeStr := r.URL.Query().Get("before")
+	if beforeStr != "" {
+		fmt.Sscanf(beforeStr, "%d", &before)
+	}
+
+	messages, err := ch.handler.msgRepo.GetChatLinks(chatID, limit, before)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ch.handler.sendJSON(w, messages)
+}
