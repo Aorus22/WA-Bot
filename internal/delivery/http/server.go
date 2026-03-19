@@ -13,6 +13,7 @@ import (
 	"wa-bot/internal/delivery/http/handlers"
 	"wa-bot/internal/delivery/http/middleware"
 	"wa-bot/internal/delivery/http/routes"
+	"wa-bot/internal/infrastructure/ai"
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
@@ -63,6 +64,10 @@ func (s *HTTPServer) SetCronRepo(repo repository.CronJobRepository) {
 func (s *HTTPServer) SetCronScheduler(cs *cron.CronScheduler) {
 	s.cronScheduler = cs
 	s.handler.SetCronScheduler(cs)
+}
+
+func (s *HTTPServer) SetGeminiService(gemini *ai.GeminiService) {
+	s.handler.SetGeminiService(gemini)
 }
 
 func (s *HTTPServer) GetHub() *WSHub {
