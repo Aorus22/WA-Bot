@@ -17,6 +17,7 @@ import (
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/delivery/cron"
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
+	"wa-bot/internal/infrastructure/ai"
 )
 
 type LuaService interface {
@@ -32,6 +33,7 @@ type Handler struct {
 	cronRepo      repository.CronJobRepository
 	cronScheduler *cron.CronScheduler
 	lua           LuaService
+	gemini        *ai.GeminiService
 	hub           any
 }
 
@@ -67,6 +69,10 @@ func (h *Handler) SetLuaService(lua LuaService) {
 	h.lua = lua
 }
 
+func (h *Handler) SetGeminiService(gemini *ai.GeminiService) {
+	h.gemini = gemini
+}
+
 func (h *Handler) GetCronRepo() repository.CronJobRepository {
 	return h.cronRepo
 }
@@ -77,6 +83,10 @@ func (h *Handler) GetCronScheduler() *cron.CronScheduler {
 
 func (h *Handler) GetLuaService() LuaService {
 	return h.lua
+}
+
+func (h *Handler) GetGeminiService() *ai.GeminiService {
+	return h.gemini
 }
 
 func (h *Handler) SetHub(hub any) {

@@ -47,6 +47,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	stickerHandler := handlers.NewStickerHandler(r.handler)
 	systemHandler := handlers.NewSystemHandler(r.handler)
 	msgMgmtHandler := handlers.NewMessageManagementHandler(r.handler)
+	aiHandler := handlers.NewAIHandler(r.handler)
 
 	api := r.muxRouter.PathPrefix("/api").Subrouter()
 
@@ -89,6 +90,9 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/cron/test", cronHandler.Test).Methods("POST", "OPTIONS")
 	api.HandleFunc("/cron/{id}", cronHandler.Update).Methods("PUT", "OPTIONS")
 	api.HandleFunc("/cron/{id}", cronHandler.Delete).Methods("DELETE", "OPTIONS")
+
+	api.HandleFunc("/docs", aiHandler.GetDocs).Methods("GET")
+	api.HandleFunc("/ai/assistant", aiHandler.ChatAssistant).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/avatar/{jid}", systemHandler.AvatarProxy).Methods("GET")
 
