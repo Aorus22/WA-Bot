@@ -614,9 +614,13 @@ func (s *MessageStore) MarkAsRead(chatID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Update all linked chat IDs (handle @lid and @s.whatsapp.net duality)
 	_, err := s.db.Exec(`
-                UPDATE chats SET unread = 0, updated_at = ? WHERE id = ?
-        `, time.Now().Unix(), chatID)
+		UPDATE chats SET unread = 0, updated_at = ?
+		WHERE id = ?
+		   OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		   OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?)
+	`, time.Now().Unix(), chatID, chatID, chatID)
 
 	return err
 }
