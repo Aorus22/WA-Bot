@@ -71,8 +71,10 @@ func (h *WhatsAppEventHandler) SetLuaService(luaService LuaService) {
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
-		fmt.Printf("\n📩 [MSG_IN] ID: %s | From: %s | Alt: %s\n", v.Info.ID, v.Info.Sender.String(), v.Info.SenderAlt.String())
-		if h.msgStore != nil && !v.Info.IsGroup {
+		fmt.Printf("\n[MSG_IN] ID: %s | From: %s | Alt: %s | Group: %v\n", v.Info.ID, v.Info.Sender.String(), v.Info.SenderAlt.String(), v.Info.IsGroup)
+
+		// Save LID mapping for all messages (both private and group)
+		if h.msgStore != nil {
 			sender := v.Info.Sender.ToNonAD()
 			alt := v.Info.SenderAlt.ToNonAD()
 
@@ -82,13 +84,11 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 				// Server-agnostic mapping: if one is PN (s.whatsapp.net) and other is not, it's a mapping
 				if sender.Server == "s.whatsapp.net" && alt.Server != "s.whatsapp.net" {
 					h.msgStore.SaveLIDMapping(alt.String(), sender.String())
-					fmt.Printf("✅ [MAP_SAVE] Linked LID %s to PN %s\n", alt.String(), sender.String())
+					fmt.Printf("[MAP_SAVE] Linked LID %s to PN %s\n", alt.String(), sender.String())
 				} else if alt.Server == "s.whatsapp.net" && sender.Server != "s.whatsapp.net" {
 					h.msgStore.SaveLIDMapping(sender.String(), alt.String())
-					fmt.Printf("✅ [MAP_SAVE] Linked LID %s to PN %s\n", sender.String(), alt.String())
+					fmt.Printf("[MAP_SAVE] Linked LID %s to PN %s\n", sender.String(), alt.String())
 				}
-			} else {
-				fmt.Printf("⚠️ [MAP_SKIP] SenderAlt is empty\n")
 			}
 		}
 
@@ -130,6 +130,18 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	var senderJID waTypes.JID
 	if evt.Info.IsGroup {
 		senderJID = evt.Info.Sender.ToNonAD()
+		// If sender is LID, try to resolve to PN JID
+		if senderJID.Server == "lid" {
+			alt := evt.Info.SenderAlt.ToNonAD()
+			if !alt.IsEmpty() && alt.Server == "s.whatsapp.net" {
+				senderJID = alt
+			} else if h.msgStore != nil {
+				resolved := h.msgStore.ResolveChatID(senderJID.String())
+				if resolved != senderJID.String() {
+					senderJID, _ = waTypes.ParseJID(resolved)
+				}
+			}
+		}
 	} else {
 		senderJID = evt.Info.Chat.ToNonAD()
 	}

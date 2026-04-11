@@ -278,7 +278,7 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 
 	// Insert message
 	_, err = tx.Exec(`
-                INSERT INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name, metadata)
+                INSERT OR REPLACE INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
 		if msg.IsAutomatic {
@@ -307,7 +307,7 @@ func (s *MessageStore) GetMessages(chatID string, limit int, before int64, after
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)`
 
@@ -375,7 +375,7 @@ func (s *MessageStore) SearchMessages(chatID string, query string, limit int) ([
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND content LIKE ?
@@ -440,7 +440,7 @@ func (s *MessageStore) GetMessageContext(chatID string, messageID string, limit 
 	var targetMsg Message
 	var isAuto int
 	err = s.db.QueryRow(`
-		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
 		FROM messages WHERE id = ?
 	`, messageID).Scan(
 		&targetMsg.ID,
@@ -762,7 +762,7 @@ func (s *MessageStore) GetChatMedia(chatID string, limit int, before int64) ([]M
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND msg_type IN ('image', 'video')
@@ -826,7 +826,7 @@ func (s *MessageStore) GetChatDocs(chatID string, limit int, before int64) ([]Me
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND msg_type = 'document'
@@ -890,7 +890,7 @@ func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]M
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND msg_type = 'text'
