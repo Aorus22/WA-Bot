@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -178,6 +179,16 @@ func (h *WebhookHandler) ExecuteWebhook(w http.ResponseWriter, r *http.Request) 
 
 	// Read body bytes for logging and execution
 	bodyBytes, _ := io.ReadAll(r.Body)
+
+	// Handle form-encoded payload (e.g., GitHub Actions webhooks)
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		form, err := url.ParseQuery(string(bodyBytes))
+		if err == nil {
+			if payload := form.Get("payload"); payload != "" {
+				bodyBytes = []byte(payload)
+			}
+		}
+	}
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	status, result := h.luaService.ExecuteWebhook(r.Context(), webhook, r)
