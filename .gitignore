@@ -6,3 +6,5 @@ wa-bot.exe
 wa-bot
 frontend/
 tmp/
+.serena
+.claude
