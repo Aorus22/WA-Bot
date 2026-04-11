@@ -61,6 +61,10 @@ func (s *HTTPServer) SetCronRepo(repo repository.CronJobRepository) {
 	s.handler.SetCronRepo(repo)
 }
 
+func (s *HTTPServer) SetWebhookRepo(repo repository.WebhookRepository) {
+	s.handler.SetWebhookRepo(repo)
+}
+
 func (s *HTTPServer) SetCronScheduler(cs *cron.CronScheduler) {
 	s.cronScheduler = cs
 	s.handler.SetCronScheduler(cs)

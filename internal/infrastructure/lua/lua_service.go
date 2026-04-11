@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,82 @@ func (s *LuaService) RunCronScript(ctx context.Context, script string) {
 	if err := L.DoString(script); err != nil {
 		fmt.Printf("[LUA CRON] Script Error: %v\n", err)
 	}
+}
+
+func (s *LuaService) ExecuteWebhook(ctx context.Context, webhook *entity.Webhook, r *http.Request) (int, map[string]interface{}) {
+	// Read request body with 1MB limit
+	rawBody, err := io.ReadAll(io.LimitReader(r.Body, 1048576))
+	if err != nil {
+		return http.StatusBadRequest, map[string]interface{}{"error": "failed to read request body"}
+	}
+
+	L := s.newLuaState(ctx)
+	defer L.Close()
+
+	// Build req table
+	reqTable := L.NewTable()
+
+	// req.method
+	L.RawSet(reqTable, lua.LString("method"), lua.LString(r.Method))
+
+	// req.path
+	L.RawSet(reqTable, lua.LString("path"), lua.LString(webhook.Path))
+
+	// req.raw_body
+	rawBodyStr := string(rawBody)
+	L.RawSet(reqTable, lua.LString("raw_body"), lua.LString(rawBodyStr))
+
+	// req.body (parsed JSON if possible)
+	var parsedBody interface{}
+	if err := json.Unmarshal(rawBody, &parsedBody); err == nil {
+		L.RawSet(reqTable, lua.LString("body"), s.goValueToLua(L, parsedBody))
+	} else {
+		L.RawSet(reqTable, lua.LString("body"), lua.LNil)
+	}
+
+	// req.headers
+	headersTable := L.NewTable()
+	for k, vals := range r.Header {
+		if len(vals) > 0 {
+			L.RawSet(headersTable, lua.LString(k), lua.LString(vals[0]))
+		}
+	}
+	L.RawSet(reqTable, lua.LString("headers"), headersTable)
+
+	// req.query_params
+	queryTable := L.NewTable()
+	for k, vals := range r.URL.Query() {
+		if len(vals) > 0 {
+			L.RawSet(queryTable, lua.LString(k), lua.LString(vals[0]))
+		}
+	}
+	L.RawSet(reqTable, lua.LString("query_params"), queryTable)
+
+	L.SetGlobal("req", reqTable)
+
+	if err := L.DoString(webhook.Script); err != nil {
+		fmt.Printf("[LUA WEBHOOK] Script Error for path '%s': %v\n", webhook.Path, err)
+		return http.StatusInternalServerError, map[string]interface{}{"error": err.Error()}
+	}
+
+	// Check if script set a response global
+	if resp := L.GetGlobal("response"); resp != lua.LNil {
+		result := make(map[string]interface{})
+		if tbl, ok := resp.(*lua.LTable); ok {
+			tbl.ForEach(func(key, value lua.LValue) {
+				result[key.String()] = value.String()
+			})
+		}
+		status := http.StatusOK
+		if s, ok := result["status"]; ok {
+			if code, err := strconv.Atoi(s.(string)); err == nil {
+				status = code
+			}
+		}
+		return status, result
+	}
+
+	return http.StatusOK, map[string]interface{}{"status": "ok"}
 }
 
 func (s *LuaService) newLuaState(ctx context.Context) *lua.LState {

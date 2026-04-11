@@ -154,6 +154,7 @@ func InitializeApp() (*App, error) {
 	httpServer.SetLuaService(luaService)
 	httpServer.SetTriggerRepo(appStore)
 	httpServer.SetCronRepo(appStore)
+	httpServer.SetWebhookRepo(appStore)
 
 	cronScheduler := cron.NewCronScheduler(appStore, luaService)
 	httpServer.SetCronScheduler(cronScheduler)

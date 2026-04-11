@@ -94,6 +94,15 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/cron/{id}", cronHandler.Update).Methods("PUT", "OPTIONS")
 	api.HandleFunc("/cron/{id}", cronHandler.Delete).Methods("DELETE", "OPTIONS")
 
+
+	webhookHandler := handlers.NewWebhookHandler(r.handler, r.handler.GetWebhookRepo(), luaSvc)
+
+	api.HandleFunc("/webhooks", webhookHandler.GetAll).Methods("GET")
+	api.HandleFunc("/webhooks", webhookHandler.Create).Methods("POST", "OPTIONS")
+	api.HandleFunc("/webhooks/test", webhookHandler.Test).Methods("POST", "OPTIONS")
+	api.HandleFunc("/webhooks/{id}", webhookHandler.Update).Methods("PUT", "OPTIONS")
+	api.HandleFunc("/webhooks/{id}", webhookHandler.Delete).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/webhooks", webhookHandler.DeleteAll).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/docs", aiHandler.GetDocs).Methods("GET")
 	api.HandleFunc("/ai/assistant", aiHandler.ChatAssistant).Methods("POST", "OPTIONS")
 
@@ -104,6 +113,8 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	if r.wsHandler != nil {
 		r.muxRouter.HandleFunc("/ws", r.wsHandler)
 	}
+
+	r.muxRouter.HandleFunc("/webhook/{path:.+}", webhookHandler.ExecuteWebhook)
 
 	r.setupStaticRoutes()
 
