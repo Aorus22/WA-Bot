@@ -55,6 +55,16 @@ func (s *AppStore) init() error {
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
 			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 		)`,
+			`CREATE TABLE IF NOT EXISTS webhooks (
+				id TEXT PRIMARY KEY,
+				name TEXT,
+				path TEXT UNIQUE,
+				script TEXT,
+				secret TEXT DEFAULT '',
+				is_active INTEGER DEFAULT 1,
+				created_at INTEGER DEFAULT (strftime('%s', 'now')),
+				updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+			)`,
 	}
 
 	for _, query := range queries {
@@ -277,4 +287,121 @@ func (s *AppStore) UpdateCron(ctx context.Context, j *entity.CronJob) error {
 
 func (s *AppStore) Close() error {
 	return s.db.Close()
+}
+
+// WebhookRepository implementation for AppStore
+func (s *AppStore) GetAllWebhooks(ctx context.Context) ([]*entity.Webhook, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, path, script, secret, is_active, created_at, updated_at FROM webhooks ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var webhooks []*entity.Webhook
+	for rows.Next() {
+		var w entity.Webhook
+		var isActive int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Secret, &isActive, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		w.IsActive = isActive == 1
+		w.CreatedAt = time.Unix(createdAt, 0)
+		w.UpdatedAt = time.Unix(updatedAt, 0)
+		webhooks = append(webhooks, &w)
+	}
+	return webhooks, nil
+}
+
+func (s *AppStore) GetWebhookByID(ctx context.Context, id string) (*entity.Webhook, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, path, script, secret, is_active, created_at, updated_at FROM webhooks WHERE id = ?`
+	var w entity.Webhook
+	var isActive int
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Secret, &isActive, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	w.IsActive = isActive == 1
+	w.CreatedAt = time.Unix(createdAt, 0)
+	w.UpdatedAt = time.Unix(updatedAt, 0)
+	return &w, nil
+}
+
+func (s *AppStore) GetWebhookByPath(ctx context.Context, path string) (*entity.Webhook, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, path, script, secret, is_active, created_at, updated_at FROM webhooks WHERE path = ?`
+	var w entity.Webhook
+	var isActive int
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, query, path).Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Secret, &isActive, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	w.IsActive = isActive == 1
+	w.CreatedAt = time.Unix(createdAt, 0)
+	w.UpdatedAt = time.Unix(updatedAt, 0)
+	return &w, nil
+}
+
+func (s *AppStore) CreateWebhook(ctx context.Context, w *entity.Webhook) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO webhooks (id, name, path, script, secret, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	now := time.Now().Unix()
+	_, err := s.db.ExecContext(ctx, query, w.ID, w.Name, w.Path, w.Script, w.Secret, func() int {
+		if w.IsActive {
+			return 1
+		}
+		return 0
+	}(), now, now)
+	return err
+}
+
+func (s *AppStore) UpdateWebhook(ctx context.Context, w *entity.Webhook) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE webhooks SET name = ?, path = ?, script = ?, secret = ?, is_active = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, w.Name, w.Path, w.Script, w.Secret, func() int {
+		if w.IsActive {
+			return 1
+		}
+		return 0
+	}(), time.Now().Unix(), w.ID)
+	return err
+}
+
+func (s *AppStore) DeleteWebhook(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM webhooks WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (s *AppStore) DeleteAllWebhooks(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM webhooks`
+	_, err := s.db.ExecContext(ctx, query)
+	return err
 }
