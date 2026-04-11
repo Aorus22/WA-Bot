@@ -124,8 +124,24 @@ func (s *LuaService) ExecuteWebhook(ctx context.Context, webhook *entity.Webhook
 		L.RawSet(reqTable, lua.LString("body"), lua.LNil)
 	}
 
-	// req.headers
+	// req.headers (case-insensitive lookup via metatable)
+	headersData := L.NewTable()
+	for k, vals := range r.Header {
+		if len(vals) > 0 {
+			L.RawSet(headersData, lua.LString(strings.ToLower(k)), lua.LString(vals[0]))
+		}
+	}
 	headersTable := L.NewTable()
+	L.SetField(headersTable, "__index", L.NewFunction(func(L *lua.LState) int {
+		key := strings.ToLower(L.CheckString(2))
+		val := L.GetTable(headersData, lua.LString(key))
+		if val == lua.LNil {
+			val = L.GetTable(headersData, lua.LString(L.CheckString(2)))
+		}
+		L.Push(val)
+		return 1
+	}))
+	L.SetMetatable(headersTable, headersTable)
 	for k, vals := range r.Header {
 		if len(vals) > 0 {
 			L.RawSet(headersTable, lua.LString(k), lua.LString(vals[0]))

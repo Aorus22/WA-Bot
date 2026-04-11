@@ -62,9 +62,14 @@ If the body is not valid JSON, `req.body` will be `nil` and you should use `req.
 local raw = req.raw_body            -- raw string, always available
 ```
 
+> **Note:** Some services (like GitHub Actions) send webhooks as `application/x-www-form-urlencoded` with a `payload` field containing URL-encoded JSON. The system automatically extracts and parses the JSON from `payload=<...>`, so `req.body` will contain the parsed JSON table as expected.
+
 #### `req.headers`
 
+Header lookup is case-insensitive. Any casing will work:
+
 ```lua
+local event = req.headers["X-GitHub-Event"]   -- matches "X-Github-Event", "x-github-event", etc.
 local content_type = req.headers["Content-Type"]  -- "application/json"
 local auth = req.headers["Authorization"]          -- "Bearer token123"
 ```
@@ -782,4 +787,168 @@ if req.method == "GET" then
 else
     response = { status = 405, body = "method not allowed" }
 end
+```
+
+---
+
+## Example: Webhook - GitHub Actions Notification
+
+```lua
+-- Triggered by GitHub webhook (push, workflow_run, check_run, etc.)
+-- GitHub sends form-encoded payload with a `payload` field — auto-extracted by the system
+
+local target_jid = "628123456789@s.whatsapp.net"
+local payload = req.body
+
+if not payload then
+    response = { status = 400, body = "Invalid JSON payload" }
+    return
+end
+
+local event_type = req.headers["X-GitHub-Event"] or "unknown"
+local repo = payload.repository and payload.repository.full_name or "unknown"
+
+local message = "\xF0\x9F\x94\x94 *" .. repo .. "*\n\n"
+
+if event_type == "push" then
+    local pusher = payload.pusher and payload.pusher.name or "someone"
+    local branch = (payload.ref or ""):gsub("refs/heads/", "")
+    local commits = payload.commits or {}
+    local total = #commits
+
+    message = message .. "*Push to `" .. branch .. "`* by " .. pusher .. "\n"
+    message = message .. total .. " commit" .. (total ~= 1 and "s" or "") .. "\n\n"
+
+    for i, commit in ipairs(commits) do
+        local sha = (commit.id or ""):sub(1, 7)
+        local msg = (commit.message or ""):split("\n")[1] or ""
+        local author = commit.author and commit.author.name or "unknown"
+        message = message .. tostring(i) .. ". `" .. sha .. "` " .. msg .. " (" .. author .. ")\n"
+    end
+
+    local compare = payload.compare or ""
+    if compare ~= "" then
+        message = message .. "\n" .. compare
+    end
+
+elseif event_type == "workflow_run" then
+    local run = payload.workflow_run
+    local name = run and run.name or "unknown"
+    local status = run and run.status or "unknown"
+    local conclusion = run and run.conclusion or ""
+    local branch = run and run.head_branch or "unknown"
+    local title = run and run.display_title or ""
+
+    local icon = "\xE2\x8F\xB3"
+    if conclusion == "success" then icon = "\xE2\x9C\x85"
+    elseif conclusion == "failure" then icon = "\xE2\x9D\x8C"
+    elseif conclusion == "cancelled" then icon = "\xE2\x9A\xA0"
+    end
+
+    message = message .. "*Workflow: " .. name .. "* " .. icon .. "\n"
+    message = message .. "Branch: `" .. branch .. "`\n"
+    message = message .. "Status: " .. (conclusion ~= "" and conclusion or status) .. "\n"
+    if title ~= "" then
+        message = message .. "Commit: " .. title .. "\n"
+    end
+
+    local url = run and run.html_url or ""
+    if url ~= "" then
+        message = message .. "\n" .. url
+    end
+
+elseif event_type == "check_run" then
+    local cr = payload.check_run
+    local name = cr and cr.name or "unknown"
+    local status = cr and cr.status or "unknown"
+    local conclusion = cr and cr.conclusion or ""
+
+    local icon = "\xE2\x8F\xB3"
+    if conclusion == "success" then icon = "\xE2\x9C\x85"
+    elseif conclusion == "failure" then icon = "\xE2\x9D\x8C"
+    elseif conclusion == "cancelled" then icon = "\xE2\x9A\xA0"
+    end
+
+    local branch = payload.check_suite and payload.check_suite.head_branch or "unknown"
+
+    message = message .. "*Check Run: " .. name .. "* " .. icon .. "\n"
+    message = message .. "Branch: `" .. branch .. "`\n"
+    message = message .. "Status: " .. (conclusion ~= "" and conclusion or status) .. "\n"
+
+    local url = cr and cr.html_url or ""
+    if url ~= "" then
+        message = message .. "\n" .. url
+    end
+
+elseif event_type == "check_suite" then
+    local cs = payload.check_suite
+    local branch = cs and cs.head_branch or "unknown"
+    local conclusion = cs and cs.conclusion or ""
+
+    local icon = "\xE2\x8F\xB3"
+    if conclusion == "success" then icon = "\xE2\x9C\x85"
+    elseif conclusion == "failure" then icon = "\xE2\x9D\x8C"
+
+    end
+
+    message = message .. "*Check Suite* " .. icon .. "\n"
+    message = message .. "Branch: `" .. branch .. "`\n"
+    if conclusion ~= "" then
+        message = message .. "Conclusion: " .. conclusion .. "\n"
+    end
+
+elseif event_type == "pull_request" then
+    local pr = payload.pull_request
+    local action = payload.action or "unknown"
+    local title = pr and pr.title or "unknown"
+    local number = pr and pr.number or 0
+    local author = pr and pr.user and pr.user.login or "unknown"
+    local state = pr and pr.state or "unknown"
+    local html_url = pr and pr.html_url or ""
+
+    local icon = "\xF0\x9F\x94\x80"
+    if action == "closed" and state == "merged" then icon = "\xE2\x9C\x85"
+    elseif action == "closed" then icon = "\xE2\x9D\x8C"
+    elseif action == "opened" then icon = "\xF0\x9F\x86\x95"
+
+    end
+
+    message = message .. "*PR #" .. tostring(number) .. ": " .. title .. "* " .. icon .. "\n"
+    message = message .. "By: " .. author .. "\n"
+    message = message .. "Action: " .. action
+    if state ~= "" then
+        message = message .. " (" .. state .. ")"
+    end
+    message = message .. "\n"
+    if html_url ~= "" then
+        message = message .. "\n" .. html_url
+    end
+
+elseif event_type == "release" then
+    local release = payload.release
+    local action = payload.action or "unknown"
+    local tag = release and release.tag_name or "unknown"
+    local name = release and release.name or tag
+    local author = release and release.author and release.author.login or "unknown"
+    local html_url = release and release.html_url or ""
+
+    local icon = "\xF0\x9F\x9A\x80"
+    if action == "deleted" then icon = "\xF0\x9F\x97\x91" end
+
+    message = message .. "*Release: " .. name .. "* " .. icon .. "\n"
+    message = message .. "Tag: `" .. tag .. "`\n"
+    message = message .. "By: " .. author .. "\n"
+    message = message .. "Action: " .. action .. "\n"
+    if html_url ~= "" then
+        message = message .. "\n" .. html_url
+    end
+
+else
+    message = message .. "Event: *" .. event_type .. "*\n"
+    message = message .. "Action: " .. (payload.action or "n/a") .. "\n"
+    message = message .. "Sender: " .. (payload.sender and payload.sender.login or "unknown")
+end
+
+send_text(target_jid, message)
+response = { status = 200, body = "Notification sent to WhatsApp" }
 ```
