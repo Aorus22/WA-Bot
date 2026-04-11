@@ -27,6 +27,7 @@ func (ah *AIHandler) ChatAssistant(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prompt      string `json:"prompt"`
 		CurrentCode string `json:"currentCode,omitempty"`
+		Model       string `json:"model,omitempty"`
 	}
 
 	if err := ah.handler.readJSON(r, &req); err != nil {
@@ -62,7 +63,12 @@ AGENT GUIDELINES:
 		fullPrompt = fmt.Sprintf("%s\n\nUser Question: %s", systemPrompt, req.Prompt)
 	}
 
-	answer, err := gemini.GenerateText(context.Background(), "gemma-3-27b-it", fullPrompt)
+	model := req.Model
+	if model == "" {
+		model = "gemma-3-27b-it"
+	}
+
+	answer, err := gemini.GenerateText(context.Background(), model, fullPrompt)
 	if err != nil {
 		ah.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return

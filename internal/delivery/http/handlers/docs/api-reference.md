@@ -1,6 +1,6 @@
 # Bot Lua API Documentation
 
-Welcome to the Lua API documentation for Dynamic Triggers, Cron Jobs, and Webhooks. Use the functions below to create interactive and intelligent WhatsApp bots.
+Welcome to the Lua API documentation for Dynamic Triggers, Cron Jobs, and Webhooks. Use the functions below to create interactive and intelligent WhatsApp bots. 
 
 ## Global Variables
 
