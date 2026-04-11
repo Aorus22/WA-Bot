@@ -65,6 +65,20 @@ func (s *AppStore) init() error {
 				created_at INTEGER DEFAULT (strftime('%s', 'now')),
 				updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 			)`,
+			`CREATE TABLE IF NOT EXISTS webhook_logs (
+					id TEXT PRIMARY KEY,
+					webhook_id TEXT,
+					webhook_path TEXT,
+					source_ip TEXT,
+					method TEXT,
+					headers TEXT,
+					body TEXT,
+					query_params TEXT,
+					status_code INTEGER,
+					created_at INTEGER DEFAULT (strftime('%s', 'now'))
+				)`,
+			`CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_id ON webhook_logs(webhook_id)`,
 	}
 
 	for _, query := range queries {
@@ -402,6 +416,79 @@ func (s *AppStore) DeleteAllWebhooks(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	query := `DELETE FROM webhooks`
+	_, err := s.db.ExecContext(ctx, query)
+	return err
+}
+
+// WebhookLogRepository implementation for AppStore
+
+func (s *AppStore) CreateWebhookLog(ctx context.Context, log *entity.WebhookLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO webhook_logs (id, webhook_id, webhook_path, source_ip, method, headers, body, query_params, status_code, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, query, log.ID, log.WebhookID, log.WebhookPath, log.SourceIP, log.Method, log.Headers, log.Body, log.QueryParams, log.StatusCode, log.CreatedAt)
+	return err
+}
+
+func (s *AppStore) GetAllWebhookLogs(ctx context.Context, webhookID string, limit int, offset int) ([]*entity.WebhookLog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if webhookID != "" {
+		query = `SELECT id, webhook_id, webhook_path, source_ip, method, headers, body, query_params, status_code, created_at FROM webhook_logs WHERE webhook_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
+		rows, err = s.db.QueryContext(ctx, query, webhookID, limit, offset)
+	} else {
+		query = `SELECT id, webhook_id, webhook_path, source_ip, method, headers, body, query_params, status_code, created_at FROM webhook_logs ORDER BY created_at DESC LIMIT ? OFFSET ?`
+		rows, err = s.db.QueryContext(ctx, query, limit, offset)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []*entity.WebhookLog
+	for rows.Next() {
+		var l entity.WebhookLog
+		if err := rows.Scan(&l.ID, &l.WebhookID, &l.WebhookPath, &l.SourceIP, &l.Method, &l.Headers, &l.Body, &l.QueryParams, &l.StatusCode, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, &l)
+	}
+	return logs, nil
+}
+
+func (s *AppStore) GetWebhookLogCount(ctx context.Context, webhookID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var query string
+	var row *sql.Row
+
+	if webhookID != "" {
+		query = `SELECT COUNT(*) FROM webhook_logs WHERE webhook_id = ?`
+		row = s.db.QueryRowContext(ctx, query, webhookID)
+	} else {
+		query = `SELECT COUNT(*) FROM webhook_logs`
+		row = s.db.QueryRowContext(ctx, query)
+	}
+
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *AppStore) DeleteAllWebhookLogs(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM webhook_logs`
 	_, err := s.db.ExecContext(ctx, query)
 	return err
 }
