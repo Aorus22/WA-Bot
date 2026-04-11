@@ -1,6 +1,6 @@
 # Bot Lua API Documentation
 
-Welcome to the Lua API documentation for Dynamic Triggers and Cron Jobs. Use the functions below to create interactive and intelligent WhatsApp bots.
+Welcome to the Lua API documentation for Dynamic Triggers, Cron Jobs, and Webhooks. Use the functions below to create interactive and intelligent WhatsApp bots.
 
 ## Global Variables
 
@@ -12,8 +12,9 @@ These variables are directly available in your script:
 | `sender` | `string` | **(Triggers Only)** WhatsApp ID of the sender (JID). Example: `628xxx@s.whatsapp.net` |
 | `content` | `string` | **(Triggers Only)** The complete message text sent by the user |
 | `matches` | `table` | **(Triggers Only)** Regex capture results. `matches[1]` is the first group. |
+| `req` | `table` | **(Webhooks Only)** The incoming HTTP request data. See [The `req` Table](#the-req-table) for details. |
 
-> **Note:** Global variables like `msg`, `sender`, and `matches` are **not available** in Cron Jobs as they are not triggered by an incoming message.
+> **Note:** Global variables like `msg`, `sender`, and `matches` are **not available** in Cron Jobs and Webhooks as they are not triggered by an incoming message.
 
 ### The `msg` Table
 
@@ -28,6 +29,62 @@ msg.timestamp   -- Unix timestamp (seconds)
 msg.is_group    -- Boolean, true if the message is from a group
 msg.is_media    -- Boolean, true if the message contains an image, video, sticker, or document
 msg.type        -- The type of media ("image", "video", "sticker", "document", or "text")
+```
+
+---
+
+### The `req` Table
+
+**(Webhooks Only)** Provides full details about the incoming HTTP request that triggered the webhook:
+
+```lua
+req.method        -- HTTP method: "GET", "POST", "PUT", "DELETE", etc.
+req.path          -- The webhook path segment (e.g., "my-hook")
+req.body          -- Parsed JSON body as a Lua table, or nil if not valid JSON
+req.raw_body      -- Raw request body as a string
+req.headers       -- Table of request headers (key = header name, value = first value)
+req.query_params  -- Table of URL query parameters (key = param name, value = first value)
+```
+
+#### `req.body`
+
+If the request body is valid JSON, it is automatically parsed into a Lua table:
+
+```lua
+-- Request body: {"nama": "Budi", "order_id": 123}
+local nama = req.body.nama          -- "Budi"
+local order = req.body.order_id     -- 123
+```
+
+If the body is not valid JSON, `req.body` will be `nil` and you should use `req.raw_body` instead:
+
+```lua
+local raw = req.raw_body            -- raw string, always available
+```
+
+#### `req.headers`
+
+```lua
+local content_type = req.headers["Content-Type"]  -- "application/json"
+local auth = req.headers["Authorization"]          -- "Bearer token123"
+```
+
+#### `req.query_params`
+
+```lua
+-- URL: /webhook/my-hook?source=stripe&event=payment
+local source = req.query_params.source  -- "stripe"
+local event = req.query_params.event    -- "payment"
+```
+
+#### Customizing the HTTP Response
+
+By default, the webhook returns `200 OK` with `{"status": "ok"}`. You can customize this by setting the global `response` variable in your script:
+
+```lua
+response = { status = 200, body = "ok" }
+response = { status = 404, body = "not found" }
+response = { status = 201, body = "created successfully" }
 ```
 
 ---
@@ -659,5 +716,70 @@ elseif state == "ready" then
     -- Process user request with AI
     local response = gemini_chat("User: " .. content)
     send_text(sender, response)
+end
+```
+
+---
+
+## Example: Webhook - Order Notification
+
+```lua
+-- Triggered by POST /webhook/order-notify
+-- Expected body: {"customer": "Budi", "item": "Laptop", "price": 15000000}
+
+local customer = req.body.customer or "Unknown"
+local item = req.body.item or "Unknown"
+local price = req.body.price or 0
+
+local msg = "New Order!\nCustomer: " .. customer .. "\nItem: " .. item .. "\nPrice: Rp " .. tostring(price)
+send_text("628123456789@s.whatsapp.net", msg)
+
+response = { status = 200, body = "notification sent" }
+```
+
+---
+
+## Example: Webhook - External API Forwarder
+
+```lua
+-- Triggered by POST /webhook/forward
+-- Forwards incoming webhook data to another API and notifies via WhatsApp
+
+local data = json_decode(req.raw_body)
+
+-- Store in Redis for later retrieval
+redis_set("last_webhook:" .. req.path, req.raw_body, 3600)
+
+-- Forward to external API
+local res = fetch("https://api.example.com/ingest", {
+    method = "POST",
+    headers = { ["Content-Type"] = "application/json" },
+    body = req.raw_body
+})
+
+if res.status == 200 then
+    send_text("628123456789@s.whatsapp.net", "Webhook forwarded successfully to " .. req.path)
+    response = { status = 200, body = "ok" }
+else
+    send_text("628123456789@s.whatsapp.net", "Webhook forward failed: HTTP " .. tostring(res.status))
+    response = { status = 502, body = "upstream error" }
+end
+```
+
+---
+
+## Example: Webhook - GET Health Check with Query Params
+
+```lua
+-- Triggered by GET /webhook/health?source=monitor
+-- Sends a WhatsApp notification when a health check is pinged
+
+local source = req.query_params.source or "unknown"
+
+if req.method == "GET" then
+    send_text("628123456789@s.whatsapp.net", "Health check received from: " .. source)
+    response = { status = 200, body = "healthy" }
+else
+    response = { status = 405, body = "method not allowed" }
 end
 ```
