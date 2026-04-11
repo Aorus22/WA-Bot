@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/google/uuid"
@@ -16,16 +19,18 @@ import (
 )
 
 type WebhookHandler struct {
-	handler    *Handler
-	repo       repository.WebhookRepository
-	luaService *lua.LuaService
+	handler        *Handler
+	repo           repository.WebhookRepository
+	webhookLogRepo repository.WebhookLogRepository
+	luaService     *lua.LuaService
 }
 
-func NewWebhookHandler(handler *Handler, repo repository.WebhookRepository, luaService *lua.LuaService) *WebhookHandler {
+func NewWebhookHandler(handler *Handler, repo repository.WebhookRepository, webhookLogRepo repository.WebhookLogRepository, luaService *lua.LuaService) *WebhookHandler {
 	return &WebhookHandler{
-		handler:    handler,
-		repo:       repo,
-		luaService: luaService,
+		handler:        handler,
+		repo:           repo,
+		webhookLogRepo: webhookLogRepo,
+		luaService:     luaService,
 	}
 }
 
@@ -171,11 +176,74 @@ func (h *WebhookHandler) ExecuteWebhook(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Buffer body so it can be read by ExecuteWebhook
-	var bodyBuf bytes.Buffer
-	tee := io.TeeReader(r.Body, &bodyBuf)
-	r.Body = io.NopCloser(tee)
+	// Read body bytes for logging and execution
+	bodyBytes, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	status, result := h.luaService.ExecuteWebhook(r.Context(), webhook, r)
+
+	// Log the request
+	headersMap := make(map[string]string)
+	for k, vals := range r.Header {
+		if len(vals) > 0 {
+			headersMap[k] = vals[0]
+		}
+	}
+	headersJSON, _ := json.Marshal(headersMap)
+
+	sourceIP := r.RemoteAddr
+	if idx := strings.LastIndex(sourceIP, ":"); idx != -1 {
+		sourceIP = sourceIP[:idx]
+	}
+
+	log := &entity.WebhookLog{
+		ID:          uuid.New().String(),
+		WebhookID:   webhook.ID,
+		WebhookPath: webhook.Path,
+		SourceIP:    sourceIP,
+		Method:      r.Method,
+		Headers:     string(headersJSON),
+		Body:        string(bodyBytes),
+		QueryParams: r.URL.RawQuery,
+		StatusCode:  status,
+		CreatedAt:   time.Now().Unix(),
+	}
+	_ = h.webhookLogRepo.CreateWebhookLog(r.Context(), log)
+
 	h.handler.sendJSONWithStatus(w, status, result)
+}
+
+func (h *WebhookHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
+	webhookID := r.URL.Query().Get("webhook_id")
+	limit := 50
+	offset := 0
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+		offset = o
+	}
+
+	logs, err := h.webhookLogRepo.GetAllWebhookLogs(r.Context(), webhookID, limit, offset)
+	if err != nil {
+		h.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	total, _ := h.webhookLogRepo.GetWebhookLogCount(r.Context(), webhookID)
+
+	h.handler.sendJSON(w, map[string]interface{}{
+		"logs":   logs,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+func (h *WebhookHandler) DeleteAllLogs(w http.ResponseWriter, r *http.Request) {
+	if err := h.webhookLogRepo.DeleteAllWebhookLogs(r.Context()); err != nil {
+		h.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

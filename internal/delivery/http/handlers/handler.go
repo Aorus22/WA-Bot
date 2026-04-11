@@ -31,7 +31,8 @@ type Handler struct {
 	msgRepo       *repository.MessageStore
 	triggerRepo   repository.TriggerRepository
 	cronRepo      repository.CronJobRepository
-	webhookRepo   repository.WebhookRepository
+	webhookRepo    repository.WebhookRepository
+	webhookLogRepo repository.WebhookLogRepository
 	cronScheduler *cron.CronScheduler
 	lua           LuaService
 	gemini        *ai.GeminiService
@@ -68,6 +69,14 @@ func (h *Handler) SetWebhookRepo(repo repository.WebhookRepository) {
 
 func (h *Handler) GetWebhookRepo() repository.WebhookRepository {
 	return h.webhookRepo
+}
+
+func (h *Handler) SetWebhookLogRepo(repo repository.WebhookLogRepository) {
+	h.webhookLogRepo = repo
+}
+
+func (h *Handler) GetWebhookLogRepo() repository.WebhookLogRepository {
+	return h.webhookLogRepo
 }
 
 func (h *Handler) SetCronScheduler(scheduler *cron.CronScheduler) {

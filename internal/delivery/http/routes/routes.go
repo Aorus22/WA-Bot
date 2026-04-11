@@ -95,11 +95,13 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/cron/{id}", cronHandler.Delete).Methods("DELETE", "OPTIONS")
 
 
-	webhookHandler := handlers.NewWebhookHandler(r.handler, r.handler.GetWebhookRepo(), luaSvc)
+	webhookHandler := handlers.NewWebhookHandler(r.handler, r.handler.GetWebhookRepo(), r.handler.GetWebhookLogRepo(), luaSvc)
 
 	api.HandleFunc("/webhooks", webhookHandler.GetAll).Methods("GET")
 	api.HandleFunc("/webhooks", webhookHandler.Create).Methods("POST", "OPTIONS")
 	api.HandleFunc("/webhooks/test", webhookHandler.Test).Methods("POST", "OPTIONS")
+	api.HandleFunc("/webhooks/logs", webhookHandler.GetLogs).Methods("GET")
+	api.HandleFunc("/webhooks/logs", webhookHandler.DeleteAllLogs).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/webhooks/{id}", webhookHandler.Update).Methods("PUT", "OPTIONS")
 	api.HandleFunc("/webhooks/{id}", webhookHandler.Delete).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/webhooks", webhookHandler.DeleteAll).Methods("DELETE", "OPTIONS")
