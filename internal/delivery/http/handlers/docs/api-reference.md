@@ -19,7 +19,6 @@ These variables are directly available in your script:
 ### The `msg` Table
 
 Provides detailed information about the current message:
-
 ```lua
 msg.id          -- Unique message ID
 msg.sender      -- The JID of the person who sent the message
@@ -36,7 +35,6 @@ msg.type        -- The type of media ("image", "video", "sticker", "document", o
 ### The `req` Table
 
 **(Webhooks Only)** Provides full details about the incoming HTTP request that triggered the webhook:
-
 ```lua
 req.method        -- HTTP method: "GET", "POST", "PUT", "DELETE", etc.
 req.path          -- The webhook path segment (e.g., "my-hook")
@@ -99,7 +97,6 @@ response = { status = 201, body = "created successfully" }
 ### `send_text(target, text)`
 
 Sends a plain text message to the target JID.
-
 ```lua
 send_text("628123456789@s.whatsapp.net", "Hello from bot!")
 send_text(msg.chat_id, "Replying to your message")
@@ -114,7 +111,6 @@ send_text(msg.chat_id, "Replying to your message")
 ### `send_sticker(target, url_or_path)`
 
 Sends a sticker to the target. Supports both web URLs and local paths from `storage_path`.
-
 ```lua
 send_sticker(sender, "https://example.com/sticker.webp")
 send_sticker(sender, storage_path("my_sticker.webp"))
@@ -129,7 +125,6 @@ send_sticker(sender, storage_path("my_sticker.webp"))
 ### `send_media(target, url_or_path, [type], [caption])`
 
 Sends a media file (image, video, document).
-
 ```lua
 send_media(sender, "https://example.com/image.jpg", "image", "Check this out!")
 send_media(sender, storage_path("document.pdf"), "document")
