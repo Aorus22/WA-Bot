@@ -214,16 +214,29 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 
 	// Extract message text
 	var messageText string
+	isMedia := false
 	if evt.Message.ExtendedTextMessage != nil && evt.Message.ExtendedTextMessage.Text != nil {
 		messageText = *evt.Message.ExtendedTextMessage.Text
 	} else if evt.Message.ImageMessage != nil && evt.Message.ImageMessage.Caption != nil {
 		messageText = *evt.Message.ImageMessage.Caption
+		isMedia = true
 	} else if evt.Message.VideoMessage != nil && evt.Message.VideoMessage.Caption != nil {
 		messageText = *evt.Message.VideoMessage.Caption
+		isMedia = true
 	} else if evt.Message.DocumentMessage != nil && evt.Message.DocumentMessage.Caption != nil {
 		messageText = *evt.Message.DocumentMessage.Caption
+		isMedia = true
+	} else if evt.Message.ImageMessage != nil || evt.Message.VideoMessage != nil || evt.Message.DocumentMessage != nil || evt.Message.StickerMessage != nil || evt.Message.AudioMessage != nil {
+		isMedia = true
+		messageText = evt.Message.GetConversation()
 	} else {
 		messageText = evt.Message.GetConversation()
+	}
+
+	// 0. Filter out empty messages that are not media
+	if messageText == "" && !isMedia {
+		fmt.Printf("[DEBUG] Skipping empty message: %s (chat=%s)\n", evt.Info.ID, evt.Info.Chat.String())
+		return
 	}
 
 	// Determine what name to show in the Sidebar
