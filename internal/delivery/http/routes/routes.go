@@ -69,6 +69,8 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/chats/{chatId}/messages/{id}/delete", msgMgmtHandler.DeleteMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/edit", msgMgmtHandler.EditMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/reply", msgMgmtHandler.ReplyMessage).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/react", messageHandler.SendReaction).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/typing", messageHandler.SendTyping).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/stickers/favorites", stickerHandler.GetFavorites).Methods("GET")
 	api.HandleFunc("/stickers/favorite", stickerHandler.FavoriteSticker).Methods("POST", "OPTIONS")

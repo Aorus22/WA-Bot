@@ -15,6 +15,7 @@ import (
 
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/infrastructure/ai"
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
@@ -33,6 +34,7 @@ type WhatsAppEventHandler struct {
 	httpServer HTTPServer
 	storage    repository.StorageRepository
 	luaService LuaService
+	aiClient   *ai.AIClient
 }
 
 type LuaService interface {
@@ -66,6 +68,10 @@ func (h *WhatsAppEventHandler) SetHTTPServer(server HTTPServer) {
 
 func (h *WhatsAppEventHandler) SetLuaService(luaService LuaService) {
 	h.luaService = luaService
+}
+
+func (h *WhatsAppEventHandler) SetAIClient(client *ai.AIClient) {
+	h.aiClient = client
 }
 
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
@@ -282,6 +288,15 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 			if err == nil && avatarURL != "" && h.msgStore != nil {
 				h.msgStore.UpdateChatAvatar(chatID, avatarURL)
 			}
+		}()
+	}
+
+	// Dispatch to AI companion (fire-and-forget)
+	if h.aiClient != nil && messageText != "" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+			defer cancel()
+			h.aiClient.Dispatch(ctx, chatID, senderJID.String(), senderName, messageText, evt.Info.ID, evt.Info.IsGroup)
 		}()
 	}
 
