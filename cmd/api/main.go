@@ -164,6 +164,10 @@ func InitializeApp() (*App, error) {
 	eventHandler.SetMessageStore(msgStore)
 	eventHandler.SetHTTPServer(httpServer)
 
+	// Wire up AI companion client (disabled if AI_SERVER_URL is empty)
+	aiClient := ai.NewAIClient(cfg.Get("AI_SERVER_URL"))
+	eventHandler.SetAIClient(aiClient)
+
 	return &App{
 		waClient:      waClient,
 		eventHandler:  eventHandler,

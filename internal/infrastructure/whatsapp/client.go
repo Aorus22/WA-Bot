@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
+	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waTypes "go.mau.fi/whatsmeow/types"
@@ -473,4 +475,28 @@ func (w *WhatsAppClient) SendPresence(to string, isTyping bool) error {
 	}
 
 	return w.client.SendChatPresence(context.Background(), targetJID, presence, waTypes.ChatPresenceMediaText)
+}
+
+// SendReaction sends an emoji reaction to a specific message.
+func (w *WhatsAppClient) SendReaction(to, msgID, emoji string) error {
+	targetJID, err := waTypes.ParseJID(to)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.client.SendMessage(context.Background(), targetJID, &waProto.Message{
+		ReactionMessage: &waProto.ReactionMessage{
+			Key: &waCommon.MessageKey{
+				RemoteJID: proto.String(to),
+				FromMe:    proto.Bool(false),
+				ID:        proto.String(msgID),
+			},
+			Text:              proto.String(emoji),
+			SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
+		},
+	})
+	if err == nil {
+		w.log("reaction", targetJID.String(), emoji, "reaction", "", false, msgID)
+	}
+	return err
 }

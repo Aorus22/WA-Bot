@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/mux"
+
 	"wa-bot/internal/delivery/http/dto"
 )
 
@@ -273,4 +275,61 @@ func (mh *MessageHandler) validateSecret(secret string) bool {
 		SECRET = "default-secret"
 	}
 	return secret == SECRET
+}
+
+func (mh *MessageHandler) SendReaction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["chatId"]
+	msgID := vars["id"]
+
+	var req dto.ReactMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		mh.handler.sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	fmt.Printf("[REACT] Reacting %s to msg %s in chat %s\n", req.Emoji, msgID, chatID)
+	if err := mh.handler.client.SendReaction(chatID, msgID, req.Emoji); err != nil {
+		fmt.Printf("[ERR] Failed to send reaction: %v\n", err)
+		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	mh.handler.sendJSONWithStatus(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+	})
+}
+
+func (mh *MessageHandler) SendTyping(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["chatId"]
+
+	var req dto.TypingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		mh.handler.sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	err := mh.handler.client.SendPresence(chatID, req.IsTyping)
+	if err != nil {
+		fmt.Printf("[ERR] Failed to send typing: %v\n", err)
+		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	mh.handler.sendJSONWithStatus(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+	})
 }

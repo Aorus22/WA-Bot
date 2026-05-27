@@ -48,6 +48,14 @@ type ReplyMessageRequest struct {
 	Content string `json:"content" validate:"required"`
 }
 
+type ReactMessageRequest struct {
+	Emoji string `json:"emoji" validate:"required"`
+}
+
+type TypingRequest struct {
+	IsTyping bool `json:"isTyping"`
+}
+
 type FavoriteStickerRequest struct {
 	Secret     string `json:"secret" validate:"required"`
 	MessageID  string `json:"messageId" validate:"required"`
