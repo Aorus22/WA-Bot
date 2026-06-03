@@ -16,10 +16,11 @@ import (
 )
 
 type Router struct {
-	muxRouter *mux.Router
-	handler   *handlers.Handler
-	storage   repository.StorageRepository
-	wsHandler http.HandlerFunc
+	muxRouter  *mux.Router
+	handler    *handlers.Handler
+	storage    repository.StorageRepository
+	wsHandler  http.HandlerFunc
+	qrHandler  http.HandlerFunc
 }
 
 func NewRouter(h *handlers.Handler, storage repository.StorageRepository) *Router {
@@ -32,6 +33,10 @@ func NewRouter(h *handlers.Handler, storage repository.StorageRepository) *Route
 
 func (r *Router) SetWebSocketHandler(handler http.HandlerFunc) {
 	r.wsHandler = handler
+}
+
+func (r *Router) SetQrHandler(handler http.HandlerFunc) {
+	r.qrHandler = handler
 }
 
 func (r *Router) RegisterRoutes() *mux.Router {
@@ -79,6 +84,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/contacts", chatHandler.GetContacts).Methods("GET")
 
 	api.HandleFunc("/status", systemHandler.GetStatus).Methods("GET")
+	api.HandleFunc("/qr-code", r.qrHandler).Methods("GET")
 	api.HandleFunc("/logout", systemHandler.Logout).Methods("POST", "OPTIONS")
 	api.HandleFunc("/health", systemHandler.HealthCheck).Methods("GET")
 
