@@ -41,6 +41,7 @@ func (s *AppStore) init() error {
 			name TEXT,
 			pattern TEXT,
 			script TEXT,
+			description TEXT DEFAULT '',
 			priority INTEGER DEFAULT 0,
 			is_active INTEGER DEFAULT 1,
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
@@ -51,6 +52,7 @@ func (s *AppStore) init() error {
 			name TEXT,
 			schedule TEXT,
 			script TEXT,
+			description TEXT DEFAULT '',
 			is_active INTEGER DEFAULT 1,
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
 			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
@@ -60,6 +62,7 @@ func (s *AppStore) init() error {
 				name TEXT,
 				path TEXT UNIQUE,
 				script TEXT,
+				description TEXT DEFAULT '',
 				secret TEXT DEFAULT '',
 				is_active INTEGER DEFAULT 1,
 				created_at INTEGER DEFAULT (strftime('%s', 'now')),
@@ -90,6 +93,11 @@ func (s *AppStore) init() error {
 	// Add priority column if it doesn't exist (for existing databases)
 	_, _ = s.db.Exec("ALTER TABLE triggers ADD COLUMN priority INTEGER DEFAULT 0")
 
+	// Add description column if it doesn't exist (for existing databases)
+	_, _ = s.db.Exec("ALTER TABLE triggers ADD COLUMN description TEXT DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE cron_jobs ADD COLUMN description TEXT DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE webhooks ADD COLUMN description TEXT DEFAULT ''")
+
 	return nil
 }
 
@@ -103,7 +111,7 @@ func (s *AppStore) GetAll(ctx context.Context) ([]*entity.Trigger, error) {
 	// Tier 2: priority = 0 (default)
 	// Tier 3: priority < 0 (sorted -2, -1)
 	query := `
-		SELECT id, name, pattern, script, priority, is_active, created_at, updated_at 
+		SELECT id, name, pattern, script, description, priority, is_active, created_at, updated_at 
 		FROM triggers 
 		ORDER BY 
 			(CASE 
@@ -124,7 +132,7 @@ func (s *AppStore) GetAll(ctx context.Context) ([]*entity.Trigger, error) {
 		var t entity.Trigger
 		var isActive int
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &t.Priority, &isActive, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &t.Description, &t.Priority, &isActive, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.IsActive = isActive == 1
@@ -139,11 +147,11 @@ func (s *AppStore) GetByID(ctx context.Context, id string) (*entity.Trigger, err
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, pattern, script, priority, is_active, created_at, updated_at FROM triggers WHERE id = ?`
+	query := `SELECT id, name, pattern, script, description, priority, is_active, created_at, updated_at FROM triggers WHERE id = ?`
 	var t entity.Trigger
 	var isActive int
 	var createdAt, updatedAt int64
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &t.Priority, &isActive, &createdAt, &updatedAt)
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&t.ID, &t.Name, &t.Pattern, &t.Script, &t.Description, &t.Priority, &isActive, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -160,9 +168,9 @@ func (s *AppStore) Create(ctx context.Context, t *entity.Trigger) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO triggers (id, name, pattern, script, priority, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO triggers (id, name, pattern, script, description, priority, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().Unix()
-	_, err := s.db.ExecContext(ctx, query, t.ID, t.Name, t.Pattern, t.Script, t.Priority, func() int {
+	_, err := s.db.ExecContext(ctx, query, t.ID, t.Name, t.Pattern, t.Script, t.Description, t.Priority, func() int {
 		if t.IsActive {
 			return 1
 		}
@@ -175,8 +183,8 @@ func (s *AppStore) Update(ctx context.Context, t *entity.Trigger) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `UPDATE triggers SET name = ?, pattern = ?, script = ?, priority = ?, is_active = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, t.Name, t.Pattern, t.Script, t.Priority, func() int {
+	query := `UPDATE triggers SET name = ?, pattern = ?, script = ?, description = ?, priority = ?, is_active = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, t.Name, t.Pattern, t.Script, t.Description, t.Priority, func() int {
 		if t.IsActive {
 			return 1
 		}
@@ -226,7 +234,7 @@ func (s *AppStore) GetAllCron(ctx context.Context) ([]*entity.CronJob, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, schedule, script, is_active, created_at, updated_at FROM cron_jobs ORDER BY created_at DESC`
+	query := `SELECT id, name, schedule, script, description, is_active, created_at, updated_at FROM cron_jobs ORDER BY created_at DESC`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -238,7 +246,7 @@ func (s *AppStore) GetAllCron(ctx context.Context) ([]*entity.CronJob, error) {
 		var j entity.CronJob
 		var isActive int
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&j.ID, &j.Name, &j.Schedule, &j.Script, &isActive, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.Name, &j.Schedule, &j.Script, &j.Description, &isActive, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		j.IsActive = isActive == 1
@@ -253,11 +261,11 @@ func (s *AppStore) GetCronByID(ctx context.Context, id string) (*entity.CronJob,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, schedule, script, is_active, created_at, updated_at FROM cron_jobs WHERE id = ?`
+	query := `SELECT id, name, schedule, script, description, is_active, created_at, updated_at FROM cron_jobs WHERE id = ?`
 	var j entity.CronJob
 	var isActive int
 	var createdAt, updatedAt int64
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&j.ID, &j.Name, &j.Schedule, &j.Script, &isActive, &createdAt, &updatedAt)
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&j.ID, &j.Name, &j.Schedule, &j.Script, &j.Description, &isActive, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -274,9 +282,9 @@ func (s *AppStore) CreateCron(ctx context.Context, j *entity.CronJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO cron_jobs (id, name, schedule, script, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO cron_jobs (id, name, schedule, script, description, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().Unix()
-	_, err := s.db.ExecContext(ctx, query, j.ID, j.Name, j.Schedule, j.Script, func() int {
+	_, err := s.db.ExecContext(ctx, query, j.ID, j.Name, j.Schedule, j.Script, j.Description, func() int {
 		if j.IsActive {
 			return 1
 		}
@@ -289,8 +297,8 @@ func (s *AppStore) UpdateCron(ctx context.Context, j *entity.CronJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `UPDATE cron_jobs SET name = ?, schedule = ?, script = ?, is_active = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, j.Name, j.Schedule, j.Script, func() int {
+	query := `UPDATE cron_jobs SET name = ?, schedule = ?, script = ?, description = ?, is_active = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, j.Name, j.Schedule, j.Script, j.Description, func() int {
 		if j.IsActive {
 			return 1
 		}
@@ -308,7 +316,7 @@ func (s *AppStore) GetAllWebhooks(ctx context.Context) ([]*entity.Webhook, error
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, path, script, secret, is_active, created_at, updated_at FROM webhooks ORDER BY created_at DESC`
+	query := `SELECT id, name, path, script, description, secret, is_active, created_at, updated_at FROM webhooks ORDER BY created_at DESC`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -320,7 +328,7 @@ func (s *AppStore) GetAllWebhooks(ctx context.Context) ([]*entity.Webhook, error
 		var w entity.Webhook
 		var isActive int
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Secret, &isActive, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Description, &w.Secret, &isActive, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		w.IsActive = isActive == 1
@@ -335,11 +343,11 @@ func (s *AppStore) GetWebhookByID(ctx context.Context, id string) (*entity.Webho
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, path, script, secret, is_active, created_at, updated_at FROM webhooks WHERE id = ?`
+	query := `SELECT id, name, path, script, description, secret, is_active, created_at, updated_at FROM webhooks WHERE id = ?`
 	var w entity.Webhook
 	var isActive int
 	var createdAt, updatedAt int64
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Secret, &isActive, &createdAt, &updatedAt)
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Description, &w.Secret, &isActive, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -356,11 +364,11 @@ func (s *AppStore) GetWebhookByPath(ctx context.Context, path string) (*entity.W
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, name, path, script, secret, is_active, created_at, updated_at FROM webhooks WHERE path = ?`
+	query := `SELECT id, name, path, script, description, secret, is_active, created_at, updated_at FROM webhooks WHERE path = ?`
 	var w entity.Webhook
 	var isActive int
 	var createdAt, updatedAt int64
-	err := s.db.QueryRowContext(ctx, query, path).Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Secret, &isActive, &createdAt, &updatedAt)
+	err := s.db.QueryRowContext(ctx, query, path).Scan(&w.ID, &w.Name, &w.Path, &w.Script, &w.Description, &w.Secret, &isActive, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -377,9 +385,9 @@ func (s *AppStore) CreateWebhook(ctx context.Context, w *entity.Webhook) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO webhooks (id, name, path, script, secret, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO webhooks (id, name, path, script, description, secret, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().Unix()
-	_, err := s.db.ExecContext(ctx, query, w.ID, w.Name, w.Path, w.Script, w.Secret, func() int {
+	_, err := s.db.ExecContext(ctx, query, w.ID, w.Name, w.Path, w.Script, w.Description, w.Secret, func() int {
 		if w.IsActive {
 			return 1
 		}
@@ -392,8 +400,8 @@ func (s *AppStore) UpdateWebhook(ctx context.Context, w *entity.Webhook) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `UPDATE webhooks SET name = ?, path = ?, script = ?, secret = ?, is_active = ?, updated_at = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, w.Name, w.Path, w.Script, w.Secret, func() int {
+	query := `UPDATE webhooks SET name = ?, path = ?, script = ?, description = ?, secret = ?, is_active = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, w.Name, w.Path, w.Script, w.Description, w.Secret, func() int {
 		if w.IsActive {
 			return 1
 		}
