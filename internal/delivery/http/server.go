@@ -2,8 +2,10 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -29,6 +31,8 @@ type HTTPServer struct {
 	msgRepo       *repository.MessageStore
 	config        repository.ConfigRepository
 	cronScheduler *cron.CronScheduler
+	latestQRCode  string
+	qrMu          sync.RWMutex
 }
 
 func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.ConfigRepository, storage repository.StorageRepository) *HTTPServer {
@@ -85,6 +89,7 @@ func (s *HTTPServer) GetHub() *WSHub {
 func (s *HTTPServer) Start() error {
 	s.handler.SetHub(s.hub)
 	s.router.SetWebSocketHandler(s.handleWebSocket(s.hub))
+	s.router.SetQrHandler(s.handleQRCode)
 
 	muxRouter := s.router.RegisterRoutes()
 
@@ -116,9 +121,26 @@ func (s *HTTPServer) Stop() {
 }
 
 func (s *HTTPServer) BroadcastMessage(msgType string, payload interface{}) {
+	// Cache latest QR code
+	if msgType == "qr_code" {
+		if m, ok := payload.(map[string]string); ok {
+			s.qrMu.Lock()
+			s.latestQRCode = m["code"]
+			s.qrMu.Unlock()
+		}
+	}
 	s.hub.Broadcast(WSMessage{
 		Type:    msgType,
 		Payload: payload,
+	})
+}
+
+func (s *HTTPServer) handleQRCode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	s.qrMu.RLock()
+	defer s.qrMu.RUnlock()
+	json.NewEncoder(w).Encode(map[string]string{
+		"code": s.latestQRCode,
 	})
 }
 
