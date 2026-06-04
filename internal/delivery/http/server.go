@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -92,19 +93,63 @@ func (s *HTTPServer) Start() error {
 
 	port := s.config.Get("PORT")
 	if port == "" {
-		port = "3000"
+		port = ":3000"
 	}
 
+	// Use net.Listen to support auto-port (:0) for desktop mode
+	ln, err := net.Listen("tcp", "0.0.0.0"+port)
+	if err != nil {
+		return fmt.Errorf("failed to listen: %w", err)
+	}
+	actualPort := ln.Addr().(*net.TCPAddr).Port
+
 	s.server = &http.Server{
-		Addr:         ":" + port,
 		Handler:      s.createHandler(muxRouter),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	fmt.Printf("Server running on port %s\n", port)
-	return s.server.ListenAndServe()
+	// Print for parent process (Electron) to detect the port
+	fmt.Printf("BACKEND_PORT:%d\n", actualPort)
+	fmt.Printf("Server running on port %d\n", actualPort)
+	return s.server.Serve(ln)
+}
+
+// StartWithListener starts the HTTP server using a pre-created listener
+// (port is already bound, just set up routes and serve)
+func (s *HTTPServer) StartWithListener(ln net.Listener) error {
+	s.handler.SetHub(s.hub)
+	s.router.SetWebSocketHandler(s.handleWebSocket(s.hub))
+
+	muxRouter := s.router.RegisterRoutes()
+
+	go s.hub.Run()
+
+	s.server = &http.Server{
+		Handler:      s.createHandler(muxRouter),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	fmt.Printf("Server running on port %d\n", ln.Addr().(*net.TCPAddr).Port)
+	return s.server.Serve(ln)
+}
+
+// BindPort listens on the configured port and returns the listener + actual port
+// without starting the HTTP server (useful for printing BACKEND_PORT early)
+func (s *HTTPServer) BindPort() (net.Listener, int, error) {
+	port := s.config.Get("PORT")
+	if port == "" {
+		port = ":3000"
+	}
+	ln, err := net.Listen("tcp", "0.0.0.0"+port)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to listen: %w", err)
+	}
+	actualPort := ln.Addr().(*net.TCPAddr).Port
+	return ln, actualPort, nil
 }
 
 func (s *HTTPServer) Stop() {
