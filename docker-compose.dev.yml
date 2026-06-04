@@ -36,12 +36,12 @@ services:
 
   frontend:
     build:
-      context: ./Wa-Bot-FE
-      dockerfile: Dockerfile.dev
+      context: ./web
+      dockerfile: ../Dockerfile.fe.dev
     container_name: wa-bot-fe-dev
     network_mode: host
     volumes:
-      - ./Wa-Bot-FE:/app
+      - ./web:/app
     stdin_open: true
     tty: true
     command: tail -f /dev/null
