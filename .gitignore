@@ -4,5 +4,8 @@ database/
 media/
 wa-bot.exe
 wa-bot
-frontend/
 tmp/
+
+# Frontend (web/)
+web/node_modules/
+web/dist/
