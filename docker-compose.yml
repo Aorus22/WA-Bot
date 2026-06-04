@@ -18,6 +18,17 @@ services:
       - lightpanda
       - redis
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.fe
+    container_name: wa-bot-fe
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
   lightpanda:
     image: lightpanda/browser:nightly
     container_name: wa-bot-lightpanda
