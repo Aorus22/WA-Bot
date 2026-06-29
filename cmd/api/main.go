@@ -31,28 +31,33 @@ type App struct {
 }
 
 func (a *App) Run() error {
+	// Bind port early so Electron can detect BACKEND_PORT immediately
+	ln, actualPort, err := a.httpServer.BindPort()
+	if err != nil {
+		return fmt.Errorf("failed to bind port: %w", err)
+	}
+	fmt.Printf("BACKEND_PORT:%d\n", actualPort)
+	fmt.Printf("Server listening on port %d, initializing WhatsApp...\n", actualPort)
+
 	a.waClient.AddEventHandler(func(evt interface{}) {
 		a.eventHandler.HandleEvent(evt)
 	})
 
 	if err := a.cronScheduler.Start(); err != nil {
+		ln.Close()
 		return fmt.Errorf("failed to start cron scheduler: %w", err)
 	}
 
 	if a.waClient.GetClient() == nil {
+		ln.Close()
 		return fmt.Errorf("whatsapp client not initialized")
 	}
 
 	// Start session management in background
 	go a.HandleSession()
 
-	// Start HTTP server (this is blocking)
-	port := a.config.Get("PORT")
-	if port == "" {
-		port = "3000"
-	}
-	fmt.Printf("Starting HTTP server on port %s...\n", port)
-	if err := a.httpServer.Start(); err != nil {
+	// Start HTTP server using the pre-bound listener
+	if err := a.httpServer.StartWithListener(ln); err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
 
@@ -102,9 +107,8 @@ func (a *App) HandleSession() {
 }
 
 func InitializeApp() (*App, error) {
-	if err := godotenv.Load(); err != nil {
-		return nil, fmt.Errorf("failed to load .env file: %w", err)
-	}
+	// Load .env if available; optional for desktop mode
+	_ = godotenv.Load()
 
 	cfg := infrastructureConfig.NewEnvConfig()
 	storageRepo := storage.NewLocalStorage("media")
@@ -123,9 +127,12 @@ func InitializeApp() (*App, error) {
 	}
 
 	apiKey := cfg.Get("GEMINI_API_KEY")
-	geminiService, err := ai.NewGeminiService(apiKey, storageRepo)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Gemini service: %w", err)
+	var geminiService *ai.GeminiService
+	if apiKey != "" {
+		geminiService, err = ai.NewGeminiService(apiKey, storageRepo)
+		if err != nil {
+			fmt.Printf("Warning: Failed to create Gemini service: %v\n", err)
+		}
 	}
 
 	mediaDownloader := media.NewMediaDownloader(storageRepo)
