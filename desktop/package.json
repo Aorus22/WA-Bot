@@ -1,0 +1,68 @@
+{
+  "name": "wa-bot-desktop",
+  "version": "1.0.0",
+  "description": "WA Bot Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build:be": "cd ../ && go build -o wa-bot-backend ./cmd/api/main.go",
+    "build:fe": "cd ../web && npm run build",
+    "build": "electron-builder --win --mac --linux",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "build": {
+    "appId": "com.wa-bot.desktop",
+    "productName": "WA Bot",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "fe/dist",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../wa-bot-backend",
+        "to": "be/wa-bot-backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../wa-bot-backend.exe",
+        "to": "be/wa-bot-backend.exe",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1"
+  }
+}

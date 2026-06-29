@@ -1,0 +1,9 @@
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Instal tool tambahan jika diperlukan
+RUN apk add --no-cache bash git
+
+# Command agar container tetap menyala
+CMD ["tail", "-f", "/dev/null"]

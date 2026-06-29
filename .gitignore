@@ -4,7 +4,11 @@ database/
 media/
 wa-bot.exe
 wa-bot
+wa-bot-backend.exe
 frontend/
 tmp/
 .serena
 .claude
+desktop/node_modules/
+desktop/dist/
+compiled/
