@@ -6,6 +6,9 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { Loader2 } from "lucide-react"
 import { AuthProvider, useAuth } from "@/contexts/AuthContext"
+import { CallProvider } from "@/contexts/CallContext"
+import { IncomingCallOverlay } from "@/components/call/IncomingCallOverlay"
+import { CallOverlay } from "@/components/call/CallOverlay"
 import { AppLayout } from "@/pages/layout/AppLayout"
 import { LoginPage } from "@/pages/login/LoginPage"
 import { ChatPage } from "@/pages/chat/ChatPage"
@@ -69,25 +72,29 @@ function App() {
 	}, [])
 
 	return (
-		<HashRouter>
-			<div
-				className={cn(
-					isDesktop && "h-screen w-full bg-background text-foreground relative",
-					isDesktop && windowState !== "maximized" && "rounded-xl shadow-lg overflow-hidden"
-				)}
-			>
-				<AuthProvider>
-					<ThemeProvider defaultTheme="system" storageKey="wa-bot-theme">
-						<AppThemeProvider>
-							<TooltipProvider>
-								<AppRoutes />
-								<Toaster position="top-center" />
-							</TooltipProvider>
-						</AppThemeProvider>
-					</ThemeProvider>
-				</AuthProvider>
-			</div>
-		</HashRouter>
+		<AuthProvider>
+			<CallProvider>
+				<HashRouter>
+					<div
+						className={cn(
+							isDesktop && "h-screen w-full bg-background text-foreground relative",
+							isDesktop && windowState !== "maximized" && "rounded-xl shadow-lg overflow-hidden"
+						)}
+					>
+						<ThemeProvider defaultTheme="system" storageKey="wa-bot-theme">
+							<AppThemeProvider>
+								<TooltipProvider>
+									<AppRoutes />
+									<IncomingCallOverlay />
+									<CallOverlay />
+									<Toaster position="top-center" />
+								</TooltipProvider>
+							</AppThemeProvider>
+						</ThemeProvider>
+					</div>
+				</HashRouter>
+			</CallProvider>
+		</AuthProvider>
 	)
 }
 

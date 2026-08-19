@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { useWebSocket, type WSMessage } from "@/hooks/use-websocket"
+import { emitWSMessage } from "@/lib/ws-bus"
 import { api, type Message } from "@/lib/api"
 
 interface ChatUpdate {
@@ -37,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const processedMsgIds = useRef<Set<string>>(new Set())
 
 	const handleWSMessage = useCallback((message: WSMessage) => {
+		emitWSMessage(message)
 		switch (message.type) {
 			case "qr_code":
 				if (message.payload && message.payload.code) {
