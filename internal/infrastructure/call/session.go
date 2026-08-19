@@ -27,6 +27,18 @@ type CallSession struct {
 	// Media is the bridge between the browser media WebSocket and the call. It
 	// is built when the call is created and closed when the call ends.
 	Media *CallMedia
+	// APIKeyID is the API key that initiated this call (external calls only).
+	APIKeyID string
+	// AudioResult is the pre-resolved TTS/audio-file source played after the
+	// call is answered (media-mode external calls only). Its Cleanup is invoked
+	// when the call finalizes.
+	AudioResult *AudioResult
+	// HangupAfterPlayback ends the call once the audio source finishes.
+	HangupAfterPlayback bool
+	// RingTimeout is the configured ring timeout for this call.
+	RingTimeout time.Duration
+	// ringTimer aborts the call if it is not answered in time.
+	ringTimer *time.Timer
 }
 
 // NewCallSession builds a new runtime call session.

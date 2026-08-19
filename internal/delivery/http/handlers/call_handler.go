@@ -77,7 +77,8 @@ func (ch *CallHandler) RejectCall(w http.ResponseWriter, r *http.Request) {
 // HangupCall ends the active call.
 func (ch *CallHandler) HangupCall(w http.ResponseWriter, r *http.Request) {
 	id := ch.handler.getJID(r, "id")
-	if err := ch.callSvc.HangupCall(r.Context(), id); err != nil {
+	// Internal/UI path: no API key ownership applies.
+	if err := ch.callSvc.HangupCall(r.Context(), id, "", false); err != nil {
 		writeCallError(ch.handler, w, err)
 		return
 	}
@@ -122,6 +123,8 @@ func writeCallError(h *Handler, w http.ResponseWriter, err error) {
 		h.sendJSONWithStatus(w, http.StatusServiceUnavailable, map[string]string{"error": "whatsapp_not_connected", "message": "whatsapp client is not connected"})
 	case errors.Is(err, call.ErrInvalidTarget):
 		h.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{"error": "invalid_target", "message": "invalid target"})
+	case errors.Is(err, call.ErrCallNotOwned):
+		h.sendJSONWithStatus(w, http.StatusForbidden, map[string]string{"error": "call_not_owned", "message": "you do not own this call"})
 	case errors.Is(err, call.ErrNotImplemented), errors.Is(err, call.ErrGroupNotSupported):
 		h.sendJSONWithStatus(w, http.StatusNotImplemented, map[string]string{"error": "not_implemented", "message": "not implemented"})
 	default:

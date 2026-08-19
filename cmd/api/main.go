@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/mdp/qrterminal"
@@ -160,6 +161,22 @@ func InitializeApp() (*App, error) {
 
 	callSvc := call.NewCallService(waClient.GetCallClient(), waClient.IsConnected, appStore, httpServer)
 	httpServer.SetCallService(callSvc)
+
+	// Wire the API key repository (also the external-call auth store).
+	httpServer.SetAPIKeyRepo(appStore)
+
+	// Ring timeout (PRD §29), default 45s.
+	if ringSeconds := cfg.GetInt("CALL_RING_TIMEOUT_SECONDS"); ringSeconds > 0 {
+		callSvc.SetRingTimeout(time.Duration(ringSeconds) * time.Second)
+	}
+
+	// TTS provider, gated by CALL_TTS_PROVIDER=edge.
+	var ttsProvider call.TTSProvider
+	if cfg.Get("CALL_TTS_PROVIDER") == "edge" {
+		ttsProvider = call.NewEdgeTTSProvider(cfg.Get("CALL_TTS_DEFAULT_VOICE"))
+	}
+	httpServer.SetTTSProvider(ttsProvider)
+
 	callMediaHandler := http.NewCallMediaHandler(callSvc)
 	httpServer.SetCallMediaHandler(callMediaHandler.ServeWS)
 	if err := callSvc.MarkInterruptedOnStartup(context.Background()); err != nil {

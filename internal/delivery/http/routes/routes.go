@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"wa-bot/internal/delivery/http/handlers"
+	"wa-bot/internal/delivery/http/middleware"
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/lua"
 )
@@ -62,6 +63,8 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	aiHandler := handlers.NewAIHandler(r.handler)
 
 	callHandler := handlers.NewCallHandler(r.handler)
+	apiKeyHandler := handlers.NewAPIKeyHandler(r.handler)
+	extCallHandler := handlers.NewExternalCallHandler(r.handler)
 
 	api := r.muxRouter.PathPrefix("/api").Subrouter()
 
@@ -133,6 +136,22 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/calls/{id}/answer", callHandler.AnswerCall).Methods("POST", "OPTIONS")
 	api.HandleFunc("/calls/{id}/reject", callHandler.RejectCall).Methods("POST", "OPTIONS")
 	api.HandleFunc("/calls/{id}/hangup", callHandler.HangupCall).Methods("POST", "OPTIONS")
+
+	// Internal API key management (PRD §40). These routes manage credentials
+	// that mint calls:write keys, so they require the internal X-API-Secret
+	// (API_SECRET env). Missing/misconfigured secret fails closed (401).
+	api.HandleFunc("/api-keys", middleware.Auth(apiKeyHandler.List)).Methods("GET", "OPTIONS")
+	api.HandleFunc("/api-keys", middleware.Auth(apiKeyHandler.Create)).Methods("POST", "OPTIONS")
+	api.HandleFunc("/api-keys/{id}/revoke", middleware.Auth(apiKeyHandler.Revoke)).Methods("POST", "OPTIONS")
+	api.HandleFunc("/api-keys/{id}", middleware.Auth(apiKeyHandler.Delete)).Methods("DELETE", "OPTIONS")
+
+	// External call API (PRD §33-37), authenticated via bearer API keys. The
+	// create + hangup routes require calls:write; status requires calls:read.
+	apiKeyMW := middleware.NewAPIKeyMiddleware(r.handler.GetAPIKeyRepo())
+	external := api.PathPrefix("/external/v1").Subrouter()
+	external.HandleFunc("/calls", apiKeyMW.RequireScope("calls:write", extCallHandler.CreateCall)).Methods("POST", "OPTIONS")
+	external.HandleFunc("/calls/{id}/hangup", apiKeyMW.RequireScope("calls:write", extCallHandler.HangupCall)).Methods("POST", "OPTIONS")
+	external.HandleFunc("/calls/{id}", apiKeyMW.RequireScope("calls:read", extCallHandler.GetCallStatus)).Methods("GET", "OPTIONS")
 
 	api.HandleFunc("/avatar/{jid}", systemHandler.AvatarProxy).Methods("GET")
 
