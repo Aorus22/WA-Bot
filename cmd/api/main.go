@@ -14,6 +14,7 @@ import (
 	"wa-bot/internal/delivery/whatsapp"
 	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
+	"wa-bot/internal/infrastructure/call"
 	infrastructureConfig "wa-bot/internal/infrastructure/config"
 	"wa-bot/internal/infrastructure/lua"
 	"wa-bot/internal/infrastructure/media"
@@ -27,6 +28,7 @@ type App struct {
 	eventHandler  *whatsapp.WhatsAppEventHandler
 	httpServer    *http.HTTPServer
 	cronScheduler *cron.CronScheduler
+	callSvc       *call.CallService
 	config        *infrastructureConfig.EnvConfig
 }
 
@@ -156,6 +158,12 @@ func InitializeApp() (*App, error) {
 		return nil, fmt.Errorf("failed to create app store: %w", err)
 	}
 
+	callSvc := call.NewCallService(waClient.GetCallClient(), waClient.IsConnected, appStore, httpServer)
+	httpServer.SetCallService(callSvc)
+	if err := callSvc.MarkInterruptedOnStartup(context.Background()); err != nil {
+		fmt.Printf("Warning: failed to mark interrupted calls: %v\n", err)
+	}
+
 	luaService := lua.NewLuaService(waClient, appStore, stateRepo, storageRepo, geminiService, mediaDownloader, redisService)
 	eventHandler.SetLuaService(luaService)
 	httpServer.SetLuaService(luaService)
@@ -180,6 +188,7 @@ func InitializeApp() (*App, error) {
 		eventHandler:  eventHandler,
 		httpServer:    httpServer,
 		cronScheduler: cronScheduler,
+		callSvc:       callSvc,
 		config:        cfg,
 	}, nil
 }

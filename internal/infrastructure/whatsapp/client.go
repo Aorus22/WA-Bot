@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/purpshell/meowcaller"
 	"go.mau.fi/whatsmeow"
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
@@ -28,12 +29,13 @@ type QREvent struct {
 }
 
 type WhatsAppClient struct {
-	client    *whatsmeow.Client
-	logLevel  string
-	dbURL     string
-	dbLog     waLog.Logger
-	container *sqlstore.Container
-	logger    MessageLogger
+	client     *whatsmeow.Client
+	callClient *meowcaller.Client
+	logLevel   string
+	dbURL      string
+	dbLog      waLog.Logger
+	container  *sqlstore.Container
+	logger     MessageLogger
 }
 
 func NewWhatsAppClient(dbURL string, logLevel string, dbLog waLog.Logger) (*WhatsAppClient, error) {
@@ -47,13 +49,18 @@ func NewWhatsAppClient(dbURL string, logLevel string, dbLog waLog.Logger) (*What
 	}
 	client := whatsmeow.NewClient(deviceStore, waLog.Stdout("Client", logLevel, true))
 
-	return &WhatsAppClient{
+	w := &WhatsAppClient{
 		client:    client,
 		logLevel:  logLevel,
 		dbURL:     dbURL,
 		dbLog:     dbLog,
 		container: container,
-	}, nil
+	}
+	// meowcaller wraps the same whatsmeow.Client and MUST be created before
+	// whatsmeow.Connect() so call hooks are attached before the receive loop starts.
+	w.callClient = meowcaller.NewClient(client)
+
+	return w, nil
 }
 
 func (w *WhatsAppClient) SetLogger(logger MessageLogger) {
@@ -413,6 +420,12 @@ func (w *WhatsAppClient) GetClient() interface{} {
 	return w.client
 }
 
+// GetCallClient returns the meowcaller.Client wrapping the same whatsmeow.Client.
+// It is non-nil as soon as the WhatsAppClient is constructed (before Connect).
+func (w *WhatsAppClient) GetCallClient() *meowcaller.Client {
+	return w.callClient
+}
+
 func (w *WhatsAppClient) AddEventHandler(handler func(event interface{})) {
 	w.client.AddEventHandler(handler)
 }
@@ -439,6 +452,13 @@ func (w *WhatsAppClient) GetQRChannel(ctx context.Context) (<-chan QREvent, erro
 
 func (w *WhatsAppClient) IsLoggedIn() bool {
 	return w.client.Store.ID != nil
+}
+
+// IsConnected reports whether the underlying whatsmeow websocket is actively
+// connected. Unlike IsLoggedIn (which only checks a stored device), this is true
+// only while the connection is live.
+func (w *WhatsAppClient) IsConnected() bool {
+	return w.client != nil && w.client.IsConnected()
 }
 
 func (w *WhatsAppClient) GetProfilePictureInfo(ctx context.Context, jid string) (string, error) {
