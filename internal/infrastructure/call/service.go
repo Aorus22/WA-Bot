@@ -44,15 +44,19 @@ type CallService struct {
 	connected func() bool
 	logs      repository.CallRepository
 	hub       EventPublisher
+
+	mediaMu       sync.Mutex
+	mediaSessions map[string]*MediaSession
 }
 
 // NewCallService builds the call service and wires the incoming-call handler.
 func NewCallService(client *meowcaller.Client, connected func() bool, logs repository.CallRepository, hub EventPublisher) *CallService {
 	svc := &CallService{
-		client:    client,
-		connected: connected,
-		logs:      logs,
-		hub:       hub,
+		client:        client,
+		connected:     connected,
+		logs:          logs,
+		hub:           hub,
+		mediaSessions: make(map[string]*MediaSession),
 	}
 	if client != nil {
 		client.OnIncomingCall(svc.onIncomingCall)
@@ -151,6 +155,7 @@ func (s *CallService) StartCall(ctx context.Context, req entity.CreateCallReques
 	if s.active != nil && s.active.ID == id {
 		session.MeowCallID = call.ID()
 		session.Call = call
+		session.Media = NewCallMedia(call)
 		session.Status = entity.CallStatusInitiating
 	}
 	s.mu.Unlock()
@@ -351,6 +356,7 @@ func (s *CallService) onIncomingCall(call *meowcaller.Call) {
 		nil,
 	)
 	session.Status = entity.CallStatusRinging
+	session.Media = NewCallMedia(call)
 	s.active = session
 	s.mu.Unlock()
 
@@ -460,7 +466,15 @@ func (s *CallService) finalize(session *CallSession, status entity.CallStatus, r
 	session.EndedAt = &now
 	session.Status = status
 	s.active = nil
+	media := session.Media
+	session.Media = nil
 	s.mu.Unlock()
+
+	// Release the media bridges and any pending media session for this call.
+	if media != nil {
+		media.Close()
+	}
+	s.dropMediaSession(session.ID)
 
 	endedMs := now.UnixMilli()
 	var durationMS *int64

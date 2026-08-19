@@ -24,7 +24,9 @@ type CallSession struct {
 	StartedAt    time.Time
 	AnsweredAt   *time.Time
 	EndedAt      *time.Time
-	// MediaClient reserved for Phase 2.
+	// Media is the bridge between the browser media WebSocket and the call. It
+	// is built when the call is created and closed when the call ends.
+	Media *CallMedia
 }
 
 // NewCallSession builds a new runtime call session.

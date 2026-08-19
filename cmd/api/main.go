@@ -160,6 +160,8 @@ func InitializeApp() (*App, error) {
 
 	callSvc := call.NewCallService(waClient.GetCallClient(), waClient.IsConnected, appStore, httpServer)
 	httpServer.SetCallService(callSvc)
+	callMediaHandler := http.NewCallMediaHandler(callSvc)
+	httpServer.SetCallMediaHandler(callMediaHandler.ServeWS)
 	if err := callSvc.MarkInterruptedOnStartup(context.Background()); err != nil {
 		fmt.Printf("Warning: failed to mark interrupted calls: %v\n", err)
 	}

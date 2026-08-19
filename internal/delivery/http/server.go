@@ -35,6 +35,7 @@ type HTTPServer struct {
 	cronScheduler *cron.CronScheduler
 	latestQRCode  string
 	qrMu          sync.RWMutex
+	callMedia     http.HandlerFunc
 }
 
 func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.ConfigRepository, storage repository.StorageRepository) *HTTPServer {
@@ -86,6 +87,12 @@ func (s *HTTPServer) SetGeminiService(gemini *ai.GeminiService) {
 
 func (s *HTTPServer) SetCallService(svc *call.CallService) {
 	s.handler.SetCallService(svc)
+}
+
+// SetCallMediaHandler registers the dedicated binary media WebSocket handler.
+func (s *HTTPServer) SetCallMediaHandler(h http.HandlerFunc) {
+	s.callMedia = h
+	s.router.SetCallMediaHandler(h)
 }
 
 func (s *HTTPServer) GetHub() *WSHub {
