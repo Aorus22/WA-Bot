@@ -21,6 +21,7 @@ type Router struct {
 	storage   repository.StorageRepository
 	wsHandler http.HandlerFunc
 	qrHandler http.HandlerFunc
+	callMedia http.HandlerFunc
 }
 
 func NewRouter(h *handlers.Handler, storage repository.StorageRepository) *Router {
@@ -37,6 +38,12 @@ func (r *Router) SetWebSocketHandler(handler http.HandlerFunc) {
 
 func (r *Router) SetQrHandler(handler http.HandlerFunc) {
 	r.qrHandler = handler
+}
+
+// SetCallMediaHandler registers the dedicated binary media WebSocket handler,
+// served at the top-level (non-API) /ws/calls/{id}/media path.
+func (r *Router) SetCallMediaHandler(handler http.HandlerFunc) {
+	r.callMedia = handler
 }
 
 func (r *Router) RegisterRoutes() *mux.Router {
@@ -133,6 +140,10 @@ func (r *Router) RegisterRoutes() *mux.Router {
 
 	if r.wsHandler != nil {
 		r.muxRouter.HandleFunc("/ws", r.wsHandler)
+	}
+
+	if r.callMedia != nil {
+		r.muxRouter.HandleFunc("/ws/calls/{id}/media", r.callMedia)
 	}
 
 	r.muxRouter.HandleFunc("/webhook/{path:.+}", webhookHandler.ExecuteWebhook)
