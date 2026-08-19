@@ -16,11 +16,11 @@ import (
 )
 
 type Router struct {
-	muxRouter  *mux.Router
-	handler    *handlers.Handler
-	storage    repository.StorageRepository
-	wsHandler  http.HandlerFunc
-	qrHandler  http.HandlerFunc
+	muxRouter *mux.Router
+	handler   *handlers.Handler
+	storage   repository.StorageRepository
+	wsHandler http.HandlerFunc
+	qrHandler http.HandlerFunc
 }
 
 func NewRouter(h *handlers.Handler, storage repository.StorageRepository) *Router {
@@ -43,16 +43,18 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	messageHandler := handlers.NewMessageHandler(r.handler)
 	chatHandler := handlers.NewChatHandler(r.handler)
 	triggerHandler := handlers.NewTriggerHandler(r.handler)
-	
+
 	// Type assertion needed because handler interface doesn't match concrete type directly in struct initialization
 	luaSvc := r.handler.GetLuaService().(*lua.LuaService)
-	
+
 	cronHandler := handlers.NewCronHandler(r.handler.GetCronRepo(), r.handler.GetCronScheduler(), luaSvc)
 	cronHandler.SetHandler(r.handler)
 	stickerHandler := handlers.NewStickerHandler(r.handler)
 	systemHandler := handlers.NewSystemHandler(r.handler)
 	msgMgmtHandler := handlers.NewMessageManagementHandler(r.handler)
 	aiHandler := handlers.NewAIHandler(r.handler)
+
+	callHandler := handlers.NewCallHandler(r.handler)
 
 	api := r.muxRouter.PathPrefix("/api").Subrouter()
 
@@ -102,7 +104,6 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/cron/{id}", cronHandler.Update).Methods("PUT", "OPTIONS")
 	api.HandleFunc("/cron/{id}", cronHandler.Delete).Methods("DELETE", "OPTIONS")
 
-
 	webhookHandler := handlers.NewWebhookHandler(r.handler, r.handler.GetWebhookRepo(), r.handler.GetWebhookLogRepo(), luaSvc)
 
 	api.HandleFunc("/webhooks", webhookHandler.GetAll).Methods("GET")
@@ -115,6 +116,16 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/webhooks", webhookHandler.DeleteAll).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/docs", aiHandler.GetDocs).Methods("GET")
 	api.HandleFunc("/ai/assistant", aiHandler.ChatAssistant).Methods("POST", "OPTIONS")
+
+	// Call routes. Literal paths (active/history) are registered before the
+	// {id} pattern to avoid mux matching conflicts.
+	api.HandleFunc("/calls/active", callHandler.GetActiveCall).Methods("GET")
+	api.HandleFunc("/calls/history", callHandler.GetHistory).Methods("GET")
+	api.HandleFunc("/calls", callHandler.CreateCall).Methods("POST", "OPTIONS")
+	api.HandleFunc("/calls/group", callHandler.CreateGroupCall).Methods("POST", "OPTIONS")
+	api.HandleFunc("/calls/{id}/answer", callHandler.AnswerCall).Methods("POST", "OPTIONS")
+	api.HandleFunc("/calls/{id}/reject", callHandler.RejectCall).Methods("POST", "OPTIONS")
+	api.HandleFunc("/calls/{id}/hangup", callHandler.HangupCall).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/avatar/{jid}", systemHandler.AvatarProxy).Methods("GET")
 

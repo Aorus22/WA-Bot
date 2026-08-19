@@ -11,12 +11,13 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/delivery/cron"
 	"wa-bot/internal/delivery/http/handlers"
 	"wa-bot/internal/delivery/http/middleware"
 	"wa-bot/internal/delivery/http/routes"
+	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
+	"wa-bot/internal/infrastructure/call"
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
@@ -81,6 +82,10 @@ func (s *HTTPServer) SetCronScheduler(cs *cron.CronScheduler) {
 
 func (s *HTTPServer) SetGeminiService(gemini *ai.GeminiService) {
 	s.handler.SetGeminiService(gemini)
+}
+
+func (s *HTTPServer) SetCallService(svc *call.CallService) {
+	s.handler.SetCallService(svc)
 }
 
 func (s *HTTPServer) GetHub() *WSHub {

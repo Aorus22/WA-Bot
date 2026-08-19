@@ -14,10 +14,11 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/delivery/cron"
-	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
+	"wa-bot/internal/domain/repository"
 	"wa-bot/internal/infrastructure/ai"
+	"wa-bot/internal/infrastructure/call"
+	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
 type LuaService interface {
@@ -25,18 +26,19 @@ type LuaService interface {
 }
 
 type Handler struct {
-	client        *whatsappInfra.WhatsAppClient
-	config        repository.ConfigRepository
-	storage       repository.StorageRepository
-	msgRepo       *repository.MessageStore
-	triggerRepo   repository.TriggerRepository
-	cronRepo      repository.CronJobRepository
+	client         *whatsappInfra.WhatsAppClient
+	config         repository.ConfigRepository
+	storage        repository.StorageRepository
+	msgRepo        *repository.MessageStore
+	triggerRepo    repository.TriggerRepository
+	cronRepo       repository.CronJobRepository
 	webhookRepo    repository.WebhookRepository
 	webhookLogRepo repository.WebhookLogRepository
-	cronScheduler *cron.CronScheduler
-	lua           LuaService
-	gemini        *ai.GeminiService
-	hub           any
+	cronScheduler  *cron.CronScheduler
+	lua            LuaService
+	gemini         *ai.GeminiService
+	hub            any
+	callService    *call.CallService
 }
 
 func NewHandler(
@@ -113,6 +115,14 @@ func (h *Handler) SetHub(hub any) {
 
 func (h *Handler) GetHub() any {
 	return h.hub
+}
+
+func (h *Handler) SetCallService(svc *call.CallService) {
+	h.callService = svc
+}
+
+func (h *Handler) GetCallService() *call.CallService {
+	return h.callService
 }
 
 func (h *Handler) sendJSON(w http.ResponseWriter, data interface{}) {

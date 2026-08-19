@@ -1,0 +1,130 @@
+package handlers
+
+import (
+	"errors"
+	"net/http"
+	"strconv"
+
+	"wa-bot/internal/domain/entity"
+	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/infrastructure/call"
+)
+
+// CallHandler exposes the internal call REST API.
+type CallHandler struct {
+	handler *Handler
+	callSvc *call.CallService
+}
+
+// NewCallHandler builds the call handler from the shared container.
+func NewCallHandler(h *Handler) *CallHandler {
+	return &CallHandler{
+		handler: h,
+		callSvc: h.GetCallService(),
+	}
+}
+
+// GetActiveCall returns the current active call state (200 with null if none).
+func (ch *CallHandler) GetActiveCall(w http.ResponseWriter, r *http.Request) {
+	state := ch.callSvc.GetActiveCall()
+	ch.handler.sendJSON(w, state)
+}
+
+// CreateCall places an outgoing direct call.
+func (ch *CallHandler) CreateCall(w http.ResponseWriter, r *http.Request) {
+	var req entity.CreateCallRequest
+	if err := ch.handler.readJSON(r, &req); err != nil {
+		ch.handler.sendError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	state, err := ch.callSvc.StartCall(r.Context(), req, entity.CallSourceUI)
+	if err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSONWithStatus(w, http.StatusCreated, state)
+}
+
+// CreateGroupCall is reserved for Phase 5.
+func (ch *CallHandler) CreateGroupCall(w http.ResponseWriter, r *http.Request) {
+	ch.handler.sendJSONWithStatus(w, http.StatusNotImplemented, map[string]string{
+		"error":   "not_implemented",
+		"message": "group calls are not yet supported",
+	})
+}
+
+// AnswerCall answers the active call.
+func (ch *CallHandler) AnswerCall(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	if err := ch.callSvc.AnswerCall(r.Context(), id); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "answered"})
+}
+
+// RejectCall rejects the active call.
+func (ch *CallHandler) RejectCall(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	if err := ch.callSvc.RejectCall(r.Context(), id); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "rejected"})
+}
+
+// HangupCall ends the active call.
+func (ch *CallHandler) HangupCall(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	if err := ch.callSvc.HangupCall(r.Context(), id); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "ended"})
+}
+
+// GetHistory returns the call history.
+func (ch *CallHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
+	filter := repository.CallHistoryFilter{}
+
+	if limit, err := strconv.Atoi(ch.handler.getQueryParam(r, "limit")); err == nil && limit > 0 {
+		filter.Limit = limit
+	}
+	if before, err := strconv.ParseInt(ch.handler.getQueryParam(r, "before"), 10, 64); err == nil {
+		filter.Before = &before
+	}
+	filter.Direction = entity.CallDirection(ch.handler.getQueryParam(r, "direction"))
+	filter.Type = entity.CallType(ch.handler.getQueryParam(r, "type"))
+	filter.Status = entity.CallStatus(ch.handler.getQueryParam(r, "status"))
+	filter.Target = ch.handler.getQueryParam(r, "target")
+
+	logs, err := ch.callSvc.GetHistory(r.Context(), filter)
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ch.handler.sendJSON(w, map[string]interface{}{
+		"logs": logs,
+	})
+}
+
+// writeCallError maps call service sentinel errors to HTTP responses.
+func writeCallError(h *Handler, w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, call.ErrCallAlreadyActive):
+		h.sendJSONWithStatus(w, http.StatusConflict, map[string]string{"error": "call_already_active", "message": "a call is already active"})
+	case errors.Is(err, call.ErrCallNotFound):
+		h.sendJSONWithStatus(w, http.StatusNotFound, map[string]string{"error": "call_not_found", "message": "call not found"})
+	case errors.Is(err, call.ErrCallNotActive):
+		h.sendJSONWithStatus(w, http.StatusConflict, map[string]string{"error": "call_not_active", "message": "call is not active"})
+	case errors.Is(err, call.ErrWhatsAppNotConnected):
+		h.sendJSONWithStatus(w, http.StatusServiceUnavailable, map[string]string{"error": "whatsapp_not_connected", "message": "whatsapp client is not connected"})
+	case errors.Is(err, call.ErrInvalidTarget):
+		h.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{"error": "invalid_target", "message": "invalid target"})
+	case errors.Is(err, call.ErrNotImplemented), errors.Is(err, call.ErrGroupNotSupported):
+		h.sendJSONWithStatus(w, http.StatusNotImplemented, map[string]string{"error": "not_implemented", "message": "not implemented"})
+	default:
+		h.sendError(w, http.StatusInternalServerError, err.Error())
+	}
+}

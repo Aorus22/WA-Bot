@@ -12,3 +12,5 @@ tmp/
 desktop/node_modules/
 desktop/dist/
 compiled/
+# deepwork session state (local only)
+.slim/deepwork/

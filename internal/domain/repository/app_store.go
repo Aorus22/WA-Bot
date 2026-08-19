@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -57,7 +58,7 @@ func (s *AppStore) init() error {
 			created_at INTEGER DEFAULT (strftime('%s', 'now')),
 			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 		)`,
-			`CREATE TABLE IF NOT EXISTS webhooks (
+		`CREATE TABLE IF NOT EXISTS webhooks (
 				id TEXT PRIMARY KEY,
 				name TEXT,
 				path TEXT UNIQUE,
@@ -68,7 +69,7 @@ func (s *AppStore) init() error {
 				created_at INTEGER DEFAULT (strftime('%s', 'now')),
 				updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 			)`,
-			`CREATE TABLE IF NOT EXISTS webhook_logs (
+		`CREATE TABLE IF NOT EXISTS webhook_logs (
 					id TEXT PRIMARY KEY,
 					webhook_id TEXT,
 					webhook_path TEXT,
@@ -80,8 +81,42 @@ func (s *AppStore) init() error {
 					status_code INTEGER,
 					created_at INTEGER DEFAULT (strftime('%s', 'now'))
 				)`,
-			`CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at DESC)`,
-			`CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_id ON webhook_logs(webhook_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_id ON webhook_logs(webhook_id)`,
+		`CREATE TABLE IF NOT EXISTS api_keys (
+				id TEXT PRIMARY KEY,
+				name TEXT,
+				key_prefix TEXT,
+				key_hash TEXT UNIQUE,
+				scopes TEXT DEFAULT '[]',
+				is_active INTEGER DEFAULT 1,
+				created_at INTEGER DEFAULT (strftime('%s', 'now')),
+				last_used_at INTEGER,
+				revoked_at INTEGER
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
+		`CREATE TABLE IF NOT EXISTS call_logs (
+				id TEXT PRIMARY KEY,
+				meow_call_id TEXT DEFAULT '',
+				direction TEXT,
+				call_type TEXT,
+				target TEXT,
+				group_jid TEXT DEFAULT '',
+				participants TEXT DEFAULT '[]',
+				source TEXT,
+				media_mode TEXT,
+				status TEXT,
+				error_message TEXT DEFAULT '',
+				api_key_id TEXT DEFAULT '',
+				started_at INTEGER,
+				answered_at INTEGER,
+				ended_at INTEGER,
+				duration_ms INTEGER,
+				created_at INTEGER DEFAULT (strftime('%s', 'now'))
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_call_logs_started ON call_logs(started_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_call_logs_target ON call_logs(target)`,
+		`CREATE INDEX IF NOT EXISTS idx_call_logs_status ON call_logs(status)`,
 	}
 
 	for _, query := range queries {
@@ -499,4 +534,216 @@ func (s *AppStore) DeleteAllWebhookLogs(ctx context.Context) error {
 	query := `DELETE FROM webhook_logs`
 	_, err := s.db.ExecContext(ctx, query)
 	return err
+}
+
+// APIKeyRepository implementation for AppStore
+
+func (s *AppStore) CreateAPIKey(ctx context.Context, key *entity.APIKey) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scopes, err := json.Marshal(key.Scopes)
+	if err != nil {
+		return err
+	}
+	isActive := 0
+	if key.IsActive {
+		isActive = 1
+	}
+	query := `INSERT INTO api_keys (id, name, key_prefix, key_hash, scopes, is_active, created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err = s.db.ExecContext(ctx, query, key.ID, key.Name, key.Prefix, key.KeyHash, string(scopes), isActive, key.CreatedAt, key.LastUsedAt, key.RevokedAt)
+	return err
+}
+
+func (s *AppStore) GetAPIKeys(ctx context.Context) ([]*entity.APIKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, key_prefix, key_hash, scopes, is_active, created_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []*entity.APIKey
+	for rows.Next() {
+		var k entity.APIKey
+		var scopes string
+		var isActive int
+		if err := rows.Scan(&k.ID, &k.Name, &k.Prefix, &k.KeyHash, &scopes, &isActive, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(scopes), &k.Scopes)
+		if k.Scopes == nil {
+			k.Scopes = []string{}
+		}
+		k.IsActive = isActive == 1
+		keys = append(keys, &k)
+	}
+	return keys, nil
+}
+
+func (s *AppStore) FindAPIKeyByHash(ctx context.Context, hash string) (*entity.APIKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, name, key_prefix, key_hash, scopes, is_active, created_at, last_used_at, revoked_at FROM api_keys WHERE key_hash = ?`
+	var k entity.APIKey
+	var scopes string
+	var isActive int
+	err := s.db.QueryRowContext(ctx, query, hash).Scan(&k.ID, &k.Name, &k.Prefix, &k.KeyHash, &scopes, &isActive, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(scopes), &k.Scopes)
+	if k.Scopes == nil {
+		k.Scopes = []string{}
+	}
+	k.IsActive = isActive == 1
+	return &k, nil
+}
+
+func (s *AppStore) TouchAPIKey(ctx context.Context, id string, lastUsedAt int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE api_keys SET last_used_at = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, lastUsedAt, id)
+	return err
+}
+
+func (s *AppStore) RevokeAPIKey(ctx context.Context, id string, revokedAt int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE api_keys SET revoked_at = ?, is_active = 0 WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, revokedAt, id)
+	return err
+}
+
+func (s *AppStore) DeleteAPIKey(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM api_keys WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, id)
+	return err
+}
+
+// CallRepository implementation for AppStore
+
+func (s *AppStore) CreateCallLog(ctx context.Context, log *entity.CallLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	participants, err := json.Marshal(log.Participants)
+	if err != nil {
+		return err
+	}
+	query := `INSERT INTO call_logs (id, meow_call_id, direction, call_type, target, group_jid, participants, source, media_mode, status, error_message, api_key_id, started_at, answered_at, ended_at, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err = s.db.ExecContext(ctx, query, log.ID, log.MeowCallID, log.Direction, log.CallType, log.Target, log.GroupJID, string(participants), log.Source, log.MediaMode, log.Status, log.ErrorMessage, log.APIKeyID, log.StartedAt, log.AnsweredAt, log.EndedAt, log.DurationMS, log.CreatedAt)
+	return err
+}
+
+func (s *AppStore) UpdateCallStatus(ctx context.Context, id string, status entity.CallStatus, answeredAt *int64, endedAt *int64, durationMS *int64, meowCallID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE call_logs SET status = ?, answered_at = COALESCE(?, answered_at), ended_at = COALESCE(?, ended_at), duration_ms = COALESCE(?, duration_ms), meow_call_id = CASE WHEN ? = '' THEN meow_call_id ELSE ? END WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, status, answeredAt, endedAt, durationMS, meowCallID, meowCallID, id)
+	return err
+}
+
+func (s *AppStore) GetCallLog(ctx context.Context, id string) (*entity.CallLog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, meow_call_id, direction, call_type, target, group_jid, participants, source, media_mode, status, error_message, api_key_id, started_at, answered_at, ended_at, duration_ms, created_at FROM call_logs WHERE id = ?`
+	var l entity.CallLog
+	var participants string
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&l.ID, &l.MeowCallID, &l.Direction, &l.CallType, &l.Target, &l.GroupJID, &participants, &l.Source, &l.MediaMode, &l.Status, &l.ErrorMessage, &l.APIKeyID, &l.StartedAt, &l.AnsweredAt, &l.EndedAt, &l.DurationMS, &l.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(participants), &l.Participants)
+	if l.Participants == nil {
+		l.Participants = []string{}
+	}
+	return &l, nil
+}
+
+func (s *AppStore) GetCallHistory(ctx context.Context, opts CallHistoryFilter) ([]*entity.CallLog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, meow_call_id, direction, call_type, target, group_jid, participants, source, media_mode, status, error_message, api_key_id, started_at, answered_at, ended_at, duration_ms, created_at FROM call_logs WHERE 1=1`
+	var args []interface{}
+	if opts.Before != nil {
+		query += ` AND started_at < ?`
+		args = append(args, *opts.Before)
+	}
+	if opts.Direction != "" {
+		query += ` AND direction = ?`
+		args = append(args, opts.Direction)
+	}
+	if opts.Type != "" {
+		query += ` AND call_type = ?`
+		args = append(args, opts.Type)
+	}
+	if opts.Status != "" {
+		query += ` AND status = ?`
+		args = append(args, opts.Status)
+	}
+	if opts.Target != "" {
+		query += ` AND target = ?`
+		args = append(args, opts.Target)
+	}
+	query += ` ORDER BY started_at DESC`
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	query += ` LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []*entity.CallLog
+	for rows.Next() {
+		var l entity.CallLog
+		var participants string
+		if err := rows.Scan(&l.ID, &l.MeowCallID, &l.Direction, &l.CallType, &l.Target, &l.GroupJID, &participants, &l.Source, &l.MediaMode, &l.Status, &l.ErrorMessage, &l.APIKeyID, &l.StartedAt, &l.AnsweredAt, &l.EndedAt, &l.DurationMS, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(participants), &l.Participants)
+		if l.Participants == nil {
+			l.Participants = []string{}
+		}
+		logs = append(logs, &l)
+	}
+	return logs, nil
+}
+
+func (s *AppStore) MarkInterruptedCalls(ctx context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE call_logs SET status = 'interrupted' WHERE status IN ('preparing', 'initiating', 'ringing', 'connecting', 'connected', 'ending') AND ended_at IS NULL`
+	res, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
