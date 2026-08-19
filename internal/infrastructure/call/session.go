@@ -39,6 +39,10 @@ type CallSession struct {
 	RingTimeout time.Duration
 	// ringTimer aborts the call if it is not answered in time.
 	ringTimer *time.Timer
+	// VideoEnabled reports whether this client's outbound camera is active.
+	VideoEnabled bool
+	// RemoteVideoEnabled reports whether the peer's camera is on.
+	RemoteVideoEnabled bool
 }
 
 // NewCallSession builds a new runtime call session.
@@ -78,16 +82,18 @@ func (s *CallSession) View() entity.CallStateResponse {
 		answeredAt = &ms
 	}
 	return entity.CallStateResponse{
-		ID:           s.ID,
-		Status:       s.Status,
-		Type:         s.Type,
-		Direction:    s.Direction,
-		Source:       s.Source,
-		MediaMode:    s.MediaMode,
-		Target:       s.Target,
-		GroupJID:     s.GroupJID,
-		Participants: s.Participants,
-		StartedAt:    s.StartedAt.UnixMilli(),
-		AnsweredAt:   answeredAt,
+		ID:                 s.ID,
+		Status:             s.Status,
+		Type:               s.Type,
+		Direction:          s.Direction,
+		Source:             s.Source,
+		MediaMode:          s.MediaMode,
+		Target:             s.Target,
+		GroupJID:           s.GroupJID,
+		Participants:       s.Participants,
+		StartedAt:          s.StartedAt.UnixMilli(),
+		AnsweredAt:         answeredAt,
+		VideoEnabled:       s.VideoEnabled,
+		RemoteVideoEnabled: s.RemoteVideoEnabled,
 	}
 }

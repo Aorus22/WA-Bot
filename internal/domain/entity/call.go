@@ -109,4 +109,8 @@ type CallStateResponse struct {
 	Participants []string      `json:"participants,omitempty"`
 	StartedAt    int64         `json:"started_at"`
 	AnsweredAt   *int64        `json:"answered_at,omitempty"`
+	// VideoEnabled reports whether this client's outbound camera is active.
+	VideoEnabled bool `json:"video_enabled"`
+	// RemoteVideoEnabled reports whether the peer's camera is on.
+	RemoteVideoEnabled bool `json:"remote_video_enabled"`
 }

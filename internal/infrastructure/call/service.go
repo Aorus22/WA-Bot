@@ -574,6 +574,109 @@ func (s *CallService) HangupCall(ctx context.Context, id string, apiKeyID string
 	return nil
 }
 
+// StartVideo requests an audio→video upgrade on the active call.
+func (s *CallService) StartVideo(ctx context.Context, id string) error {
+	s.mu.Lock()
+	session := s.active
+	if session == nil || session.ID != id {
+		s.mu.Unlock()
+		return ErrCallNotFound
+	}
+	if session.Call == nil {
+		s.mu.Unlock()
+		return ErrCallNotActive
+	}
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.StartVideo(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		session.VideoEnabled = true
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// AcceptVideo accepts a pending peer video upgrade request on the active call.
+func (s *CallService) AcceptVideo(ctx context.Context, id string) error {
+	s.mu.Lock()
+	session := s.active
+	if session == nil || session.ID != id {
+		s.mu.Unlock()
+		return ErrCallNotFound
+	}
+	if session.Call == nil {
+		s.mu.Unlock()
+		return ErrCallNotActive
+	}
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.AcceptVideo(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		session.VideoEnabled = true
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// StopVideo stops this client's outbound video without ending the audio call
+// (PRD §9: muting video must not end the audio call).
+func (s *CallService) StopVideo(ctx context.Context, id string) error {
+	s.mu.Lock()
+	session := s.active
+	if session == nil || session.ID != id {
+		s.mu.Unlock()
+		return ErrCallNotFound
+	}
+	if session.Call == nil {
+		s.mu.Unlock()
+		return ErrCallNotActive
+	}
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.StopVideo(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		session.VideoEnabled = false
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// RejectVideo declines a pending peer video upgrade request by turning off this
+// client's own outbound camera (meowcaller.SetVideoEnabled(false)), which
+// declines the peer's upgrade while keeping the audio call alive.
+func (s *CallService) RejectVideo(ctx context.Context, id string) error {
+	s.mu.Lock()
+	session := s.active
+	if session == nil || session.ID != id {
+		s.mu.Unlock()
+		return ErrCallNotFound
+	}
+	if session.Call == nil {
+		s.mu.Unlock()
+		return ErrCallNotActive
+	}
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.SetVideoEnabled(false); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		session.VideoEnabled = false
+	}
+	s.mu.Unlock()
+	return nil
+}
+
 // GetActiveCall returns the active call state, or nil if none is active.
 func (s *CallService) GetActiveCall() *entity.CallStateResponse {
 	s.mu.Lock()
@@ -774,6 +877,39 @@ func (s *CallService) wireCallbacks(session *CallSession, call *meowcaller.Call)
 		}
 		s.mu.Unlock()
 		s.broadcast("call.ready", state)
+	})
+	call.OnVideoState(func(vs meowcaller.VideoState) {
+		s.mu.Lock()
+		if s.active == nil || s.active.ID != session.ID {
+			// The call has ended or was superseded; do not broadcast a phantom
+			// zero-value upgrade request or a post-end video state.
+			s.mu.Unlock()
+			return
+		}
+		session.RemoteVideoEnabled = vs.Active
+		videoEnabled := session.VideoEnabled
+		remoteVideoEnabled := session.RemoteVideoEnabled
+		s.mu.Unlock()
+		// Unified video event envelope. The `kind` discriminator distinguishes an
+		// inbound peer upgrade request from a plain peer video state change.
+		kind := "video_state"
+		if vs.Upgrade {
+			kind = "video_upgrade_requested"
+		}
+		envelope := map[string]interface{}{
+			"kind":                 kind,
+			"id":                   session.ID,
+			"active":               vs.Active,
+			"orientation":          vs.Orientation,
+			"raw":                  vs.Raw,
+			"video_enabled":        videoEnabled,
+			"remote_video_enabled": remoteVideoEnabled,
+		}
+		if vs.Upgrade {
+			s.broadcast("call.video_upgrade_requested", envelope)
+			return
+		}
+		s.broadcast("call.video_state", envelope)
 	})
 	call.OnEnd(func(reason string) {
 		s.onEnd(session, reason)
