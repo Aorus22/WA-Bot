@@ -85,6 +85,46 @@ func (ch *CallHandler) HangupCall(w http.ResponseWriter, r *http.Request) {
 	ch.handler.sendJSON(w, map[string]string{"status": "ended"})
 }
 
+// StartVideo requests an audio→video upgrade on the active call.
+func (ch *CallHandler) StartVideo(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	if err := ch.callSvc.StartVideo(r.Context(), id); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "video_started"})
+}
+
+// AcceptVideo accepts a pending peer video upgrade request.
+func (ch *CallHandler) AcceptVideo(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	if err := ch.callSvc.AcceptVideo(r.Context(), id); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "video_accepted"})
+}
+
+// StopVideo stops this client's outbound video without ending the audio call.
+func (ch *CallHandler) StopVideo(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	if err := ch.callSvc.StopVideo(r.Context(), id); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "video_stopped"})
+}
+
+// RejectVideo declines a pending peer video upgrade request.
+func (ch *CallHandler) RejectVideo(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	if err := ch.callSvc.RejectVideo(r.Context(), id); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "video_rejected"})
+}
+
 // GetHistory returns the call history.
 func (ch *CallHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	filter := repository.CallHistoryFilter{}
