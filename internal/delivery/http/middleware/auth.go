@@ -24,11 +24,10 @@ func Auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		expectedSecret := os.Getenv("API_SECRET")
-		if expectedSecret == "" {
-			expectedSecret = "default-secret"
-		}
-
-		if secret != expectedSecret {
+		// Fail closed: if no secret is configured there is nothing to validate
+		// against, so refuse the request rather than falling back to a known
+		// default (a default secret is not a defense).
+		if expectedSecret == "" || secret != expectedSecret {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error":"Unauthorized"}`))

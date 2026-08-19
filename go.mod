@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/aorus22/instagramdl v0.0.0-20250413042826-610b92f59faf
+	github.com/bytectlgo/edge-tts v1.0.5
 	github.com/chromedp/chromedp v0.14.2
 	github.com/google/generative-ai-go v0.20.1
 	github.com/google/uuid v1.6.0

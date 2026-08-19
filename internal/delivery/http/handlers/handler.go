@@ -39,6 +39,8 @@ type Handler struct {
 	gemini         *ai.GeminiService
 	hub            any
 	callService    *call.CallService
+	apiKeyRepo     repository.APIKeyRepository
+	ttsProvider    call.TTSProvider
 }
 
 func NewHandler(
@@ -123,6 +125,22 @@ func (h *Handler) SetCallService(svc *call.CallService) {
 
 func (h *Handler) GetCallService() *call.CallService {
 	return h.callService
+}
+
+func (h *Handler) SetAPIKeyRepo(repo repository.APIKeyRepository) {
+	h.apiKeyRepo = repo
+}
+
+func (h *Handler) GetAPIKeyRepo() repository.APIKeyRepository {
+	return h.apiKeyRepo
+}
+
+func (h *Handler) SetTTSProvider(p call.TTSProvider) {
+	h.ttsProvider = p
+}
+
+func (h *Handler) GetTTSProvider() call.TTSProvider {
+	return h.ttsProvider
 }
 
 func (h *Handler) sendJSON(w http.ResponseWriter, data interface{}) {

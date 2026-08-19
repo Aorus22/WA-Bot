@@ -89,6 +89,14 @@ func (s *HTTPServer) SetCallService(svc *call.CallService) {
 	s.handler.SetCallService(svc)
 }
 
+func (s *HTTPServer) SetAPIKeyRepo(repo repository.APIKeyRepository) {
+	s.handler.SetAPIKeyRepo(repo)
+}
+
+func (s *HTTPServer) SetTTSProvider(p call.TTSProvider) {
+	s.handler.SetTTSProvider(p)
+}
+
 // SetCallMediaHandler registers the dedicated binary media WebSocket handler.
 func (s *HTTPServer) SetCallMediaHandler(h http.HandlerFunc) {
 	s.callMedia = h

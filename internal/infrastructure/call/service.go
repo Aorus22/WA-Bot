@@ -28,6 +28,17 @@ var (
 	ErrNotImplemented = errors.New("not_implemented")
 	// ErrGroupNotSupported indicates group calls are not supported yet.
 	ErrGroupNotSupported = errors.New("group_not_supported")
+	// ErrCallNotOwned indicates an external API key tried to act on a call it
+	// does not own without the calls:write scope (PRD §37).
+	ErrCallNotOwned = errors.New("call_not_owned")
+)
+
+// Ring timeout bounds (PRD §29). The service default is configurable via the
+// CALL_RING_TIMEOUT_SECONDS env; external API calls are clamped to this range.
+const (
+	DefaultRingTimeout = 45 * time.Second
+	MinRingTimeout     = 10 * time.Second
+	MaxRingTimeout     = 120 * time.Second
 )
 
 // EventPublisher is the minimal broadcast contract used by CallService. It is
@@ -47,6 +58,9 @@ type CallService struct {
 
 	mediaMu       sync.Mutex
 	mediaSessions map[string]*MediaSession
+
+	// ringTimeout is the default ring timeout for outgoing calls (PRD §29).
+	ringTimeout time.Duration
 }
 
 // NewCallService builds the call service and wires the incoming-call handler.
@@ -71,6 +85,35 @@ func (s *CallService) MarkInterruptedOnStartup(ctx context.Context) error {
 	}
 	_, err := s.logs.MarkInterruptedCalls(ctx)
 	return err
+}
+
+// SetRingTimeout sets the default ring timeout used for outgoing calls.
+func (s *CallService) SetRingTimeout(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ringTimeout = d
+}
+
+// RingTimeout returns the configured default ring timeout.
+func (s *CallService) RingTimeout() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ringTimeout <= 0 {
+		return DefaultRingTimeout
+	}
+	return s.ringTimeout
+}
+
+// ExternalCallRequest describes an outgoing external API call carrying a
+// media-mode audio source (TTS or audio file) to play after the peer answers.
+type ExternalCallRequest struct {
+	Target              string
+	Type                entity.CallType
+	MediaMode           entity.MediaMode
+	Audio               *AudioResult
+	HangupAfterPlayback bool
+	RingTimeout         time.Duration
+	APIKeyID            string
 }
 
 // StartCall places an outgoing direct audio/video call. It does not block
@@ -170,6 +213,285 @@ func (s *CallService) StartCall(ctx context.Context, req entity.CreateCallReques
 	return &state, nil
 }
 
+// StartExternalCall reserves the single active slot for an external API call,
+// persists the call log, and returns its state immediately (HTTP 202). The
+// actual dial happens asynchronously in a goroutine so the caller does not wait.
+// The audio source must be resolved (TTS/audio file) BEFORE calling so the peer
+// does not wait for synthesis after answering.
+func (s *CallService) StartExternalCall(ctx context.Context, req ExternalCallRequest) (*entity.CallStateResponse, error) {
+	if s.connected == nil || !s.connected() {
+		return nil, ErrWhatsAppNotConnected
+	}
+	if req.Target == "" {
+		return nil, ErrInvalidTarget
+	}
+	callType := req.Type
+	if callType == "" {
+		callType = entity.CallTypeAudio
+	}
+	if callType != entity.CallTypeAudio {
+		return nil, ErrInvalidTarget
+	}
+	// External calls only support tts / audio_file media modes (video is Phase 4).
+	if req.MediaMode != entity.MediaModeTTS && req.MediaMode != entity.MediaModeAudioFile {
+		return nil, ErrInvalidTarget
+	}
+	if req.Audio == nil {
+		return nil, ErrInvalidTarget
+	}
+
+	s.mu.Lock()
+	if s.active != nil {
+		s.mu.Unlock()
+		return nil, ErrCallAlreadyActive
+	}
+
+	id := fmt.Sprintf("call_%d", time.Now().UnixMilli())
+	session := NewCallSession(
+		id,
+		"",
+		nil,
+		entity.CallDirectionOutgoing,
+		callType,
+		entity.CallSourceExternalAPI,
+		req.MediaMode,
+		req.Target,
+		"",
+		nil,
+	)
+	session.Status = entity.CallStatusPreparing
+	session.APIKeyID = req.APIKeyID
+	session.AudioResult = req.Audio
+	session.HangupAfterPlayback = req.HangupAfterPlayback
+	session.RingTimeout = req.RingTimeout
+	s.active = session
+	s.mu.Unlock()
+
+	// Create the call log first.
+	now := time.Now().UnixMilli()
+	callLog := &entity.CallLog{
+		ID:         id,
+		MeowCallID: "",
+		Direction:  session.Direction,
+		CallType:   session.Type,
+		Target:     session.Target,
+		Source:     session.Source,
+		MediaMode:  session.MediaMode,
+		Status:     entity.CallStatusPreparing,
+		APIKeyID:   session.APIKeyID,
+		StartedAt:  now,
+		CreatedAt:  now,
+	}
+	if err := s.logs.CreateCallLog(ctx, callLog); err != nil {
+		s.clearActive(id)
+		s.cleanupAudio(session)
+		return nil, err
+	}
+
+	// Return the state immediately; dial happens in the background.
+	s.mu.Lock()
+	state := session.View()
+	s.mu.Unlock()
+	go s.dialExternal(session)
+	return &state, nil
+}
+
+// dialExternal places the call asynchronously and wires its lifecycle callbacks.
+// Errors are handled here by marking the log failed and broadcasting call.state.
+func (s *CallService) dialExternal(session *CallSession) {
+	ctx := context.Background()
+
+	s.mu.Lock()
+	if s.active == nil || s.active.ID != session.ID {
+		s.mu.Unlock()
+		return
+	}
+	target := session.Target
+	s.mu.Unlock()
+
+	call, err := s.client.Call(ctx, target)
+	if err != nil {
+		now := time.Now().UnixMilli()
+		_ = s.logs.UpdateCallStatus(ctx, session.ID, entity.CallStatusFailed, nil, &now, nil, "")
+		s.cleanupAudio(session)
+		s.mu.Lock()
+		if s.active != nil && s.active.ID == session.ID {
+			session.Status = entity.CallStatusFailed
+			state := session.View()
+			s.active = nil
+			s.mu.Unlock()
+			s.broadcast("call.state", state)
+			s.broadcast("call.ended", map[string]interface{}{
+				"id":     session.ID,
+				"status": entity.CallStatusFailed,
+				"reason": err.Error(),
+				"state":  state,
+			})
+			return
+		}
+		s.mu.Unlock()
+		return
+	}
+
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == session.ID {
+		session.MeowCallID = call.ID()
+		session.Call = call
+		session.Status = entity.CallStatusInitiating
+	}
+	s.mu.Unlock()
+
+	s.wireExternalCallbacks(session, call)
+	s.startRingTimeout(session, call)
+
+	s.mu.Lock()
+	state := session.View()
+	s.mu.Unlock()
+	s.broadcast("call.state", state)
+}
+
+// wireExternalCallbacks registers the lifecycle callbacks for an external call.
+// On answer it stops the ring timer and plays the pre-resolved audio source.
+func (s *CallService) wireExternalCallbacks(session *CallSession, call *meowcaller.Call) {
+	if call == nil {
+		return
+	}
+
+	call.OnStateChange(func(phase meowcaller.CallPhase) {
+		s.onStateChange(session, phase)
+	})
+	call.OnPeerAccept(func() {
+		s.mu.Lock()
+		var state entity.CallStateResponse
+		if s.active != nil && s.active.ID == session.ID {
+			session.Status = entity.CallStatusConnecting
+			state = session.View()
+		}
+		s.mu.Unlock()
+		s.broadcast("call.peer_accepted", state)
+	})
+	call.OnReady(func() {
+		s.mu.Lock()
+		var state entity.CallStateResponse
+		if s.active != nil && s.active.ID == session.ID {
+			if session.ringTimer != nil {
+				session.ringTimer.Stop()
+				session.ringTimer = nil
+			}
+			now := time.Now()
+			session.Status = entity.CallStatusConnected
+			session.AnsweredAt = &now
+			answeredAt := now.UnixMilli()
+			_ = s.logs.UpdateCallStatus(context.Background(), session.ID, entity.CallStatusConnected, &answeredAt, nil, nil, session.MeowCallID)
+			state = session.View()
+			s.playSessionAudio(session, call)
+		}
+		s.mu.Unlock()
+		s.broadcast("call.ready", state)
+	})
+	call.OnEnd(func(reason string) {
+		s.onEnd(session, reason)
+	})
+}
+
+// playSessionAudio streams the pre-resolved audio file into the call. If
+// HangupAfterPlayback is set the call is ended when the source is exhausted.
+func (s *CallService) playSessionAudio(session *CallSession, call *meowcaller.Call) {
+	res := session.AudioResult
+	if res == nil || call == nil {
+		return
+	}
+	var (
+		src meowcaller.AudioSource
+		err error
+	)
+	switch res.Format {
+	case "wav":
+		src, err = meowcaller.WAVFile(res.Path)
+	default:
+		src, err = meowcaller.MP3File(res.Path)
+	}
+	if err != nil {
+		return
+	}
+	player := call.Play(src)
+	if session.HangupAfterPlayback {
+		// OnFinish fires when the source reaches EOF (see meowcaller.Player).
+		player.OnFinish(func() {
+			s.hangupAfterPlayback(session)
+		})
+	}
+}
+
+// hangupAfterPlayback ends an external call once its audio has finished playing.
+func (s *CallService) hangupAfterPlayback(session *CallSession) {
+	s.mu.Lock()
+	if s.active == nil || s.active.ID != session.ID {
+		s.mu.Unlock()
+		return
+	}
+	call := session.Call
+	s.mu.Unlock()
+	if call == nil {
+		return
+	}
+	_ = call.Hangup()
+	s.finalize(session, entity.CallStatusEnded, "playback_finished")
+}
+
+// startRingTimeout arms the ring timer for the call. It is cancelled when the
+// call is answered; otherwise it hangs up and finalizes the call as missed.
+func (s *CallService) startRingTimeout(session *CallSession, call *meowcaller.Call) {
+	timeout := session.RingTimeout
+	if timeout <= 0 {
+		timeout = s.RingTimeout()
+	}
+	if timeout < MinRingTimeout {
+		timeout = MinRingTimeout
+	}
+	if timeout > MaxRingTimeout {
+		timeout = MaxRingTimeout
+	}
+
+	timer := time.AfterFunc(timeout, func() {
+		s.ringTimeoutFired(session, call)
+	})
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == session.ID {
+		session.ringTimer = timer
+	}
+	s.mu.Unlock()
+}
+
+// ringTimeoutFired is invoked by the ring timer: hang up if the call is still
+// ringing/unanswered, and finalize it as missed or failed.
+func (s *CallService) ringTimeoutFired(session *CallSession, call *meowcaller.Call) {
+	s.mu.Lock()
+	if s.active == nil || s.active.ID != session.ID || session.AnsweredAt != nil {
+		s.mu.Unlock()
+		return
+	}
+	status := entity.CallStatusMissed
+	switch session.Status {
+	case entity.CallStatusPreparing, entity.CallStatusInitiating:
+		status = entity.CallStatusFailed
+	}
+	s.mu.Unlock()
+
+	_ = call.Hangup()
+	s.finalize(session, status, "ring_timeout")
+}
+
+// cleanupAudio releases the temp file backing an audio-source result (TTS/audio
+// file) once the call finalizes.
+func (s *CallService) cleanupAudio(session *CallSession) {
+	if session == nil || session.AudioResult == nil || session.AudioResult.Cleanup == nil {
+		return
+	}
+	session.AudioResult.Cleanup()
+	session.AudioResult = nil
+}
+
 // StartGroupCall is reserved for Phase 5.
 func (s *CallService) StartGroupCall(ctx context.Context, req entity.CreateGroupCallRequest, source entity.CallSource) (*entity.CallStateResponse, error) {
 	return nil, ErrGroupNotSupported
@@ -179,18 +501,25 @@ func (s *CallService) StartGroupCall(ctx context.Context, req entity.CreateGroup
 func (s *CallService) AnswerCall(ctx context.Context, id string) error {
 	s.mu.Lock()
 	session := s.active
-	s.mu.Unlock()
 	if session == nil || session.ID != id {
+		s.mu.Unlock()
 		return ErrCallNotFound
 	}
 	if session.Call == nil {
+		s.mu.Unlock()
 		return ErrCallNotActive
 	}
-	if err := session.Call.Answer(); err != nil {
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.Answer(); err != nil {
 		return err
 	}
 	now := time.Now()
-	session.AnsweredAt = &now
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		session.AnsweredAt = &now
+	}
+	s.mu.Unlock()
 	return nil
 }
 
@@ -198,32 +527,47 @@ func (s *CallService) AnswerCall(ctx context.Context, id string) error {
 func (s *CallService) RejectCall(ctx context.Context, id string) error {
 	s.mu.Lock()
 	session := s.active
-	s.mu.Unlock()
 	if session == nil || session.ID != id {
+		s.mu.Unlock()
 		return ErrCallNotFound
 	}
 	if session.Call == nil {
+		s.mu.Unlock()
 		return ErrCallNotActive
 	}
-	if err := session.Call.Reject(); err != nil {
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.Reject(); err != nil {
 		return err
 	}
 	s.finalize(session, entity.CallStatusRejected, "rejected")
 	return nil
 }
 
-// HangupCall ends the active call.
-func (s *CallService) HangupCall(ctx context.Context, id string) error {
+// HangupCall ends the active call. When invoked from the external API the
+// caller's APIKeyID and whether they hold calls:write scope are threaded in to
+// enforce ownership (PRD §37): a key may hang up a call it created, or any call
+// if it has calls:write. An empty apiKeyID (internal/UI path) skips the check.
+func (s *CallService) HangupCall(ctx context.Context, id string, apiKeyID string, hasWriteScope bool) error {
 	s.mu.Lock()
 	session := s.active
-	s.mu.Unlock()
 	if session == nil || session.ID != id {
+		s.mu.Unlock()
 		return ErrCallNotFound
 	}
 	if session.Call == nil {
+		s.mu.Unlock()
 		return ErrCallNotActive
 	}
-	if err := session.Call.Hangup(); err != nil {
+	// Ownership: an external key may only hang up a call it created unless it
+	// holds calls:write. Internal (UI) callers pass an empty apiKeyID.
+	if apiKeyID != "" && !hasWriteScope && session.APIKeyID != "" && session.APIKeyID != apiKeyID {
+		s.mu.Unlock()
+		return ErrCallNotOwned
+	}
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.Hangup(); err != nil {
 		return err
 	}
 	s.finalize(session, entity.CallStatusEnded, "hangup")
@@ -242,11 +586,18 @@ func (s *CallService) GetActiveCall() *entity.CallStateResponse {
 }
 
 // GetCallStatus returns the state for a call, from the active session or history.
-func (s *CallService) GetCallStatus(ctx context.Context, id string) (*entity.CallStateResponse, error) {
+// When called from the external API (apiKeyID != ""), ownership is enforced
+// (PRD §37): a key without calls:write may only read its own calls, and its
+// target is never leaked to a non-owner. A calls:write key may read any call.
+func (s *CallService) GetCallStatus(ctx context.Context, id string, apiKeyID string, hasWriteScope bool) (*entity.CallStateResponse, error) {
 	s.mu.Lock()
 	if s.active != nil && s.active.ID == id {
 		state := s.active.View()
+		owner := s.active.APIKeyID
 		s.mu.Unlock()
+		if apiKeyID != "" && !hasWriteScope && owner != "" && owner != apiKeyID {
+			return nil, ErrCallNotOwned
+		}
 		return &state, nil
 	}
 	s.mu.Unlock()
@@ -260,6 +611,11 @@ func (s *CallService) GetCallStatus(ctx context.Context, id string) (*entity.Cal
 	}
 	if log == nil {
 		return nil, ErrCallNotFound
+	}
+	// Ownership: non-write keys may only read their own calls. Returning
+	// ErrCallNotOwned (mapped to 404) avoids leaking a call's existence.
+	if apiKeyID != "" && !hasWriteScope && log.APIKeyID != "" && log.APIKeyID != apiKeyID {
+		return nil, ErrCallNotOwned
 	}
 	return logToState(log), nil
 }
@@ -475,6 +831,8 @@ func (s *CallService) finalize(session *CallSession, status entity.CallStatus, r
 		media.Close()
 	}
 	s.dropMediaSession(session.ID)
+	// Remove the temp TTS/audio-file source now that playback is done.
+	s.cleanupAudio(session)
 
 	endedMs := now.UnixMilli()
 	var durationMS *int64
