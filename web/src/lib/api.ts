@@ -107,6 +107,74 @@ export type WebhookLog = {
         created_at: number
 }
 
+export type CallStatus =
+        | "preparing"
+        | "initiating"
+        | "ringing"
+        | "connecting"
+        | "connected"
+        | "ending"
+        | "ended"
+        | "rejected"
+        | "missed"
+        | "busy"
+        | "failed"
+        | "interrupted"
+
+export type CallType = "audio" | "video" | "group_audio" | "group_video"
+export type CallDirection = "incoming" | "outgoing"
+export type CallSource = "ui" | "external_api" | "incoming"
+export type MediaMode = "live" | "tts" | "audio_file"
+
+export type CallState = {
+        id: string
+        status: CallStatus
+        type: CallType
+        direction: CallDirection
+        source: CallSource
+        media_mode: MediaMode
+        target: string
+        group_jid?: string
+        participants?: string[]
+        started_at: number
+        answered_at?: number | null
+        video_enabled: boolean
+        remote_video_enabled: boolean
+}
+
+export type CallLog = {
+        id: string
+        meow_call_id: string
+        direction: CallDirection
+        call_type: CallType
+        target: string
+        group_jid?: string
+        participants?: string[]
+        source: CallSource
+        media_mode: MediaMode
+        status: CallStatus
+        error_message?: string
+        api_key_id?: string
+        started_at: number
+        answered_at?: number | null
+        ended_at?: number | null
+        duration_ms?: number | null
+        created_at: number
+}
+
+export type CallHistoryResponse = {
+        logs: CallLog[]
+}
+
+export type CallHistoryFilter = {
+        limit?: number
+        before?: number
+        direction?: string
+        type?: string
+        status?: string
+        target?: string
+}
+
 class ApiClient {	private baseUrl: string
 
 	constructor(baseUrl?: string) {
@@ -443,6 +511,93 @@ class ApiClient {	private baseUrl: string
 		}
 
 		return response.json()
+	}
+
+	// --- Calls ---------------------------------------------------------------
+
+	async getActiveCall(): Promise<CallState | null> {
+		return this.request<CallState | null>("/calls/active")
+	}
+
+	async createCall(payload: { target: string; type: CallType }): Promise<CallState> {
+		return this.request<CallState>("/calls", {
+			method: "POST",
+			body: JSON.stringify(payload),
+		})
+	}
+
+	async createGroupCall(payload: { group_jid: string; participants: string[]; type: CallType }): Promise<CallState> {
+		return this.request<CallState>("/calls/group", {
+			method: "POST",
+			body: JSON.stringify(payload),
+		})
+	}
+
+	async addCallParticipants(id: string, targets: string[]): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/participants`, {
+			method: "POST",
+			body: JSON.stringify({ targets }),
+		})
+	}
+
+	async ringCallParticipant(id: string, target: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/ring?target=${encodeURIComponent(target)}`, {
+			method: "POST",
+		})
+	}
+
+	async answerCall(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/answer`, {
+			method: "POST",
+		})
+	}
+
+	async rejectCall(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/reject`, {
+			method: "POST",
+		})
+	}
+
+	async hangupCall(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/hangup`, {
+			method: "POST",
+		})
+	}
+
+	async getCallHistory(filter?: CallHistoryFilter): Promise<CallHistoryResponse> {
+		const q = new URLSearchParams()
+		if (filter?.limit) q.set("limit", String(filter.limit))
+		if (filter?.before) q.set("before", String(filter.before))
+		if (filter?.direction) q.set("direction", filter.direction)
+		if (filter?.type) q.set("type", filter.type)
+		if (filter?.status) q.set("status", filter.status)
+		if (filter?.target) q.set("target", filter.target)
+		const qs = q.toString()
+		return this.request<CallHistoryResponse>(`/calls/history${qs ? `?${qs}` : ""}`)
+	}
+
+	async startVideo(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/video/start`, {
+			method: "POST",
+		})
+	}
+
+	async acceptVideo(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/video/accept`, {
+			method: "POST",
+		})
+	}
+
+	async rejectVideo(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/video/reject`, {
+			method: "POST",
+		})
+	}
+
+	async stopVideo(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/video/stop`, {
+			method: "POST",
+		})
 	}
 }
 

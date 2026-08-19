@@ -492,9 +492,207 @@ func (s *CallService) cleanupAudio(session *CallSession) {
 	session.AudioResult = nil
 }
 
-// StartGroupCall is reserved for Phase 5.
+// StartGroupCall places an outgoing group call (PRD §44-46). It accepts either
+// an explicit participant list (GroupCall) or a WhatsApp group JID (GroupCallByID).
+// At least two remote targets are required by WhatsApp for a group call.
 func (s *CallService) StartGroupCall(ctx context.Context, req entity.CreateGroupCallRequest, source entity.CallSource) (*entity.CallStateResponse, error) {
-	return nil, ErrGroupNotSupported
+	if s.connected == nil || !s.connected() {
+		return nil, ErrWhatsAppNotConnected
+	}
+	callType := req.Type
+	if callType == "" {
+		callType = entity.CallTypeGroupAudio
+	}
+	if callType != entity.CallTypeGroupAudio && callType != entity.CallTypeGroupVideo {
+		return nil, ErrInvalidTarget
+	}
+
+	// Reserve the single active slot BEFORE dialing so we never place a group
+	// call on the wire that we cannot track (mirrors StartCall/StartExternalCall).
+	// We set s.active to a placeholder session immediately so the slot is held
+	// through the network dial window (no TOCTOU race with concurrent callers).
+	s.mu.Lock()
+	if s.active != nil {
+		s.mu.Unlock()
+		return nil, ErrCallAlreadyActive
+	}
+	id := fmt.Sprintf("call_%d", time.Now().UnixMilli())
+	session := NewCallSession(
+		id,
+		"",
+		nil,
+		entity.CallDirectionOutgoing,
+		callType,
+		source,
+		entity.MediaModeLive,
+		"",
+		req.GroupJID,
+		req.Participants,
+	)
+	session.Status = entity.CallStatusPreparing
+	s.active = session
+	s.mu.Unlock()
+
+	// Resolve targets: explicit participants take precedence; otherwise resolve
+	// the group roster via GroupCallByID.
+	var (
+		call         *meowcaller.Call
+		err          error
+		groupJID     string
+		participants []string
+	)
+	if len(req.Participants) > 0 {
+		if len(req.Participants) < 2 {
+			s.clearActive(id)
+			return nil, ErrInvalidTarget
+		}
+		participants = req.Participants
+		opts := meowcaller.GroupCallOptions{}
+		if callType == entity.CallTypeGroupVideo {
+			opts.Video = true
+		}
+		call, err = s.client.GroupCallWithOptions(ctx, participants, opts)
+	} else if req.GroupJID != "" {
+		groupJID = req.GroupJID
+		opts := meowcaller.GroupCallOptions{}
+		if callType == entity.CallTypeGroupVideo {
+			opts.Video = true
+		}
+		call, err = s.client.GroupCallByIDWithOptions(ctx, req.GroupJID, opts)
+	} else {
+		s.clearActive(id)
+		return nil, ErrInvalidTarget
+	}
+	if err != nil {
+		s.clearActive(id)
+		return nil, err
+	}
+
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		session.MeowCallID = call.ID()
+		session.Call = call
+		session.GroupJID = groupJID
+		session.Participants = participants
+		session.Media = NewCallMedia(call)
+	}
+	s.mu.Unlock()
+
+	now := time.Now().UnixMilli()
+	callLog := &entity.CallLog{
+		ID:           id,
+		MeowCallID:   call.ID(),
+		Direction:    session.Direction,
+		CallType:     session.Type,
+		Target:       "",
+		GroupJID:     groupJID,
+		Participants: participants,
+		Source:       session.Source,
+		MediaMode:    session.MediaMode,
+		Status:       entity.CallStatusPreparing,
+		StartedAt:    now,
+		CreatedAt:    now,
+	}
+	if err := s.logs.CreateCallLog(ctx, callLog); err != nil {
+		s.clearActive(id)
+		return nil, err
+	}
+
+	s.wireCallbacks(session, call)
+	s.wireGroupCallbacks(session, call)
+
+	s.mu.Lock()
+	state := session.View()
+	s.mu.Unlock()
+	s.broadcast("call.state", state)
+	return &state, nil
+}
+
+// AddParticipant adds one participant to an active group call (PRD §47).
+func (s *CallService) AddParticipant(ctx context.Context, id, target string) error {
+	s.mu.Lock()
+	session := s.active
+	if session == nil || session.ID != id {
+		s.mu.Unlock()
+		return ErrCallNotFound
+	}
+	if session.Call == nil {
+		s.mu.Unlock()
+		return ErrCallNotActive
+	}
+	call := session.Call
+	s.mu.Unlock()
+	if err := call.AddParticipant(ctx, target); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		session.Participants = append(session.Participants, target)
+		state := session.View()
+		s.mu.Unlock()
+		s.broadcast("call.participant_join", map[string]interface{}{
+			"id":     id,
+			"target": target,
+			"state":  state,
+		})
+		return nil
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// AddParticipants adds multiple participants to an active group call (PRD §47).
+func (s *CallService) AddParticipants(ctx context.Context, id string, targets []string) []error {
+	var errs []error
+	for _, t := range targets {
+		if err := s.AddParticipant(ctx, id, t); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
+// RingParticipant rings a specific participant in an active group call (PRD §48).
+func (s *CallService) RingParticipant(ctx context.Context, id, target string) error {
+	s.mu.Lock()
+	session := s.active
+	if session == nil || session.ID != id {
+		s.mu.Unlock()
+		return ErrCallNotFound
+	}
+	if session.Call == nil {
+		s.mu.Unlock()
+		return ErrCallNotActive
+	}
+	call := session.Call
+	s.mu.Unlock()
+	return call.RingParticipant(ctx, target)
+}
+
+// wireGroupCallbacks registers the group-roster callback for a live group call.
+func (s *CallService) wireGroupCallbacks(session *CallSession, call *meowcaller.Call) {
+	if call == nil {
+		return
+	}
+	call.OnGroupState(func(gs meowcaller.GroupCallState) {
+		s.mu.Lock()
+		if s.active == nil || s.active.ID != session.ID {
+			s.mu.Unlock()
+			return
+		}
+		participants := make([]string, 0, len(gs.Participants))
+		for _, p := range gs.Participants {
+			participants = append(participants, p.JID.String())
+		}
+		session.Participants = participants
+		state := session.View()
+		s.mu.Unlock()
+		s.broadcast("call.group_state", map[string]interface{}{
+			"id":           session.ID,
+			"participants": participants,
+			"state":        state,
+		})
+	})
 }
 
 // AnswerCall answers the active call.

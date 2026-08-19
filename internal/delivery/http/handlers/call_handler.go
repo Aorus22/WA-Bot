@@ -46,12 +46,53 @@ func (ch *CallHandler) CreateCall(w http.ResponseWriter, r *http.Request) {
 	ch.handler.sendJSONWithStatus(w, http.StatusCreated, state)
 }
 
-// CreateGroupCall is reserved for Phase 5.
+// CreateGroupCall places an outgoing group call (Phase 5).
 func (ch *CallHandler) CreateGroupCall(w http.ResponseWriter, r *http.Request) {
-	ch.handler.sendJSONWithStatus(w, http.StatusNotImplemented, map[string]string{
-		"error":   "not_implemented",
-		"message": "group calls are not yet supported",
-	})
+	var req entity.CreateGroupCallRequest
+	if err := ch.handler.readJSON(r, &req); err != nil {
+		ch.handler.sendError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	state, err := ch.callSvc.StartGroupCall(r.Context(), req, entity.CallSourceUI)
+	if err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSONWithStatus(w, http.StatusCreated, state)
+}
+
+// AddCallParticipants adds one or more participants to an active group call.
+func (ch *CallHandler) AddCallParticipants(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	var req entity.AddParticipantRequest
+	if err := ch.handler.readJSON(r, &req); err != nil {
+		ch.handler.sendError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Targets) == 0 {
+		ch.handler.sendError(w, http.StatusBadRequest, "targets required")
+		return
+	}
+	if errs := ch.callSvc.AddParticipants(r.Context(), id, req.Targets); len(errs) > 0 {
+		writeCallError(ch.handler, w, errs[0])
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "participants_added"})
+}
+
+// RingCallParticipant rings a specific participant in an active group call.
+func (ch *CallHandler) RingCallParticipant(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	target := ch.handler.getQueryParam(r, "target")
+	if target == "" {
+		ch.handler.sendError(w, http.StatusBadRequest, "target required")
+		return
+	}
+	if err := ch.callSvc.RingParticipant(r.Context(), id, target); err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]string{"status": "ringing"})
 }
 
 // AnswerCall answers the active call.

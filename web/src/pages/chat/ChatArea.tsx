@@ -4,8 +4,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker } from "lucide-react"
+import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video } from "lucide-react"
 import { api, type Chat, type Message } from "@/lib/api"
+import { useCall } from "@/contexts/CallContext"
 import { cn } from "@/lib/utils"
 import { renderFormattedContent, encodeMarkdown } from "./renderMd"
 import { toast } from "sonner"
@@ -108,6 +109,7 @@ const formatDate = (timestamp: number) => {
     cachedHasMore,
     onCacheUpdate
 }: ChatAreaProps) => {
+    const { startCall, startGroupCall, activeCall } = useCall()
     const [messages, setMessages] = useState<Message[]>([])
     const [loadingMore, setLoadingMore] = useState(false)
     const [loadingNewer, setLoadingNewer] = useState(false)
@@ -553,6 +555,53 @@ const formatDate = (timestamp: number) => {
                 </div>
 
                 <div className="flex items-center gap-1">
+                    {chat.isGroup ? (
+                        <>
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                title="Group audio call"
+                                disabled={!!activeCall}
+                                onClick={(e) => { e.stopPropagation(); startGroupCall(chat.id, [], "group_audio").catch(() => toast.error("Failed to start group call")); }}
+                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                            >
+                                <Phone className="h-5 w-5" />
+                            </Button>
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                title="Group video call"
+                                disabled={!!activeCall}
+                                onClick={(e) => { e.stopPropagation(); startGroupCall(chat.id, [], "group_video").catch(() => toast.error("Failed to start group call")); }}
+                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                            >
+                                <Video className="h-5 w-5" />
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                title="Audio call"
+                                disabled={!!activeCall}
+                                onClick={(e) => { e.stopPropagation(); startCall(chat.id, "audio").catch(() => toast.error("Failed to start call")); }}
+                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                            >
+                                <Phone className="h-5 w-5" />
+                            </Button>
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                title="Video call"
+                                disabled={!!activeCall}
+                                onClick={(e) => { e.stopPropagation(); startCall(chat.id, "video").catch(() => toast.error("Failed to start call")); }}
+                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                            >
+                                <Video className="h-5 w-5" />
+                            </Button>
+                        </>
+                    )}
                     <Button 
                         variant="ghost" 
                         size="icon" 
