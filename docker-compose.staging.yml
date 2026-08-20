@@ -1,0 +1,37 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wa-bot-staging
+    restart: always
+    volumes:
+      - /root/bimalord-bot/database:/root/database
+      - /home/aorus/project/wa-bot/web/dist:/root/frontend/dist
+    ports:
+      - "3247:3090"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Jakarta
+      - LIGHTPANDA_CDP_URL=http://lightpanda:9222
+    depends_on:
+      - lightpanda
+      - redis
+
+  lightpanda:
+    image: lightpanda/browser:nightly
+    container_name: wa-bot-staging-lightpanda
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: wa-bot-staging-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+volumes:
+  redis_data:
