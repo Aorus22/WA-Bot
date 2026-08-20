@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot, Mic } from "lucide-react"
 import { LazyMedia } from "@/components/LazyMedia"
 import { isMarkdownContent } from "./renderMd"
+import { WAAudioPlayer } from "./WAAudioPlayer"
 
 export const ChatMessageItem = memo(({
 	message,
@@ -231,42 +232,28 @@ export const ChatMessageItem = memo(({
 								</div>
 							)}
 							{isAudio && isMedia && (
-								<div className={cn(
-									"flex flex-col gap-2 p-2.5 rounded-none relative z-10 min-w-[220px] sm:min-w-[260px] max-w-[65vw] sm:max-w-[320px] -mx-[14px] -mt-2",
-									isMe ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-								)}>
-									<div className="flex items-center gap-3">
-										<div className={cn(
-											"w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0",
-											isMe ? "bg-primary-foreground/15 text-primary-foreground" : "bg-primary/10 text-primary"
-										)}>
-											<Mic className="h-5 w-5" />
-										</div>
-										<div className="flex-1 min-w-0">
-											<p className="text-xs font-bold truncate">{message.type === "ptt" ? "Voice message" : "Audio"}</p>
-											<p className="text-[10px] opacity-60 uppercase font-medium truncate">{message.content && !["[Audio]", "[Voice Message]"].includes(message.content) ? message.content : "Audio file"}</p>
-										</div>
-									</div>
-									<audio
-										controls
-										preload="metadata"
-										src={getMediaUrl(message.mediaUrl)}
-										className="w-full h-10"
-									/>
-								</div>
+								<WAAudioPlayer
+									src={getMediaUrl(message.mediaUrl)!}
+									isMe={isMe}
+									type={message.type}
+									messageId={message.id}
+									avatarUrl={getAvatarUrl(message.from)}
+								/>
 							)}
 							{isAudio && !isMedia && (
 								<div className={cn(
-									"flex items-center gap-2 p-2.5 rounded-xl -mx-[14px] -mt-2",
-									isMe ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+									"flex items-center gap-2 py-1.5 pl-2 pr-3 -mx-[14px] -mt-2 rounded-full w-fit",
+									isMe ? "bg-primary/10 text-primary" : "bg-black/5 dark:bg-white/5 text-muted-foreground"
 								)}>
-									<Mic className="h-4 w-4" />
-									<span className="text-xs font-bold uppercase tracking-wide">Audio unavailable</span>
+									<Mic className="h-3.5 w-3.5" />
+									<span className="text-[11px] font-bold">Audio unavailable</span>
 								</div>
 							)}
 							{message.content && !["[Image]", "[Video]", "[Sticker]", "[Document]", "[Audio]", "[Voice Message]"].includes(message.content) && !isDocument && !isAudio && (
 							        <div className={cn("break-words [word-break:break-word] leading-relaxed relative z-10", !isMarkdownContent(message.content) && "whitespace-pre-wrap")}>{renderFormattedContent(message.content)}</div>
-							)}							<div className={cn("flex items-center gap-1.5 mt-1 justify-end", "text-[10px] font-medium opacity-50 uppercase tracking-tight")}>
+							)}
+							{!(isAudio && isMedia) && (
+								<div className={cn("flex items-center gap-1.5 mt-1 justify-end", "text-[10px] font-medium opacity-50 uppercase tracking-tight")}>
 								{message.isAutomatic && (
 									<div className={cn(
 										"flex items-center gap-1 px-1.5 py-0.5 rounded-full",
@@ -357,7 +344,8 @@ export const ChatMessageItem = memo(({
 								        <div className="absolute top-1/2 -translate-y-1/2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block z-20">										<Button variant="ghost" size="icon" onClick={onReply} className="h-6 w-6 text-muted-foreground hover:text-primary bg-background/80 backdrop-blur-sm rounded-full shadow-sm"><Reply className="h-3 w-3" /></Button>
 									</div>
 								)}
-							</div>
+								</div>
+							)}
 						</div>
 					)}
 				</div>
