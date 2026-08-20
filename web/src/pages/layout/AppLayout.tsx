@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { NavigationSidebar } from "./NavigationSidebar"
 import { cn } from "@/lib/utils"
-import { MessageSquare, Bot, Clock, Globe, FileText, Settings, Minus, Square, Copy, X } from "lucide-react"
+import { MessageSquare, Phone, Bot, Clock, Globe, FileText, Settings, Minus, Square, Copy, X } from "lucide-react"
 import {
 	isDesktop,
 	platform,
@@ -147,6 +147,9 @@ export function AppLayout() {
 						<div className="h-16 bg-background border-t border-border/40 flex items-center justify-around px-6 shrink-0 z-50">
 							<button onClick={() => navigate("/chat")} className={cn("flex flex-col items-center gap-1 p-2", isActive("/chat") ? "text-primary" : "text-muted-foreground")}>
 								<MessageSquare className="h-5 w-5" /><span className="text-[10px] font-bold uppercase">Chats</span>
+							</button>
+							<button onClick={() => navigate("/calls")} className={cn("flex flex-col items-center gap-1 p-2", isActive("/calls") ? "text-primary" : "text-muted-foreground")}>
+								<Phone className="h-5 w-5" /><span className="text-[10px] font-bold uppercase">Calls</span>
 							</button>
 							<button onClick={() => setAutoOpen(prev => !prev)} className={cn("flex flex-col items-center gap-1 p-2", isAutoActive ? "text-primary" : "text-muted-foreground")}>
 								<Bot className="h-5 w-5" /><span className="text-[10px] font-bold uppercase">Automation</span>
