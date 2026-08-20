@@ -4,9 +4,10 @@ import { useParams, useNavigate } from "react-router-dom"
 import { ChatSidebar } from "./ChatSidebar"
 import { ChatArea } from "./ChatArea"
 import { cn } from "@/lib/utils"
-import { type Chat, type Message } from "@/lib/api"
+import { type Chat } from "@/lib/api"
 import { useAuth } from "@/contexts/AuthContext"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useChatStore } from "@/stores/chatStore"
 
 export function ChatPage() {
 	const isMobileView = useIsMobile()
@@ -14,11 +15,33 @@ export function ChatPage() {
 	const { id: chatId } = useParams<{ id: string }>()
 	const { incomingMessage, chatUpdate, statusUpdate, isLoggedIn } = useAuth()
 	const [selectedChat, setSelectedChat] = useState<Chat | null>(null)
-	const [chats, setChats] = useState<Chat[]>([])
+	const chats = useChatStore(s => s.chats)
+	const setChats = useChatStore(s => s.setChats)
 	const [showSidebar, setShowSidebar] = useState(true)
 	const containerRef = useRef<HTMLDivElement>(null)
 
-	const messageCache = useRef<Record<string, { messages: Message[], hasMore: boolean }>>({})
+	// Wire WS events into the store
+	useEffect(() => {
+		if (!incomingMessage) return
+		const { chatId: cid, message } = incomingMessage
+		const type = (message as any).type
+		if (type === "deleted") {
+			useChatStore.getState().deleteMessage(cid, message.id)
+		} else if (type === "edited") {
+			useChatStore.getState().patchMessage(cid, message.id, { content: (message as any).content })
+		} else {
+			useChatStore.getState().upsertMessage(cid, message)
+		}
+	}, [incomingMessage])
+
+	useEffect(() => {
+		if (!statusUpdate) return
+		// Patch status across all chats (message id is globally unique)
+		const { messagesByChat } = useChatStore.getState()
+		for (const cid of Object.keys(messagesByChat)) {
+			useChatStore.getState().patchMessage(cid, statusUpdate.id, { status: statusUpdate.status })
+		}
+	}, [statusUpdate])
 
 	// Auto-select chat from URL param when chats are loaded
 	useEffect(() => {
@@ -82,10 +105,6 @@ export function ChatPage() {
 		navigate("/chat")
 	}, [navigate])
 
-	const updateMessageCache = useCallback((chatId: string, messages: Message[], hasMore: boolean) => {
-		messageCache.current[chatId] = { messages, hasMore }
-	}, [])
-
 	if (!isLoggedIn) {
 		return (
 			<div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
@@ -117,11 +136,6 @@ export function ChatPage() {
 						<ChatArea
 							chat={selectedChat}
 							onBack={handleBack}
-							incomingMessage={incomingMessage}
-							statusUpdate={statusUpdate}
-							cachedMessages={messageCache.current[selectedChat.id]?.messages}
-							cachedHasMore={messageCache.current[selectedChat.id]?.hasMore}
-							onCacheUpdate={(msgs, hasMore) => updateMessageCache(selectedChat.id, msgs, hasMore)}
 							className="w-full"
 						/>
 					)}
@@ -169,11 +183,6 @@ export function ChatPage() {
 				{selectedChat ? (
 					<ChatArea
 						chat={selectedChat}
-						incomingMessage={incomingMessage}
-						statusUpdate={statusUpdate}
-						cachedMessages={messageCache.current[selectedChat.id]?.messages}
-						cachedHasMore={messageCache.current[selectedChat.id]?.hasMore}
-						onCacheUpdate={(msgs, hasMore) => updateMessageCache(selectedChat.id, msgs, hasMore)}
 						className="h-full"
 					/>
 				) : (

@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Search } from "lucide-react"
 import { api, type Chat } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useChatStore } from "@/stores/chatStore"
 
 interface ChatSidebarProps {
     selectedChatId: string | null
@@ -42,9 +43,15 @@ export const ChatSidebar = memo(({
     chatUpdate,
     className,
 }: ChatSidebarProps) => {
-    const [chats, setChats] = useState<Chat[]>([])
+    const chats = useChatStore(s => s.chats)
+    const chatsLoaded = useChatStore(s => s.chatsLoaded)
+    const chatsLoading = useChatStore(s => s.chatsLoading)
+    const setChats = useChatStore(s => s.setChats)
+    const setChatsLoaded = useChatStore(s => s.setChatsLoaded)
+    const setChatsLoading = useChatStore(s => s.setChatsLoading)
+    const upsertChat = useChatStore(s => s.upsertChat)
     const [searchQuery, setSearchQuery] = useState("")
-    const [loading, setLoading] = useState(true)
+    const [loading, setLoading] = useState(false)
     const processedUpdateIds = useRef<Set<string>>(new Set())
 
     useEffect(() => {
@@ -65,53 +72,42 @@ export const ChatSidebar = memo(({
                 api.markAsRead(selectedChatId).catch(console.error)
             }
 
-            setChats(prevChats => {
-                const chatMap = new Map(prevChats.map(c => [c.id, c]));
-                const existingChat = chatMap.get(chatUpdate.chatId);
+            const existingChat = chats.find(c => c.id === chatUpdate.chatId)
 
-                if (!existingChat) {
-                    const newChat: Chat = {
-                        id: chatUpdate.chatId,
-                        name: chatUpdate.chatName || chatUpdate.senderName || chatUpdate.chatId,
-                        avatar: "",
-                        lastMsg: chatUpdate.lastMsg,
-                        lastTime: chatUpdate.lastTime,
-                        unread: selectedChatId === chatUpdate.chatId ? 0 : 1,
-                        isActive: true,
-                        isGroup: chatUpdate.chatId.includes("@g.us"),
-                    };
-                    chatMap.set(newChat.id, newChat);
-                } else {
-                    const isIncoming = chatUpdate.status === "received" || (!chatUpdate.status && chatUpdate.lastMsg !== "");
-                    const currentUnread = Number(existingChat.unread) || 0;
-                    const newUnread = existingChat.id === selectedChatId ? 0 : (isIncoming ? currentUnread + 1 : currentUnread);
-                    
-                    chatMap.set(existingChat.id, {
-                        ...existingChat,
-                        name: chatUpdate.chatName || existingChat.name,
-                        avatar: chatUpdate.chatAvatar || existingChat.avatar,
-                        lastMsg: chatUpdate.lastMsg,
-                        lastTime: chatUpdate.lastTime,
-                        unread: newUnread,
-                    });
+            if (!existingChat) {
+                const newChat: Chat = {
+                    id: chatUpdate.chatId,
+                    name: chatUpdate.chatName || chatUpdate.senderName || chatUpdate.chatId,
+                    avatar: "",
+                    lastMsg: chatUpdate.lastMsg,
+                    lastTime: chatUpdate.lastTime,
+                    unread: selectedChatId === chatUpdate.chatId ? 0 : 1,
+                    isActive: true,
+                    isGroup: chatUpdate.chatId.includes("@g.us"),
                 }
+                upsertChat(newChat)
+            } else {
+                const isIncoming = chatUpdate.status === "received" || (!chatUpdate.status && chatUpdate.lastMsg !== "")
+                const currentUnread = Number(existingChat.unread) || 0
+                const newUnread = existingChat.id === selectedChatId ? 0 : (isIncoming ? currentUnread + 1 : currentUnread)
 
-                return Array.from(chatMap.values()).sort((a, b) => {
-                    if (chatUpdate.lastMsg !== "") {
-                        if (a.id === chatUpdate.chatId) return -1
-                        if (b.id === chatUpdate.chatId) return 1
-                    }
-                    return b.lastTime - a.lastTime
+                upsertChat({
+                    ...existingChat,
+                    name: chatUpdate.chatName || existingChat.name,
+                    avatar: chatUpdate.chatAvatar || existingChat.avatar,
+                    lastMsg: chatUpdate.lastMsg,
+                    lastTime: chatUpdate.lastTime,
+                    unread: newUnread,
                 })
-            })
+            }
         }
-    }, [chatUpdate, selectedChatId])
+    }, [chatUpdate, selectedChatId, chats, upsertChat])
 
     // Clear unread when chat is selected
     useEffect(() => {
         if (selectedChatId) {
-            setChats(prevChats =>
-                prevChats.map(chat =>
+            setChats(
+                chats.map(chat =>
                     chat.id === selectedChatId
                         ? { ...chat, unread: 0 }
                         : chat
@@ -123,19 +119,23 @@ export const ChatSidebar = memo(({
     }, [selectedChatId])
 
     const loadChats = async () => {
+        if (chatsLoaded || chatsLoading) return
         try {
+            setChatsLoading(true)
             setLoading(true)
             const data = await api.getChats()
             // Deduplicate to avoid rendering issues
-            const chatMap = new Map();
+            const chatMap = new Map<string, Chat>();
             (data || []).forEach(chat => chatMap.set(chat.id, chat));
             const deduped = Array.from(chatMap.values())
             setChats(deduped)
+            setChatsLoaded(true)
             onChatsLoaded?.(deduped)
         } catch (error) {
             console.error("Failed to load chats:", error)
             setChats([])
         } finally {
+            setChatsLoading(false)
             setLoading(false)
         }
     }
