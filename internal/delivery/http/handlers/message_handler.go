@@ -233,8 +233,8 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 				waveform = wf
 			}
 		}
-		fmt.Printf("[SEND] audio mimetype=%s ptt=%v seconds=%d bytes=%d\n", audioMimetype, ptt, seconds, len(data))
-		id, sendErr = mh.handler.client.SendAudio(ctx, target, data, audioMimetype, ptt, seconds, waveform)
+		fmt.Printf("[SEND] audio mimetype=%s ptt=%v seconds=%d bytes=%d media=%s\n", audioMimetype, ptt, seconds, len(data), mediaURL)
+		id, sendErr = mh.handler.client.SendAudio(ctx, target, data, audioMimetype, ptt, seconds, waveform, mediaURL)
 	default:
 		id, sendErr = mh.handler.client.SendDocument(ctx, target, data, header.Filename, mediaURL, false)
 	}
