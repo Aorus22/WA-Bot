@@ -1,3 +1,5 @@
 .env
 wa-bot
 wa-bot-session.db
+web/node_modules
+web/dist
