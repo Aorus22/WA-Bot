@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -124,7 +125,26 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 	var audioMimetype string
 	if isAudio {
 		if pttEarly {
-			audioMimetype = "audio/ogg; codecs=opus"
+			// PTT must be opus-in-ogg for the bubble player.
+			// If source is already ogg/opus/webm, keep bytes as-is.
+			// If source is mp3/m4a/wav (e.g. /home/aorus/tts-generate mp3s),
+			// transcode with ffmpeg (already in Dockerfile) to opus.
+			detected := http.DetectContentType(data)
+			if strings.Contains(detected, "ogg") || strings.Contains(detected, "opus") ||
+				strings.HasSuffix(strings.ToLower(header.Filename), ".ogg") ||
+				strings.HasSuffix(strings.ToLower(header.Filename), ".opus") {
+				audioMimetype = "audio/ogg; codecs=opus"
+			} else {
+				opusData, err := transcodeToOpusOgg(data)
+				if err != nil {
+					fmt.Printf("[WARN] PTT transcode failed (%v), sending as-is with opus mimetype\n", err)
+					audioMimetype = "audio/ogg; codecs=opus"
+				} else {
+					data = opusData
+					audioMimetype = "audio/ogg; codecs=opus"
+					fmt.Printf("[SEND] Transcoded PTT to opus %d -> %d bytes\n", len(data), len(opusData))
+				}
+			}
 		} else {
 			audioMimetype = http.DetectContentType(data)
 			if !strings.HasPrefix(audioMimetype, "audio/") {
@@ -361,6 +381,36 @@ func (mh *MessageHandler) validateSecret(secret string) bool {
 		SECRET = "default-secret"
 	}
 	return secret == SECRET
+}
+
+// transcodeToOpusOgg converts arbitrary audio bytes to OGG/Opus via ffmpeg.
+// Requires ffmpeg in PATH (/usr/local/bin/ffmpeg in Docker, /usr/bin/ffmpeg locally).
+func transcodeToOpusOgg(in []byte) ([]byte, error) {
+	inFile, err := os.CreateTemp("", "wa-audio-in-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(inFile.Name())
+	if _, err := inFile.Write(in); err != nil {
+		inFile.Close()
+		return nil, err
+	}
+	inFile.Close()
+
+	outFile, err := os.CreateTemp("", "wa-audio-out-*.ogg")
+	if err != nil {
+		return nil, err
+	}
+	outPath := outFile.Name()
+	outFile.Close()
+	defer os.Remove(outPath)
+
+	// Opus in OGG, mono-friendly, low bitrate matching WhatsApp PTT.
+	cmd := exec.Command("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", inFile.Name(), "-c:a", "libopus", "-b:a", "32k", "-vbr", "on", "-compression_level", "10", outPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("ffmpeg: %v: %s", err, string(out))
+	}
+	return os.ReadFile(outPath)
 }
 
 func (mh *MessageHandler) SendReaction(w http.ResponseWriter, r *http.Request) {
