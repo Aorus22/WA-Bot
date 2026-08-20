@@ -170,10 +170,18 @@ func InitializeApp() (*App, error) {
 		callSvc.SetRingTimeout(time.Duration(ringSeconds) * time.Second)
 	}
 
-	// TTS provider, gated by CALL_TTS_PROVIDER=edge.
+	// TTS provider, gated by CALL_TTS_PROVIDER (edge | fish). Unknown/empty
+	// values leave the provider nil (tts_unavailable).
 	var ttsProvider call.TTSProvider
-	if cfg.Get("CALL_TTS_PROVIDER") == "edge" {
+	switch cfg.Get("CALL_TTS_PROVIDER") {
+	case "edge":
 		ttsProvider = call.NewEdgeTTSProvider(cfg.Get("CALL_TTS_DEFAULT_VOICE"))
+	case "fish":
+		ttsProvider = call.NewFishAudioTTSProvider(call.FishAudioConfig{
+			APIKey:         cfg.Get("CALL_TTS_FISH_AUDIO_KEY"),
+			DefaultModel:   cfg.Get("CALL_TTS_FISH_AUDIO_MODEL"),
+			DefaultVoiceID: cfg.Get("CALL_TTS_FISH_AUDIO_VOICE_ID"),
+		})
 	}
 	httpServer.SetTTSProvider(ttsProvider)
 

@@ -6,6 +6,10 @@ import "context"
 type TTSRequest struct {
 	Text  string
 	Voice string
+	// ReferenceID optionally selects a specific voice library / voice ID for
+	// providers that support it (e.g. Fish Audio). Empty falls back to the
+	// provider's default voice.
+	ReferenceID string
 }
 
 // AudioResult describes a playable audio source resolved for a media-mode call.

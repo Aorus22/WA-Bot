@@ -15,10 +15,11 @@ const maxExternalBodyBytes = 2 << 20 // 2MB
 
 // externalCallMedia carries the media-mode source for an external call.
 type externalCallMedia struct {
-	Mode     string `json:"mode"`
-	Text     string `json:"text"`
-	Voice    string `json:"voice"`
-	AudioURL string `json:"audio_url"`
+	Mode        string `json:"mode"`
+	Text        string `json:"text"`
+	Voice       string `json:"voice"`
+	ReferenceID string `json:"reference_id"`
+	AudioURL    string `json:"audio_url"`
 }
 
 // externalCallRequest is the body of POST /api/external/v1/calls.
@@ -95,7 +96,7 @@ func (eh *ExternalCallHandler) CreateCall(w http.ResponseWriter, r *http.Request
 			})
 			return
 		}
-		res, err := eh.tts.Synthesize(r.Context(), call.TTSRequest{Text: req.Media.Text, Voice: req.Media.Voice})
+		res, err := eh.tts.Synthesize(r.Context(), call.TTSRequest{Text: req.Media.Text, Voice: req.Media.Voice, ReferenceID: req.Media.ReferenceID})
 		if err != nil {
 			eh.handler.sendJSONWithStatus(w, http.StatusBadGateway, map[string]string{
 				"error": "tts_failed", "message": "failed to synthesize speech",
