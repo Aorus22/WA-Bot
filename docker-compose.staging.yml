@@ -7,7 +7,6 @@ services:
     restart: always
     volumes:
       - /root/bimalord-bot/database:/root/database
-      - /home/aorus/project/wa-bot/web/dist:/root/frontend/dist
     ports:
       - "3247:3090"
     env_file:
