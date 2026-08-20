@@ -168,21 +168,20 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ext := filepath.Ext(header.Filename)
-	if ext == "" {
+	// PTT is always OGG Opus after transcode — force .ogg even if input was .mp3
+	// so the saved file matches the transcoded bytes.
+	if isAudio && strings.Contains(audioMimetype, "opus") {
+		ext = ".ogg"
+	} else if ext == "" {
 		switch {
 		case mediaType == "image":
 			ext = ".jpg"
 		case mediaType == "video":
 			ext = ".mp4"
-			case isAudio:
+		case isAudio:
 			switch {
 			case strings.HasPrefix(audioMimetype, "audio/ogg"):
-				// Covers "audio/ogg" and "audio/ogg; codecs=opus" (PTT)
-				if strings.Contains(audioMimetype, "opus") {
-					ext = ".ogg"
-				} else {
-					ext = ".ogg"
-				}
+				ext = ".ogg"
 			case audioMimetype == "audio/mpeg":
 				ext = ".mp3"
 			case audioMimetype == "audio/mp4":
