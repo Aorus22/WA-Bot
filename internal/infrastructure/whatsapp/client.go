@@ -251,7 +251,7 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 	return "", err
 }
 
-func (w *WhatsAppClient) SendAudio(ctx context.Context, to string, data []byte, mimetype string, ptt bool, seconds uint32, waveform []byte) (string, error) {
+func (w *WhatsAppClient) SendAudio(ctx context.Context, to string, data []byte, mimetype string, ptt bool, seconds uint32, waveform []byte, mediaURL string) (string, error) {
 	uploaded, err := w.client.Upload(ctx, data, whatsmeow.MediaAudio)
 	if err != nil {
 		return "", err
@@ -262,10 +262,10 @@ func (w *WhatsAppClient) SendAudio(ctx context.Context, to string, data []byte, 
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	return w.SendAudioToJID(ctx, targetJID, data, uploaded, mimetype, ptt, seconds, waveform)
+	return w.SendAudioToJID(ctx, targetJID, data, uploaded, mimetype, ptt, seconds, waveform, mediaURL)
 }
 
-func (w *WhatsAppClient) SendAudioToJID(ctx context.Context, to waTypes.JID, data []byte, uploaded whatsmeow.UploadResponse, mimetype string, ptt bool, seconds uint32, waveform []byte) (string, error) {
+func (w *WhatsAppClient) SendAudioToJID(ctx context.Context, to waTypes.JID, data []byte, uploaded whatsmeow.UploadResponse, mimetype string, ptt bool, seconds uint32, waveform []byte, mediaURL string) (string, error) {
 	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
 		AudioMessage: &waProto.AudioMessage{
 			Mimetype:      proto.String(mimetype),
@@ -285,7 +285,11 @@ func (w *WhatsAppClient) SendAudioToJID(ctx context.Context, to waTypes.JID, dat
 		if ptt {
 			msgType = "ptt"
 		}
-		w.log(resp.ID, to.String(), "[Audio]", msgType, "", false, "")
+		content := "[Audio]"
+		if ptt {
+			content = "[Voice Message]"
+		}
+		w.log(resp.ID, to.String(), content, msgType, mediaURL, false, "")
 		return resp.ID, nil
 	}
 	return "", err
