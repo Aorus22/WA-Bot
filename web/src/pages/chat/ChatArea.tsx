@@ -16,6 +16,7 @@ import { ChatEmojiPickerPopover } from "./ChatEmojiPickerPopover"
 import { ChatStickerPickerPopover } from "./ChatStickerPickerPopover"
 import { ChatSearchSheet } from "./ChatSearchSheet"
 import { ChatMessageItem } from "./ChatMessageItem"
+import { useChatStore } from "@/stores/chatStore"
 
 interface ChatAreaProps {
     chat: Chat | null
@@ -115,24 +116,20 @@ const formatRecordingTime = (seconds: number) => {
     export const ChatArea = memo(({
  
     chat, 
-    incomingMessage, 
-    statusUpdate, 
     onBack, 
     className,
-    cachedMessages,
-    cachedHasMore,
-    onCacheUpdate
 }: ChatAreaProps) => {
     const { startCall, startGroupCall, activeCall } = useCall()
-    const [messages, setMessages] = useState<Message[]>([])
-    const [loadingMore, setLoadingMore] = useState(false)
-    const [loadingNewer, setLoadingNewer] = useState(false)
-    const [hasMore, setHasMore] = useState(true)
-    const [hasMoreNext, setHasMoreNext] = useState(false)
+    const entry = useChatStore(s => s.messagesByChat[chat?.id ?? ""])
+    const messages = entry?.messages ?? []
+    const hasMore = entry?.hasMore ?? true
+    const hasMoreNext = entry?.hasMoreNext ?? false
+    const loading = entry?.loading ?? false
+    const loadingMore = entry?.loadingMore ?? false
+    const loadingNewer = entry?.loadingNewer ?? false
+    const initialLoad = !(entry?.loaded ?? false)
     const [inputMessage, setInputMessage] = useState("")
-    const [loading, setLoading] = useState(false)
     const [sending, setSending] = useState(false)
-    const [initialLoad, setInitialLoad] = useState(true)
     const [showFavoriteBtn, setShowFavoriteBtn] = useState<string | null>(null)
     const [replyTo, setReplyTo] = useState<Message | null>(null)
     const [editingMessage, setEditingMessage] = useState<Message | null>(null)
@@ -174,28 +171,14 @@ const formatRecordingTime = (seconds: number) => {
         }
     }, [])
 
-    // Sync local state back to cache
+    // Hydrate from store or load messages for the current chat
     useEffect(() => {
-        if (chat && onCacheUpdate && messages.length > 0) {
-            onCacheUpdate(messages, hasMore)
-        }
-    }, [messages, hasMore, chat?.id, onCacheUpdate])
-
-    useEffect(() => {
-        if (chat) {
-            if (cachedMessages && cachedMessages.length > 0) {
-                setMessages(cachedMessages)
-                setHasMore(cachedHasMore ?? true)
-                setInitialLoad(false)
-                // Optional: scrollToBottom("auto") if switching back
-                setTimeout(() => scrollToBottom("auto"), 50)
-            } else {
-                setHasMore(true)
-                loadMessages()
-            }
+        if (!chat) return
+        const storeEntry = useChatStore.getState().messagesByChat[chat.id]
+        if (storeEntry?.loaded) {
+            setTimeout(() => scrollToBottom("auto"), 50)
         } else {
-            setMessages([])
-            setInitialLoad(true)
+            loadMessages()
         }
     }, [chat?.id])
 
@@ -225,49 +208,13 @@ const formatRecordingTime = (seconds: number) => {
         }
     }, [])
 
+    // Scroll to bottom when a new message arrives at the end of the list
+    const lastMessageId = messages[messages.length - 1]?.id
     useEffect(() => {
-        if (incomingMessage && chat && incomingMessage.chatId === chat.id) {
-            const { message } = incomingMessage
-            if ((message as any).type === "deleted") {
-                setMessages(prev => prev.filter(m => m.id !== message.id))
-            } else if ((message as any).type === "edited") {
-                setMessages(prev => prev.map(m => m.id === message.id ? { ...m, content: (message as any).content } : m))
-            } else {
-                setMessages(prev => {
-                    if (prev.some(m => m.id === incomingMessage.message.id)) return prev
-
-                    if (incomingMessage.message.from === "me") {
-                        const pendingIndex = prev.findIndex(m =>
-                            m.status === "pending" &&
-                            m.id.startsWith("temp-") &&
-                            (
-                                m.content === incomingMessage.message.content ||
-                                (m.type === incomingMessage.message.type && ["image", "video", "sticker", "document", "audio", "ptt", "voice"].includes(m.type))
-                            )
-                        )
-
-                        if (pendingIndex !== -1) {
-                            const next = [...prev]
-                            next[pendingIndex] = incomingMessage.message
-                            return next
-                        }
-                    }
-
-                    return [...prev, incomingMessage.message]
-                })
-            }
-            setTimeout(() => scrollToBottom(), 100)
+        if (chat && lastMessageId) {
+            scrollToBottom()
         }
-    }, [incomingMessage, chat?.id, scrollToBottom])
-    useEffect(() => {
-        if (statusUpdate) {
-            setMessages(prev =>
-                prev.map(m =>
-                    m.id === statusUpdate.id ? { ...m, status: statusUpdate.status } : m
-                )
-            )
-        }
-    }, [statusUpdate])
+    }, [lastMessageId, chat?.id, scrollToBottom])
 
     useEffect(() => {
         if (replyTo || editingMessage) {
@@ -277,19 +224,18 @@ const formatRecordingTime = (seconds: number) => {
 
     const loadMessages = async () => {
         if (!chat) return
+        const store = useChatStore.getState()
+        const storeEntry = store.messagesByChat[chat.id]
+        if (storeEntry?.loading || storeEntry?.loaded) return
+        store.setMessageLoading(chat.id, "loading", true)
         try {
-            setLoading(true)
             const data = await api.getMessages(chat.id, 30)
-            setMessages(data || [])
-            setHasMore((data || []).length === 30)
-            setHasMoreNext(false)
-            setInitialLoad(false)
+            store.setMessages(chat.id, data || [], (data || []).length === 30)
             setTimeout(() => scrollToBottom("auto"), 50)
         } catch (error) {
             console.error("Failed to load messages:", error)
             toast.error("Failed to load conversation")
-        } finally {
-            setLoading(false)
+            store.setMessageLoading(chat.id, "loading", false)
         }
     }
 
@@ -297,14 +243,14 @@ const formatRecordingTime = (seconds: number) => {
         if (!chat || loadingMore || !hasMore || messages.length === 0) return
         
         const oldestMsg = messages[0]
+        const store = useChatStore.getState()
+        store.setMessageLoading(chat.id, "loadingMore", true)
         try {
-            setLoadingMore(true)
             const data = await api.getMessages(chat.id, 30, oldestMsg.timestamp)
             
             if (data && data.length > 0) {
                 // Prepend older messages
-                setMessages(prev => [...data, ...prev])
-                setHasMore(data.length === 30)
+                store.prependMessages(chat.id, data, data.length === 30)
                 
                 // Maintain scroll position after prepending
                 if (scrollRef.current) {
@@ -317,12 +263,11 @@ const formatRecordingTime = (seconds: number) => {
                     })
                 }
             } else {
-                setHasMore(false)
+                store.prependMessages(chat.id, [], false)
             }
         } catch (error) {
             console.error("Failed to load more messages:", error)
-        } finally {
-            setLoadingMore(false)
+            store.setMessageLoading(chat.id, "loadingMore", false)
         }
     }
 
@@ -330,45 +275,32 @@ const formatRecordingTime = (seconds: number) => {
         if (!chat || loadingNewer || !hasMoreNext || messages.length === 0) return
 
         const latestMsg = messages[messages.length - 1]
+        const store = useChatStore.getState()
+        store.setMessageLoading(chat.id, "loadingNewer", true)
         try {
-            setLoadingNewer(true)
             const data = await api.getMessages(chat.id, 30, undefined, latestMsg.timestamp)
 
             if (data && data.length > 0) {
-                setMessages(prev => [...prev, ...data])
-                setHasMoreNext(data.length === 30)
+                store.appendMessages(chat.id, data)
             } else {
-                setHasMoreNext(false)
+                store.appendMessages(chat.id, [])
             }
         } catch (error) {
             console.error("Failed to load newer messages:", error)
-        } finally {
-            setLoadingNewer(false)
+            store.setMessageLoading(chat.id, "loadingNewer", false)
         }
     }
 
     const teleportToMessage = async (messageId: string) => {
         if (!chat) return
+        const store = useChatStore.getState()
+        store.setMessageLoading(chat.id, "loading", true)
+        setIsSearchOpen(false)
         try {
-            setLoading(true)
-            setIsSearchOpen(false)
             const data = await api.getMessageContext(chat.id, messageId, 30)
             
             if (data && data.length > 0) {
-                setMessages(data)
-                
-                // If we got 30 messages, we might have more in both directions
-                // Since GetMessageContext fetches half before and half after (15 before, 15 after)
-                // we check if those lists are full
-                const targetIndex = data.findIndex(m => m.id === messageId)
-                setHasMore(targetIndex === 0 && data.length >= 15) // Simplified check
-                setHasMoreNext(data.length - 1 === targetIndex && data.length >= 15) // Simplified
-                
-                // Better heuristic: assume there's more unless it's a small result
-                setHasMore(true)
-                setHasMoreNext(true)
-
-                setInitialLoad(false)
+                store.setMessages(chat.id, data, true)
                 
                 // Scroll to the message after render
                 setTimeout(() => {
@@ -383,8 +315,7 @@ const formatRecordingTime = (seconds: number) => {
         } catch (error) {
             console.error("Teleport failed:", error)
             toast.error("Gagal berpindah ke pesan")
-        } finally {
-            setLoading(false)
+            store.setMessageLoading(chat.id, "loading", false)
         }
     }
 
@@ -428,16 +359,17 @@ const formatRecordingTime = (seconds: number) => {
                     type: "text"
                 }
 
-                setMessages(prev => [...prev, newMsg])
+                useChatStore.getState().upsertMessage(chat.id, newMsg)
                 setTimeout(() => scrollToBottom(), 50)
 
                 const res = await api.sendMessage(chat.id, text)
-                setMessages(prev => {
-                    if (prev.some(m => m.id === res.id)) {
-                        return prev.filter(m => m.id !== tempId)
-                    }
-                    return prev.map(m => (m.id === tempId ? { ...m, id: res.id, status: "sent" } : m))
-                })
+                const store = useChatStore.getState()
+                const entry = store.messagesByChat[chat.id]
+                if (entry?.messages.some(m => m.id === res.id)) {
+                    store.deleteMessage(chat.id, tempId)
+                } else {
+                    store.patchMessage(chat.id, tempId, { id: res.id, status: "sent" })
+                }
             }
         } catch (error) {
             console.error("Failed to send message:", error)
@@ -553,24 +485,23 @@ const formatRecordingTime = (seconds: number) => {
             mediaUrl: url
         }
 
-        setMessages(prev => [...prev, newMsg])
+        useChatStore.getState().upsertMessage(chat.id, newMsg)
         setTimeout(() => scrollToBottom(), 50)
         setPendingAudio(null)
         setSending(true)
 
         try {
             const res = await api.sendMedia(chat.id, file, "ptt", "", { ptt: true, seconds })
-            setMessages(prev => {
-                if (prev.some(m => m.id === res.id)) {
-                    return prev.filter(m => m.id !== tempId)
-                }
-                return prev.map(m => (m.id === tempId ? { ...m, id: res.id, status: "sent" } : m))
-            })
+            const store = useChatStore.getState()
+            const entry = store.messagesByChat[chat.id]
+            if (entry?.messages.some(m => m.id === res.id)) {
+                store.deleteMessage(chat.id, tempId)
+            } else {
+                store.patchMessage(chat.id, tempId, { id: res.id, status: "sent" })
+            }
         } catch (error) {
             console.error("Failed to send voice message:", error)
-            setMessages(prev =>
-                prev.map(m => (m.id === tempId ? { ...m, status: "failed" } : m))
-            )
+            useChatStore.getState().patchMessage(chat.id, tempId, { status: "failed" })
             toast.error("Failed to send voice message")
         } finally {
             setSending(false)
@@ -597,22 +528,21 @@ const formatRecordingTime = (seconds: number) => {
             mediaUrl: URL.createObjectURL(file)
         }
 
-        setMessages(prev => [...prev, newMsg])
+        useChatStore.getState().upsertMessage(chat.id, newMsg)
         setTimeout(() => scrollToBottom(), 50)
 
         try {
             const res = await api.sendMedia(chat.id, file, effectiveType, "")
-            setMessages(prev => {
-                if (prev.some(m => m.id === res.id)) {
-                    return prev.filter(m => m.id !== tempId)
-                }
-                return prev.map(m => (m.id === tempId ? { ...m, id: res.id, status: "sent" } : m))
-            })
+            const store = useChatStore.getState()
+            const entry = store.messagesByChat[chat.id]
+            if (entry?.messages.some(m => m.id === res.id)) {
+                store.deleteMessage(chat.id, tempId)
+            } else {
+                store.patchMessage(chat.id, tempId, { id: res.id, status: "sent" })
+            }
         } catch (error) {
             console.error("Failed to send media:", error)
-            setMessages(prev =>
-                prev.map(m => (m.id === tempId ? { ...m, status: "failed" } : m))
-            )
+            useChatStore.getState().patchMessage(chat.id, tempId, { status: "failed" })
             toast.error("Failed to send file")
         } finally {
             if (e.target) e.target.value = ""
@@ -635,22 +565,21 @@ const formatRecordingTime = (seconds: number) => {
             mediaUrl: sticker.mediaUrl
         }
 
-        setMessages(prev => [...prev, newMsg])
+        useChatStore.getState().upsertMessage(chat.id, newMsg)
         setTimeout(() => scrollToBottom(), 50)
 
         try {
             const res = await api.sendSticker(chat.id, sticker.mediaUrl, sticker.isAnimated)
-            setMessages(prev => {
-                if (prev.some(m => m.id === res.id)) {
-                    return prev.filter(m => m.id !== tempId)
-                }
-                return prev.map(m => (m.id === tempId ? { ...m, id: res.id, status: "sent" } : m))
-            })
+            const store = useChatStore.getState()
+            const entry = store.messagesByChat[chat.id]
+            if (entry?.messages.some(m => m.id === res.id)) {
+                store.deleteMessage(chat.id, tempId)
+            } else {
+                store.patchMessage(chat.id, tempId, { id: res.id, status: "sent" })
+            }
         } catch (error) {
             console.error("Failed to send sticker:", error)
-            setMessages(prev =>
-                prev.map(m => (m.id === tempId ? { ...m, status: "failed" } : m))
-            )
+            useChatStore.getState().patchMessage(chat.id, tempId, { status: "failed" })
         }
     }
 
@@ -668,7 +597,7 @@ const formatRecordingTime = (seconds: number) => {
         if (!chat) return
         try {
             await api.deleteMessage(chat.id, messageId)
-            setMessages(prev => prev.filter(m => m.id !== messageId))
+            useChatStore.getState().deleteMessage(chat.id, messageId)
         } catch (err) {
             toast.error("Failed to delete message")
         }
