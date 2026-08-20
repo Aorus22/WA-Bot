@@ -146,6 +146,7 @@ func (s *HTTPServer) Start() error {
 func (s *HTTPServer) StartWithListener(ln net.Listener) error {
 	s.handler.SetHub(s.hub)
 	s.router.SetWebSocketHandler(s.handleWebSocket(s.hub))
+	s.router.SetQrHandler(s.handleQRCode)
 
 	muxRouter := s.router.RegisterRoutes()
 
