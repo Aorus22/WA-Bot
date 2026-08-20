@@ -3,12 +3,14 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,13 +102,42 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("[SEND] Sending %s to: %s\n", mediaType, target)
 
 	os.MkdirAll("media", 0755)
+
+	isAudio := mediaType == "audio" || mediaType == "ptt" || mediaType == "voice" || mediaType == "audio-ptt"
+
+	// Detect mimetype for audio so we can pick a sensible extension and
+	// pass a real audio mimetype to WhatsApp.
+	var audioMimetype string
+	if isAudio {
+		audioMimetype = http.DetectContentType(data)
+		if !strings.HasPrefix(audioMimetype, "audio/") {
+			audioMimetype = "audio/ogg"
+		}
+	}
+
 	ext := filepath.Ext(header.Filename)
 	if ext == "" {
-		if mediaType == "image" {
+		switch {
+		case mediaType == "image":
 			ext = ".jpg"
-		} else if mediaType == "video" {
+		case mediaType == "video":
 			ext = ".mp4"
-		} else {
+		case isAudio:
+			switch audioMimetype {
+			case "audio/mpeg":
+				ext = ".mp3"
+			case "audio/mp4":
+				ext = ".m4a"
+			case "audio/opus":
+				ext = ".opus"
+			case "audio/wav":
+				ext = ".wav"
+			case "audio/webm":
+				ext = ".webm"
+			default:
+				ext = ".ogg"
+			}
+		default:
 			ext = ".bin"
 		}
 	}
@@ -129,6 +160,26 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 		id, sendErr = mh.handler.client.SendImage(ctx, target, data, message, mediaURL, false)
 	case "video":
 		id, sendErr = mh.handler.client.SendVideo(ctx, target, data, message, mediaURL, false)
+	case "audio", "ptt", "voice", "audio-ptt":
+		ptt := mediaType == "ptt" || mediaType == "audio-ptt"
+		if pttStr := r.FormValue("ptt"); pttStr != "" {
+			if b, err := strconv.ParseBool(pttStr); err == nil {
+				ptt = b
+			}
+		}
+		var seconds uint32
+		if secStr := r.FormValue("seconds"); secStr != "" {
+			if s, err := strconv.ParseUint(secStr, 10, 32); err == nil {
+				seconds = uint32(s)
+			}
+		}
+		var waveform []byte
+		if wfStr := r.FormValue("waveform"); wfStr != "" {
+			if wf, err := base64.StdEncoding.DecodeString(wfStr); err == nil {
+				waveform = wf
+			}
+		}
+		id, sendErr = mh.handler.client.SendAudio(ctx, target, data, audioMimetype, ptt, seconds, waveform)
 	default:
 		id, sendErr = mh.handler.client.SendDocument(ctx, target, data, header.Filename, mediaURL, false)
 	}

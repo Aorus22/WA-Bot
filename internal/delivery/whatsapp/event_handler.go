@@ -422,6 +422,47 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 					content = "[Document]"
 				}
 			}
+		} else if evt.Message.GetAudioMessage() != nil {
+			audio := evt.Message.GetAudioMessage()
+			if audio.GetPTT() {
+				msgType = "ptt"
+			} else {
+				msgType = "audio"
+			}
+			msg := &entity.Message{
+				VMessage:  evt.Message,
+				Timestamp: evt.Info.Timestamp,
+				IsGroup:   evt.Info.IsGroup,
+				SenderJID: senderJID.String(),
+			}
+
+			data, _, err := h.waClient.DownloadMedia(ctx, msg)
+			if err == nil && len(data) > 0 {
+				ext := ".ogg"
+				switch audio.GetMimetype() {
+				case "audio/mpeg":
+					ext = ".mp3"
+				case "audio/mp4":
+					ext = ".m4a"
+				case "audio/opus":
+					ext = ".opus"
+				case "audio/wav":
+					ext = ".wav"
+				case "audio/webm":
+					ext = ".webm"
+				}
+				safeJID := strings.ReplaceAll(senderJID.String(), "@", "_")
+				safeJID = strings.ReplaceAll(safeJID, ".", "_")
+				filename := fmt.Sprintf("audio_%d_%s%s", time.Now().UnixMilli(), safeJID, ext)
+
+				if _, err := h.storage.Save(ctx, filename, bytes.NewReader(data)); err == nil {
+					mediaURL = fmt.Sprintf("/media/%s", filename)
+				}
+			}
+			content = "[Audio]"
+			if audio.GetPTT() {
+				content = "[Voice Message]"
+			}
 		} else {
 			content = messageText
 		}
@@ -472,6 +513,13 @@ func (h *WhatsAppEventHandler) processCommand(ctx context.Context, evt *events.M
 	} else if evt.Message.GetDocumentMessage() != nil {
 		msgType = "document"
 		mediaURL = "/media/documents/" + evt.Info.ID + "_" + evt.Message.GetDocumentMessage().GetFileName()
+	} else if evt.Message.GetAudioMessage() != nil {
+		if evt.Message.GetAudioMessage().GetPTT() {
+			msgType = "ptt"
+		} else {
+			msgType = "audio"
+		}
+		mediaURL = "/media/audio/" + evt.Info.ID + ".ogg"
 	}
 
 	msg := &entity.Message{

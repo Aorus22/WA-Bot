@@ -204,6 +204,18 @@ func (r *Router) handleMediaFile(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 	case ".pdf":
 		w.Header().Set("Content-Type", "application/pdf")
+	case ".ogg":
+		w.Header().Set("Content-Type", "audio/ogg")
+	case ".mp3":
+		w.Header().Set("Content-Type", "audio/mpeg")
+	case ".m4a":
+		w.Header().Set("Content-Type", "audio/mp4")
+	case ".opus":
+		w.Header().Set("Content-Type", "audio/ogg")
+	case ".wav":
+		w.Header().Set("Content-Type", "audio/wav")
+	case ".webm":
+		w.Header().Set("Content-Type", "audio/webm")
 	}
 
 	reader, err := r.storage.Get(req.Context(), decodedFilename)

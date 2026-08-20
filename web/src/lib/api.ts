@@ -488,8 +488,9 @@ class ApiClient {	private baseUrl: string
 	async sendMedia(
 		target: string,
 		file: File,
-		type: "image" | "video" | "document",
-		message: string = ""
+		type: "image" | "video" | "document" | "audio" | "ptt" | "voice",
+		message: string = "",
+		options?: { ptt?: boolean; seconds?: number; waveform?: string }
 	): Promise<{ status: string; id: string }> {
 		const formData = new FormData()
 		formData.append("secret", import.meta.env.VITE_API_SECRET || "default-secret")
@@ -497,6 +498,18 @@ class ApiClient {	private baseUrl: string
 		formData.append("message", message)
 		formData.append("type", type)
 		formData.append("file", file)
+
+		// Optional audio metadata (ptt/seconds/waveform) — only sent when provided,
+		// so existing image/video/document callers behave exactly as before.
+		if (options?.ptt !== undefined) {
+			formData.append("ptt", String(options.ptt))
+		}
+		if (options?.seconds !== undefined) {
+			formData.append("seconds", String(options.seconds))
+		}
+		if (options?.waveform) {
+			formData.append("waveform", options.waveform)
+		}
 
 		const response = await fetch(`${this.baseUrl}/send-media`, {
 			method: "POST",
@@ -511,6 +524,25 @@ class ApiClient {	private baseUrl: string
 		}
 
 		return response.json()
+	}
+
+	/**
+	 * Convenience helper for audio messages. Sends as "ptt" when ptt=true,
+	 * otherwise as a regular "audio" attachment. Optional seconds/waveform are
+	 * forwarded to the backend for WhatsApp voice-note metadata.
+	 */
+	async sendAudio(
+		target: string,
+		file: File,
+		ptt = false,
+		seconds?: number,
+		waveform?: string
+	): Promise<{ status: string; id: string }> {
+		return this.sendMedia(target, file, ptt ? "ptt" : "audio", "", {
+			ptt,
+			seconds,
+			waveform,
+		})
 	}
 
 	// --- Calls ---------------------------------------------------------------

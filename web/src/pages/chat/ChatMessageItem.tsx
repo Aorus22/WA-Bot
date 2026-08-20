@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot } from "lucide-react"
+import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot, Mic } from "lucide-react"
 import { LazyMedia } from "@/components/LazyMedia"
 import { isMarkdownContent } from "./renderMd"
 
@@ -71,6 +71,7 @@ export const ChatMessageItem = memo(({
 	const isVideo = message.type === "video"
 	const isSticker = message.type === "sticker"
 	const isDocument = message.type === "document"
+	const isAudio = message.type === "audio" || message.type === "ptt" || message.type === "voice"
 	const isMedia = message.mediaUrl && message.mediaUrl.length > 0
 	const showSenderInfo = !isMe && chat?.isGroup && isFirstInSequence
 
@@ -229,7 +230,41 @@ export const ChatMessageItem = memo(({
 									</div>
 								</div>
 							)}
-							{message.content && !["[Image]", "[Video]", "[Sticker]", "[Document]"].includes(message.content) && !isDocument && (
+							{isAudio && isMedia && (
+								<div className={cn(
+									"flex flex-col gap-2 p-2.5 rounded-none relative z-10 min-w-[220px] sm:min-w-[260px] max-w-[65vw] sm:max-w-[320px] -mx-[14px] -mt-2",
+									isMe ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+								)}>
+									<div className="flex items-center gap-3">
+										<div className={cn(
+											"w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0",
+											isMe ? "bg-primary-foreground/15 text-primary-foreground" : "bg-primary/10 text-primary"
+										)}>
+											<Mic className="h-5 w-5" />
+										</div>
+										<div className="flex-1 min-w-0">
+											<p className="text-xs font-bold truncate">{message.type === "ptt" ? "Voice message" : "Audio"}</p>
+											<p className="text-[10px] opacity-60 uppercase font-medium truncate">{message.content && !["[Audio]", "[Voice Message]"].includes(message.content) ? message.content : "Audio file"}</p>
+										</div>
+									</div>
+									<audio
+										controls
+										preload="metadata"
+										src={getMediaUrl(message.mediaUrl)}
+										className="w-full h-10"
+									/>
+								</div>
+							)}
+							{isAudio && !isMedia && (
+								<div className={cn(
+									"flex items-center gap-2 p-2.5 rounded-xl -mx-[14px] -mt-2",
+									isMe ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+								)}>
+									<Mic className="h-4 w-4" />
+									<span className="text-xs font-bold uppercase tracking-wide">Audio unavailable</span>
+								</div>
+							)}
+							{message.content && !["[Image]", "[Video]", "[Sticker]", "[Document]", "[Audio]", "[Voice Message]"].includes(message.content) && !isDocument && !isAudio && (
 							        <div className={cn("break-words [word-break:break-word] leading-relaxed relative z-10", !isMarkdownContent(message.content) && "whitespace-pre-wrap")}>{renderFormattedContent(message.content)}</div>
 							)}							<div className={cn("flex items-center gap-1.5 mt-1 justify-end", "text-[10px] font-medium opacity-50 uppercase tracking-tight")}>
 								{message.isAutomatic && (

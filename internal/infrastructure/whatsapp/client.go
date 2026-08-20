@@ -251,6 +251,46 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 	return "", err
 }
 
+func (w *WhatsAppClient) SendAudio(ctx context.Context, to string, data []byte, mimetype string, ptt bool, seconds uint32, waveform []byte) (string, error) {
+	uploaded, err := w.client.Upload(ctx, data, whatsmeow.MediaAudio)
+	if err != nil {
+		return "", err
+	}
+
+	targetJID, _ := waTypes.ParseJID(to)
+	if targetJID.IsEmpty() {
+		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
+	}
+
+	return w.SendAudioToJID(ctx, targetJID, data, uploaded, mimetype, ptt, seconds, waveform)
+}
+
+func (w *WhatsAppClient) SendAudioToJID(ctx context.Context, to waTypes.JID, data []byte, uploaded whatsmeow.UploadResponse, mimetype string, ptt bool, seconds uint32, waveform []byte) (string, error) {
+	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
+		AudioMessage: &waProto.AudioMessage{
+			Mimetype:      proto.String(mimetype),
+			URL:           proto.String(uploaded.URL),
+			DirectPath:    proto.String(uploaded.DirectPath),
+			MediaKey:      uploaded.MediaKey,
+			FileEncSHA256: uploaded.FileEncSHA256,
+			FileSHA256:    uploaded.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(data))),
+			Seconds:       proto.Uint32(seconds),
+			PTT:           proto.Bool(ptt),
+			Waveform:      waveform,
+		},
+	})
+	if err == nil {
+		msgType := "audio"
+		if ptt {
+			msgType = "ptt"
+		}
+		w.log(resp.ID, to.String(), "[Audio]", msgType, "", false, "")
+		return resp.ID, nil
+	}
+	return "", err
+}
+
 func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, data []byte, isAnimated bool, mediaURL string, isAutomatic bool) (string, error) {
 	uploaded, err := w.client.Upload(ctx, data, whatsmeow.MediaImage)
 	if err != nil {
@@ -332,6 +372,9 @@ func (w *WhatsAppClient) DownloadMedia(ctx context.Context, msg *entity.Message)
 		isAnimated = msg.VMessage.GetStickerMessage().GetIsAnimated()
 	} else if msg.VMessage.GetDocumentMessage() != nil {
 		downloadableMedia = msg.VMessage.GetDocumentMessage()
+		isAnimated = false
+	} else if msg.VMessage.GetAudioMessage() != nil {
+		downloadableMedia = msg.VMessage.GetAudioMessage()
 		isAnimated = false
 	}
 
