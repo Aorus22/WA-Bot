@@ -729,6 +729,13 @@ func (s *LuaService) luaSendMedia(L *lua.LState) int {
 		_, sendErr = s.waClient.SendVideo(ctx, target, data, caption, "", true)
 	case "document":
 		_, sendErr = s.waClient.SendDocument(ctx, target, data, "document", "", true)
+	case "audio", "ptt", "voice", "audio-ptt":
+		ptt := mediaType == "ptt" || mediaType == "audio-ptt"
+		mimetype := http.DetectContentType(data)
+		if !strings.HasPrefix(mimetype, "audio/") {
+			mimetype = "audio/ogg"
+		}
+		_, sendErr = s.waClient.SendAudio(ctx, target, data, mimetype, ptt, 0, nil)
 	default:
 		sendErr = fmt.Errorf("unsupported media type: %s", mediaType)
 	}

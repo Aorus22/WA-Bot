@@ -27,6 +27,9 @@ const (
 	MediaTypeVideo    MediaType = "video"
 	MediaTypeGif      MediaType = "gif"
 	MediaTypeDocument MediaType = "document"
+	MediaTypeAudio    MediaType = "audio"
+	MediaTypePTT      MediaType = "ptt"
+	MediaTypeVoice    MediaType = "voice"
 )
 
 type Media struct {

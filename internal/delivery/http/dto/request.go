@@ -12,7 +12,7 @@ type SendMediaRequest struct {
 	Secret    string `json:"secret" validate:"required"`
 	Target    string `json:"target" validate:"required"`
 	Message   string `json:"message"`
-	MediaType string `json:"type" validate:"required,oneof=image video document"`
+	MediaType string `json:"type" validate:"required,oneof=image video document audio ptt voice audio-ptt"`
 	File      []byte `json:"-"`
 	Filename  string `json:"-"`
 }

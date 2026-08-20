@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video } from "lucide-react"
+import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video, Mic, Square, Trash2, SendHorizontal } from "lucide-react"
 import { api, type Chat, type Message } from "@/lib/api"
 import { useCall } from "@/contexts/CallContext"
 import { cn } from "@/lib/utils"
@@ -98,6 +98,20 @@ const formatDate = (timestamp: number) => {
     return date.toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" })
 }
 
+const AUDIO_EXTENSIONS = ["mp3", "ogg", "oga", "m4a", "wav", "opus", "webm", "aac", "flac"]
+
+const isAudioFile = (file: File): boolean => {
+    if (file.type.startsWith("audio/")) return true
+    const ext = file.name.split(".").pop()?.toLowerCase() || ""
+    return AUDIO_EXTENSIONS.includes(ext)
+}
+
+const formatRecordingTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m}:${s.toString().padStart(2, "0")}`
+}
+
     export const ChatArea = memo(({
  
     chat, 
@@ -133,9 +147,21 @@ const formatDate = (timestamp: number) => {
     const [imageSourceRect, setImageSourceRect] = useState<DOMRect | null>(null)
     const lastStickerMsgRef = useRef<{ id: string; mediaUrl: string }>({ id: "", mediaUrl: "" })
 
+    // --- Audio recording state ---
+    const [isRecording, setIsRecording] = useState(false)
+    const [recordingSeconds, setRecordingSeconds] = useState(0)
+    const [pendingAudio, setPendingAudio] = useState<{ file: File; seconds: number; url: string } | null>(null)
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+    const mediaStreamRef = useRef<MediaStream | null>(null)
+    const recordedChunksRef = useRef<Blob[]>([])
+    const recordingTimerRef = useRef<number | null>(null)
+    const recordingStartRef = useRef(0)
+    const cancelRecordingRef = useRef(false)
+
     const scrollRef = useRef<HTMLDivElement>(null)
     const mediaInputRef = useRef<HTMLInputElement>(null)
     const documentInputRef = useRef<HTMLInputElement>(null)
+    const audioInputRef = useRef<HTMLInputElement>(null)
     const inputRef = useRef<HTMLInputElement>(null)
 
     const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -173,6 +199,32 @@ const formatDate = (timestamp: number) => {
         }
     }, [chat?.id])
 
+    // Stop any in-progress recording when switching chats
+    useEffect(() => {
+        return () => {
+            cancelRecording()
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [chat?.id])
+
+    // Cleanup media resources on unmount
+    useEffect(() => {
+        return () => {
+            if (recordingTimerRef.current) {
+                clearInterval(recordingTimerRef.current)
+                recordingTimerRef.current = null
+            }
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach(track => track.stop())
+                mediaStreamRef.current = null
+            }
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+                mediaRecorderRef.current.stop()
+                mediaRecorderRef.current = null
+            }
+        }
+    }, [])
+
     useEffect(() => {
         if (incomingMessage && chat && incomingMessage.chatId === chat.id) {
             const { message } = incomingMessage
@@ -190,7 +242,7 @@ const formatDate = (timestamp: number) => {
                             m.id.startsWith("temp-") &&
                             (
                                 m.content === incomingMessage.message.content ||
-                                (m.type === incomingMessage.message.type && ["image", "video", "sticker", "document"].includes(m.type))
+                                (m.type === incomingMessage.message.type && ["image", "video", "sticker", "document", "audio", "ptt", "voice"].includes(m.type))
                             )
                         )
 
@@ -396,9 +448,141 @@ const formatDate = (timestamp: number) => {
         }
     }
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: "image" | "video" | "document") => {
+    // --- Audio recording ----------------------------------------------------
+
+    const stopStream = () => {
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop())
+            mediaStreamRef.current = null
+        }
+    }
+
+    const startRecording = async () => {
+        if (!chat || isRecording || sending) return
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+            const mimeType = MediaRecorder.isTypeSupported("audio/ogg; codecs=opus")
+                ? "audio/ogg; codecs=opus"
+                : MediaRecorder.isTypeSupported("audio/webm")
+                    ? "audio/webm"
+                    : ""
+
+            const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+            recordedChunksRef.current = []
+            cancelRecordingRef.current = false
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunksRef.current.push(e.data)
+            }
+
+            recorder.onstop = () => {
+                if (cancelRecordingRef.current) {
+                    cancelRecordingRef.current = false
+                    stopStream()
+                    return
+                }
+                const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/ogg" })
+                const seconds = Math.max(1, Math.round((Date.now() - recordingStartRef.current) / 1000))
+                const ext = blob.type.includes("webm") ? "webm" : "ogg"
+                const file = new File([blob], `recording_${Date.now()}.${ext}`, { type: blob.type })
+                setPendingAudio({ file, seconds, url: URL.createObjectURL(blob) })
+                setIsRecording(false)
+                setRecordingSeconds(0)
+                stopStream()
+            }
+
+            recorder.start()
+            mediaRecorderRef.current = recorder
+            mediaStreamRef.current = stream
+            recordingStartRef.current = Date.now()
+            setRecordingSeconds(0)
+            setIsRecording(true)
+            recordingTimerRef.current = window.setInterval(() => {
+                setRecordingSeconds(Math.floor((Date.now() - recordingStartRef.current) / 1000))
+            }, 1000)
+        } catch (error) {
+            console.error("Microphone access denied:", error)
+            toast.error("Microphone access denied. Check browser permissions.")
+        }
+    }
+
+    const stopRecording = () => {
+        if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current)
+            recordingTimerRef.current = null
+        }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+            mediaRecorderRef.current.stop()
+        }
+    }
+
+    const cancelRecording = () => {
+        cancelRecordingRef.current = true
+        if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current)
+            recordingTimerRef.current = null
+        }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+            mediaRecorderRef.current.stop()
+        }
+        stopStream()
+        setIsRecording(false)
+        setRecordingSeconds(0)
+    }
+
+    const cancelPendingAudio = () => {
+        if (pendingAudio) {
+            URL.revokeObjectURL(pendingAudio.url)
+        }
+        setPendingAudio(null)
+    }
+
+    const sendPendingAudio = async () => {
+        if (!chat || !pendingAudio || sending) return
+        const { file, seconds, url } = pendingAudio
+        const tempId = "temp-audio-" + Date.now()
+        const newMsg: Message = {
+            id: tempId,
+            chatId: chat.id,
+            from: "me",
+            to: chat.id,
+            content: "[Voice Message]",
+            timestamp: Date.now(),
+            status: "pending",
+            type: "ptt",
+            mediaUrl: url
+        }
+
+        setMessages(prev => [...prev, newMsg])
+        setTimeout(() => scrollToBottom(), 50)
+        setPendingAudio(null)
+        setSending(true)
+
+        try {
+            const res = await api.sendMedia(chat.id, file, "ptt", "", { ptt: true, seconds })
+            setMessages(prev => {
+                if (prev.some(m => m.id === res.id)) {
+                    return prev.filter(m => m.id !== tempId)
+                }
+                return prev.map(m => (m.id === tempId ? { ...m, id: res.id, status: "sent" } : m))
+            })
+        } catch (error) {
+            console.error("Failed to send voice message:", error)
+            setMessages(prev =>
+                prev.map(m => (m.id === tempId ? { ...m, status: "failed" } : m))
+            )
+            toast.error("Failed to send voice message")
+        } finally {
+            setSending(false)
+        }
+    }
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: "image" | "video" | "document" | "audio") => {
         const file = e.target.files?.[0]
         if (!file || !chat) return
+
+        // Detect audio files by extension/mime so audio attachments route to the audio path
+        const effectiveType = isAudioFile(file) ? "audio" : type
 
         const tempId = "temp-media-" + Date.now()
         const newMsg: Message = {
@@ -406,10 +590,10 @@ const formatDate = (timestamp: number) => {
             chatId: chat.id,
             from: "me",
             to: chat.id,
-            content: type === "image" ? "[Image]" : type === "video" ? "[Video]" : file.name,
+            content: effectiveType === "image" ? "[Image]" : effectiveType === "video" ? "[Video]" : effectiveType === "audio" ? "[Audio]" : file.name,
             timestamp: Date.now(),
             status: "pending",
-            type: type,
+            type: effectiveType,
             mediaUrl: URL.createObjectURL(file)
         }
 
@@ -417,7 +601,7 @@ const formatDate = (timestamp: number) => {
         setTimeout(() => scrollToBottom(), 50)
 
         try {
-            const res = await api.sendMedia(chat.id, file, type, "")
+            const res = await api.sendMedia(chat.id, file, effectiveType, "")
             setMessages(prev => {
                 if (prev.some(m => m.id === res.id)) {
                     return prev.filter(m => m.id !== tempId)
@@ -708,7 +892,7 @@ const formatDate = (timestamp: number) => {
                         )}
                     </div>
                 )}
-                <div className="max-w-4xl mx-auto flex items-end gap-3 px-2">
+<div className="max-w-4xl mx-auto flex items-end gap-3 px-2">
                     <div className="flex items-center mb-1 relative">
                         <div className="absolute invisible">
                             <ChatEmojiPickerPopover onEmojiSelect={addEmoji} open={emojiOpen} onOpenChange={setEmojiOpen} />
@@ -745,6 +929,10 @@ const formatDate = (timestamp: number) => {
                                         <FileText className="h-4 w-4 text-orange-500" />
                                         <span>Document</span>
                                     </button>
+                                    <button onClick={() => { audioInputRef.current?.click(); setPlusOpen(false) }} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full">
+                                        <Mic className="h-4 w-4 text-red-500" />
+                                        <span>Audio</span>
+                                    </button>
                                     <button onClick={() => { setIsMdMode(v => !v); setPlusOpen(false) }} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full", isMdMode && "text-primary")}>
                                         <FileText className="h-4 w-4" />
                                         <span>Markdown {isMdMode ? '(on)' : '(off)'}</span>
@@ -753,7 +941,52 @@ const formatDate = (timestamp: number) => {
                             </PopoverContent>
                         </Popover>
                     </div>
-                    <div className="flex-1 relative">
+                    {isRecording ? (
+                        <div className="flex-1 flex items-center gap-3 bg-muted/50 rounded-2xl px-4 min-h-[44px]">
+                            <span className="relative flex h-3 w-3 flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+                            </span>
+                            <span className="text-sm font-bold tabular-nums tracking-tight">{formatRecordingTime(recordingSeconds)}</span>
+                            <span className="text-xs text-muted-foreground hidden sm:inline">Recording...</span>
+                            <div className="ml-auto flex items-center gap-1.5">
+                                <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelRecording} title="Cancel recording">
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                                <Button size="icon" className="h-9 w-9 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 active:scale-90 transition-all" onClick={stopRecording} title="Stop and review">
+                                    <Square className="h-4 w-4 fill-current" />
+                                </Button>
+                            </div>
+                        </div>
+                    ) : pendingAudio ? (
+                        <div className="flex-1 flex items-center gap-3 bg-muted/50 rounded-2xl px-4 min-h-[44px]">
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                <Mic className="h-4 w-4 text-primary" />
+                            </div>
+                            <span className="text-sm font-bold tabular-nums tracking-tight flex-shrink-0">{formatRecordingTime(pendingAudio.seconds)}</span>
+                            <audio src={pendingAudio.url} controls preload="metadata" className="h-9 flex-1 min-w-0" />
+                            <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                                <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelPendingAudio} title="Discard recording">
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                                <Button size="icon" className="h-9 w-9 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 active:scale-90 transition-all" onClick={sendPendingAudio} disabled={sending} title="Send voice message">
+                                    <SendHorizontal className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={startRecording}
+                                disabled={sending}
+                                className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted transition-all active:scale-90 mb-1"
+                                title="Record voice message"
+                            >
+                                <Mic className="h-5 w-5" />
+                            </Button>
+                            <div className="flex-1 relative">
                         {isMdMode ? (
                             <Textarea
                                 ref={inputRef as React.Ref<HTMLTextAreaElement>}
@@ -800,6 +1033,8 @@ const formatDate = (timestamp: number) => {
                             <Send className="h-4 w-4" />
                         </Button>
                     </div>
+                        </>
+                    )}
                 </div>
             </footer>
 
@@ -807,7 +1042,7 @@ const formatDate = (timestamp: number) => {
                 type="file"
                 ref={mediaInputRef}
                 onChange={e => handleFileUpload(e, "image")}
-                accept="image/*,video/*"
+                accept="image/*,video/*,audio/*"
                 className="hidden"
             />
             <input
@@ -815,6 +1050,13 @@ const formatDate = (timestamp: number) => {
                 ref={documentInputRef}
                 onChange={e => handleFileUpload(e, "document")}
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
+                className="hidden"
+            />
+            <input
+                type="file"
+                ref={audioInputRef}
+                onChange={e => handleFileUpload(e, "audio")}
+                accept="audio/*,.mp3,.ogg,.m4a,.wav,.opus,.webm"
                 className="hidden"
             />
 
