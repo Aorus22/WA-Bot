@@ -79,7 +79,7 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 	secret := r.FormValue("secret")
 	target := r.FormValue("target")
 	message := r.FormValue("message")
-	mediaType := r.FormValue("type")
+	mediaType := strings.ToLower(strings.TrimSpace(r.FormValue("type")))
 
 	if !mh.validateSecret(secret) {
 		mh.handler.sendError(w, http.StatusUnauthorized, "Unauthorized")
@@ -93,25 +93,57 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	data := make([]byte, header.Size)
-	if _, err := file.Read(data); err != nil {
+	data, err := io.ReadAll(file)
+	if err != nil {
 		mh.handler.sendError(w, http.StatusInternalServerError, "Failed to read file: "+err.Error())
 		return
 	}
+	if len(data) == 0 {
+		mh.handler.sendError(w, http.StatusBadRequest, "Empty file")
+		return
+	}
 
-	fmt.Printf("[SEND] Sending %s to: %s\n", mediaType, target)
+	fmt.Printf("[SEND] Sending %s to: %s (%d bytes)\n", mediaType, target, len(data))
 
 	os.MkdirAll("media", 0755)
 
 	isAudio := mediaType == "audio" || mediaType == "ptt" || mediaType == "voice" || mediaType == "audio-ptt"
 
+	// Parse PTT early so mimetype / extension can be normalised correctly.
+	// PTT (voice note) MUST be `audio/ogg; codecs=opus` for WhatsApp to render
+	// the bubble player; any other codec shows as a generic audio file.
+	pttEarly := mediaType == "ptt" || mediaType == "audio-ptt"
+	if pttStr := r.FormValue("ptt"); pttStr != "" {
+		if b, err := strconv.ParseBool(pttStr); err == nil {
+			pttEarly = b
+		}
+	}
+
 	// Detect mimetype for audio so we can pick a sensible extension and
 	// pass a real audio mimetype to WhatsApp.
 	var audioMimetype string
 	if isAudio {
-		audioMimetype = http.DetectContentType(data)
-		if !strings.HasPrefix(audioMimetype, "audio/") {
-			audioMimetype = "audio/ogg"
+		if pttEarly {
+			audioMimetype = "audio/ogg; codecs=opus"
+		} else {
+			audioMimetype = http.DetectContentType(data)
+			if !strings.HasPrefix(audioMimetype, "audio/") {
+				// Fallback via filename extension before defaulting to opus.
+				switch strings.ToLower(filepath.Ext(header.Filename)) {
+				case ".mp3":
+					audioMimetype = "audio/mpeg"
+				case ".m4a":
+					audioMimetype = "audio/mp4"
+				case ".wav":
+					audioMimetype = "audio/wav"
+				case ".webm":
+					audioMimetype = "audio/webm"
+				case ".opus":
+					audioMimetype = "audio/ogg; codecs=opus"
+				default:
+					audioMimetype = "audio/ogg"
+				}
+			}
 		}
 	}
 
@@ -122,17 +154,24 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 			ext = ".jpg"
 		case mediaType == "video":
 			ext = ".mp4"
-		case isAudio:
-			switch audioMimetype {
-			case "audio/mpeg":
+			case isAudio:
+			switch {
+			case strings.HasPrefix(audioMimetype, "audio/ogg"):
+				// Covers "audio/ogg" and "audio/ogg; codecs=opus" (PTT)
+				if strings.Contains(audioMimetype, "opus") {
+					ext = ".ogg"
+				} else {
+					ext = ".ogg"
+				}
+			case audioMimetype == "audio/mpeg":
 				ext = ".mp3"
-			case "audio/mp4":
+			case audioMimetype == "audio/mp4":
 				ext = ".m4a"
-			case "audio/opus":
+			case audioMimetype == "audio/opus":
 				ext = ".opus"
-			case "audio/wav":
+			case audioMimetype == "audio/wav":
 				ext = ".wav"
-			case "audio/webm":
+			case audioMimetype == "audio/webm":
 				ext = ".webm"
 			default:
 				ext = ".ogg"
@@ -161,12 +200,7 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 	case "video":
 		id, sendErr = mh.handler.client.SendVideo(ctx, target, data, message, mediaURL, false)
 	case "audio", "ptt", "voice", "audio-ptt":
-		ptt := mediaType == "ptt" || mediaType == "audio-ptt"
-		if pttStr := r.FormValue("ptt"); pttStr != "" {
-			if b, err := strconv.ParseBool(pttStr); err == nil {
-				ptt = b
-			}
-		}
+		ptt := pttEarly
 		var seconds uint32
 		if secStr := r.FormValue("seconds"); secStr != "" {
 			if s, err := strconv.ParseUint(secStr, 10, 32); err == nil {
@@ -179,6 +213,7 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 				waveform = wf
 			}
 		}
+		fmt.Printf("[SEND] audio mimetype=%s ptt=%v seconds=%d bytes=%d\n", audioMimetype, ptt, seconds, len(data))
 		id, sendErr = mh.handler.client.SendAudio(ctx, target, data, audioMimetype, ptt, seconds, waveform)
 	default:
 		id, sendErr = mh.handler.client.SendDocument(ctx, target, data, header.Filename, mediaURL, false)
