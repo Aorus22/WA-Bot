@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: wa-bot-staging
-    restart: always
+    restart: unless-stopped
     volumes:
       - /root/bimalord-bot/database:/root/database
     ports:
@@ -21,12 +21,12 @@ services:
   lightpanda:
     image: lightpanda/browser:nightly
     container_name: wa-bot-staging-lightpanda
-    restart: always
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: wa-bot-staging-redis
-    restart: always
+    restart: unless-stopped
     volumes:
       - redis_data:/data
     ports:

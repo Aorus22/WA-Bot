@@ -34,6 +34,7 @@ const (
 	MediaModeLive      MediaMode = "live"
 	MediaModeTTS       MediaMode = "tts"
 	MediaModeAudioFile MediaMode = "audio_file"
+	MediaModeVideoFile MediaMode = "video_file"
 )
 
 // CallStatus is the lifecycle status of a call.

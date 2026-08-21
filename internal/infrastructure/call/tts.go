@@ -22,6 +22,13 @@ type AudioResult struct {
 	Cleanup func()
 }
 
+// VideoResult describes a playable video source resolved for a media-mode call.
+type VideoResult struct {
+	Path   string
+	Format string // "mp4" etc, sniffed container
+	Cleanup func()
+}
+
 // TTSProvider synthesizes text into a playable audio file.
 type TTSProvider interface {
 	Synthesize(ctx context.Context, req TTSRequest) (*AudioResult, error)

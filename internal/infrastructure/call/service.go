@@ -105,12 +105,13 @@ func (s *CallService) RingTimeout() time.Duration {
 }
 
 // ExternalCallRequest describes an outgoing external API call carrying a
-// media-mode audio source (TTS or audio file) to play after the peer answers.
+// media-mode source (TTS/audio file/video file) to play after the peer answers.
 type ExternalCallRequest struct {
 	Target              string
 	Type                entity.CallType
 	MediaMode           entity.MediaMode
 	Audio               *AudioResult
+	Video               *VideoResult
 	HangupAfterPlayback bool
 	RingTimeout         time.Duration
 	APIKeyID            string
@@ -227,17 +228,28 @@ func (s *CallService) StartExternalCall(ctx context.Context, req ExternalCallReq
 	}
 	callType := req.Type
 	if callType == "" {
-		callType = entity.CallTypeAudio
+		if req.MediaMode == entity.MediaModeVideoFile {
+			callType = entity.CallTypeVideo
+		} else {
+			callType = entity.CallTypeAudio
+		}
 	}
-	if callType != entity.CallTypeAudio {
+	if callType != entity.CallTypeAudio && callType != entity.CallTypeVideo && callType != entity.CallTypeGroupAudio && callType != entity.CallTypeGroupVideo {
 		return nil, ErrInvalidTarget
 	}
-	// External calls only support tts / audio_file media modes (video is Phase 4).
-	if req.MediaMode != entity.MediaModeTTS && req.MediaMode != entity.MediaModeAudioFile {
+	isAudioMode := req.MediaMode == entity.MediaModeTTS || req.MediaMode == entity.MediaModeAudioFile
+	isVideoMode := req.MediaMode == entity.MediaModeVideoFile
+	if !isAudioMode && !isVideoMode {
 		return nil, ErrInvalidTarget
 	}
-	if req.Audio == nil {
+	if isAudioMode && req.Audio == nil {
 		return nil, ErrInvalidTarget
+	}
+	if isVideoMode && req.Video == nil {
+		return nil, ErrInvalidTarget
+	}
+	if isVideoMode && callType == entity.CallTypeAudio {
+		callType = entity.CallTypeVideo
 	}
 
 	s.mu.Lock()
@@ -262,8 +274,12 @@ func (s *CallService) StartExternalCall(ctx context.Context, req ExternalCallReq
 	session.Status = entity.CallStatusPreparing
 	session.APIKeyID = req.APIKeyID
 	session.AudioResult = req.Audio
+	session.VideoResult = req.Video
 	session.HangupAfterPlayback = req.HangupAfterPlayback
 	session.RingTimeout = req.RingTimeout
+	if req.MediaMode == entity.MediaModeVideoFile && session.Type == entity.CallTypeAudio {
+		session.Type = entity.CallTypeVideo
+	}
 	s.active = session
 	s.mu.Unlock()
 
@@ -285,6 +301,7 @@ func (s *CallService) StartExternalCall(ctx context.Context, req ExternalCallReq
 	if err := s.logs.CreateCallLog(ctx, callLog); err != nil {
 		s.clearActive(id)
 		s.cleanupAudio(session)
+		s.cleanupVideo(session)
 		return nil, err
 	}
 
@@ -307,13 +324,23 @@ func (s *CallService) dialExternal(session *CallSession) {
 		return
 	}
 	target := session.Target
+	isVideo := session.Type == entity.CallTypeVideo || session.Type == entity.CallTypeGroupVideo
 	s.mu.Unlock()
 
-	call, err := s.client.Call(ctx, target)
+	var (
+		call *meowcaller.Call
+		err  error
+	)
+	if isVideo {
+		call, err = s.client.CallWithOptions(ctx, target, meowcaller.CallOptions{Video: true})
+	} else {
+		call, err = s.client.Call(ctx, target)
+	}
 	if err != nil {
 		now := time.Now().UnixMilli()
 		_ = s.logs.UpdateCallStatus(ctx, session.ID, entity.CallStatusFailed, nil, &now, nil, "")
 		s.cleanupAudio(session)
+		s.cleanupVideo(session)
 		s.mu.Lock()
 		if s.active != nil && s.active.ID == session.ID {
 			session.Status = entity.CallStatusFailed
@@ -384,7 +411,11 @@ func (s *CallService) wireExternalCallbacks(session *CallSession, call *meowcall
 			answeredAt := now.UnixMilli()
 			_ = s.logs.UpdateCallStatus(context.Background(), session.ID, entity.CallStatusConnected, &answeredAt, nil, nil, session.MeowCallID)
 			state = session.View()
-			s.playSessionAudio(session, call)
+			if session.MediaMode == entity.MediaModeVideoFile && session.VideoResult != nil {
+				s.playSessionVideo(session, call)
+			} else {
+				s.playSessionAudio(session, call)
+			}
 		}
 		s.mu.Unlock()
 		s.broadcast("call.ready", state)
@@ -392,6 +423,36 @@ func (s *CallService) wireExternalCallbacks(session *CallSession, call *meowcall
 	call.OnEnd(func(reason string) {
 		s.onEnd(session, reason)
 	})
+}
+
+// playSessionVideo streams the pre-resolved video file into the call. If
+// HangupAfterPlayback is set the call is ended when playback finishes.
+func (s *CallService) playSessionVideo(session *CallSession, call *meowcaller.Call) {
+	if session == nil || session.VideoResult == nil || call == nil {
+		return
+	}
+	var video *CallVideo
+	if session.Media != nil {
+		video = session.Media.Video()
+	}
+	feeder, player, err := StartVideoFileFeeder(context.Background(), call, video, session.VideoResult.Path)
+	if err != nil {
+		return
+	}
+	session.VideoFeeder = feeder
+	if player != nil && session.HangupAfterPlayback {
+		player.OnFinish(func() {
+			go func() {
+				<-feeder.Done()
+				s.hangupAfterPlayback(session)
+			}()
+		})
+	} else if session.HangupAfterPlayback {
+		go func() {
+			<-feeder.Done()
+			s.hangupAfterPlayback(session)
+		}()
+	}
 }
 
 // playSessionAudio streams the pre-resolved audio file into the call. If
@@ -490,6 +551,21 @@ func (s *CallService) cleanupAudio(session *CallSession) {
 	}
 	session.AudioResult.Cleanup()
 	session.AudioResult = nil
+}
+
+// cleanupVideo releases the temp file and feeder backing a video-file source.
+func (s *CallService) cleanupVideo(session *CallSession) {
+	if session == nil {
+		return
+	}
+	if session.VideoFeeder != nil {
+		session.VideoFeeder.Close()
+		session.VideoFeeder = nil
+	}
+	if session.VideoResult != nil && session.VideoResult.Cleanup != nil {
+		session.VideoResult.Cleanup()
+		session.VideoResult = nil
+	}
 }
 
 // StartGroupCall places an outgoing group call (PRD §44-46). It accepts either
@@ -1165,8 +1241,9 @@ func (s *CallService) finalize(session *CallSession, status entity.CallStatus, r
 		media.Close()
 	}
 	s.dropMediaSession(session.ID)
-	// Remove the temp TTS/audio-file source now that playback is done.
+	// Remove the temp TTS/audio-file/video-file sources now that playback is done.
 	s.cleanupAudio(session)
+	s.cleanupVideo(session)
 
 	endedMs := now.UnixMilli()
 	var durationMS *int64

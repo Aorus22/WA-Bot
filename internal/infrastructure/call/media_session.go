@@ -99,6 +99,14 @@ func (m *CallMedia) IncomingVideo() <-chan VideoFrame {
 	return m.video.Frames()
 }
 
+// Video returns the outbound video bridge for file-based playback.
+func (m *CallMedia) Video() *CallVideo {
+	if m == nil {
+		return nil
+	}
+	return m.video
+}
+
 // KeyframeRequests returns a channel signalled when the call requests an IDR
 // from the browser.
 func (m *CallMedia) KeyframeRequests() <-chan struct{} {

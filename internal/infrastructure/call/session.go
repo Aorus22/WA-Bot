@@ -33,6 +33,11 @@ type CallSession struct {
 	// call is answered (media-mode external calls only). Its Cleanup is invoked
 	// when the call finalizes.
 	AudioResult *AudioResult
+	// VideoResult is the pre-resolved video-file source played after the
+	// call is answered (video media-mode). Its Cleanup is invoked when the call finalizes.
+	VideoResult *VideoResult
+	// VideoFeeder streams the video file into the call (video_file mode only).
+	VideoFeeder *VideoFileFeeder
 	// HangupAfterPlayback ends the call once the audio source finishes.
 	HangupAfterPlayback bool
 	// RingTimeout is the configured ring timeout for this call.
