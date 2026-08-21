@@ -41,6 +41,7 @@ type Handler struct {
 	callService    *call.CallService
 	apiKeyRepo     repository.APIKeyRepository
 	ttsProvider    call.TTSProvider
+	settingsRepo   repository.SettingsRepository
 }
 
 func NewHandler(
@@ -141,6 +142,14 @@ func (h *Handler) SetTTSProvider(p call.TTSProvider) {
 
 func (h *Handler) GetTTSProvider() call.TTSProvider {
 	return h.ttsProvider
+}
+
+func (h *Handler) SetSettingsRepo(repo repository.SettingsRepository) {
+	h.settingsRepo = repo
+}
+
+func (h *Handler) GetSettingsRepo() repository.SettingsRepository {
+	return h.settingsRepo
 }
 
 func (h *Handler) sendJSON(w http.ResponseWriter, data interface{}) {

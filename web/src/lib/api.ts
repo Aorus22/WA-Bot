@@ -175,6 +175,13 @@ export type CallHistoryFilter = {
         target?: string
 }
 
+export type SettingsMap = Record<string, string>
+
+export type SettingsResponse = SettingsMap & {
+        hasGeminiKey?: boolean
+        hasFishKey?: boolean
+}
+
 class ApiClient {	private baseUrl: string
 
 	constructor(baseUrl?: string) {
@@ -630,6 +637,37 @@ class ApiClient {	private baseUrl: string
 		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/video/stop`, {
 			method: "POST",
 		})
+	}
+
+	// --- Settings -------------------------------------------------------------
+
+	async getSettings(): Promise<SettingsResponse> {
+		const resp = await this.request<{
+			settings: SettingsMap
+			hasGeminiKey?: boolean
+			hasFishKey?: boolean
+		}>("/settings")
+		return {
+			...resp.settings,
+			hasGeminiKey: resp.hasGeminiKey,
+			hasFishKey: resp.hasFishKey,
+		} as SettingsResponse
+	}
+
+	async updateSettings(data: SettingsMap): Promise<SettingsResponse> {
+		const resp = await this.request<{
+			settings: SettingsMap
+			hasGeminiKey?: boolean
+			hasFishKey?: boolean
+		}>("/settings", {
+			method: "PUT",
+			body: JSON.stringify(data),
+		})
+		return {
+			...resp.settings,
+			hasGeminiKey: resp.hasGeminiKey,
+			hasFishKey: resp.hasFishKey,
+		} as SettingsResponse
 	}
 }
 

@@ -129,15 +129,6 @@ func InitializeApp() (*App, error) {
 		return nil, fmt.Errorf("failed to create WhatsApp client: %w", err)
 	}
 
-	apiKey := cfg.Get("GEMINI_API_KEY")
-	var geminiService *ai.GeminiService
-	if apiKey != "" {
-		geminiService, err = ai.NewGeminiService(apiKey, storageRepo)
-		if err != nil {
-			fmt.Printf("Warning: Failed to create Gemini service: %v\n", err)
-		}
-	}
-
 	mediaDownloader := media.NewMediaDownloader(storageRepo)
 	redisService := storage.NewRedisService(cfg)
 
@@ -146,7 +137,6 @@ func InitializeApp() (*App, error) {
 	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient, storageRepo)
 
 	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
-	httpServer.SetGeminiService(geminiService)
 
 	msgStore, err := repository.NewMessageStore("file:database/wa-bot-messages.db?_foreign_keys=on")
 	if err != nil {
@@ -159,6 +149,38 @@ func InitializeApp() (*App, error) {
 		return nil, fmt.Errorf("failed to create app store: %w", err)
 	}
 
+	// TTS + AI settings are DB-backed (env ya env, settings ya settings). On
+	// first boot with an empty app_settings table, migrate the legacy env vars
+	// into the DB so existing deployments keep working. After this one-time
+	// migration the app reads these settings exclusively from the DB.
+	settingsRepo := repository.NewAppSettingsRepository(appStore)
+	seedCtx, seedCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := repository.SeedSettings(seedCtx, settingsRepo, map[string]string{
+		"gemini_api_key":               os.Getenv("GEMINI_API_KEY"),
+		"ai_server_url":                os.Getenv("AI_SERVER_URL"),
+		"call_tts_provider":            os.Getenv("CALL_TTS_PROVIDER"),
+		"call_tts_default_voice":       os.Getenv("CALL_TTS_DEFAULT_VOICE"),
+		"call_tts_fish_audio_key":      os.Getenv("CALL_TTS_FISH_AUDIO_KEY"),
+		"call_tts_fish_audio_model":    os.Getenv("CALL_TTS_FISH_AUDIO_MODEL"),
+		"call_tts_fish_audio_voice_id": os.Getenv("CALL_TTS_FISH_AUDIO_VOICE_ID"),
+	}); err != nil {
+		seedCancel()
+		return nil, fmt.Errorf("failed to seed settings: %w", err)
+	}
+	seedCancel()
+	httpServer.SetSettingsRepo(settingsRepo)
+
+	// Gemini service, gated by the DB-backed gemini_api_key setting.
+	var geminiService *ai.GeminiService
+	geminiAPIKey, _ := settingsRepo.Get(context.Background(), "gemini_api_key")
+	if geminiAPIKey != "" {
+		geminiService, err = ai.NewGeminiService(geminiAPIKey, storageRepo)
+		if err != nil {
+			fmt.Printf("Warning: Failed to create Gemini service: %v\n", err)
+		}
+	}
+	httpServer.SetGeminiService(geminiService)
+
 	callSvc := call.NewCallService(waClient.GetCallClient(), waClient.IsConnected, appStore, httpServer)
 	httpServer.SetCallService(callSvc)
 
@@ -170,17 +192,21 @@ func InitializeApp() (*App, error) {
 		callSvc.SetRingTimeout(time.Duration(ringSeconds) * time.Second)
 	}
 
-	// TTS provider, gated by CALL_TTS_PROVIDER (edge | fish). Unknown/empty
-	// values leave the provider nil (tts_unavailable).
+	// TTS provider, gated by the DB-backed call_tts_provider setting
+	// (edge | fish). Unknown/empty values leave the provider nil (tts_unavailable).
 	var ttsProvider call.TTSProvider
-	switch cfg.Get("CALL_TTS_PROVIDER") {
+	switch ttsProviderSetting, _ := settingsRepo.Get(context.Background(), "call_tts_provider"); ttsProviderSetting {
 	case "edge":
-		ttsProvider = call.NewEdgeTTSProvider(cfg.Get("CALL_TTS_DEFAULT_VOICE"))
+		voice, _ := settingsRepo.Get(context.Background(), "call_tts_default_voice")
+		ttsProvider = call.NewEdgeTTSProvider(voice)
 	case "fish":
+		fishKey, _ := settingsRepo.Get(context.Background(), "call_tts_fish_audio_key")
+		fishModel, _ := settingsRepo.Get(context.Background(), "call_tts_fish_audio_model")
+		fishVoiceID, _ := settingsRepo.Get(context.Background(), "call_tts_fish_audio_voice_id")
 		ttsProvider = call.NewFishAudioTTSProvider(call.FishAudioConfig{
-			APIKey:         cfg.Get("CALL_TTS_FISH_AUDIO_KEY"),
-			DefaultModel:   cfg.Get("CALL_TTS_FISH_AUDIO_MODEL"),
-			DefaultVoiceID: cfg.Get("CALL_TTS_FISH_AUDIO_VOICE_ID"),
+			APIKey:         fishKey,
+			DefaultModel:   fishModel,
+			DefaultVoiceID: fishVoiceID,
 		})
 	}
 	httpServer.SetTTSProvider(ttsProvider)
@@ -206,8 +232,9 @@ func InitializeApp() (*App, error) {
 	eventHandler.SetMessageStore(msgStore)
 	eventHandler.SetHTTPServer(httpServer)
 
-	// Wire up AI companion client (disabled if AI_SERVER_URL is empty)
-	aiClient := ai.NewAIClient(cfg.Get("AI_SERVER_URL"))
+	// Wire up AI companion client (disabled if ai_server_url setting is empty)
+	aiServerURL, _ := settingsRepo.Get(context.Background(), "ai_server_url")
+	aiClient := ai.NewAIClient(aiServerURL)
 	eventHandler.SetAIClient(aiClient)
 
 	return &App{
