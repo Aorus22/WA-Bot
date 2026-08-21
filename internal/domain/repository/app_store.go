@@ -117,6 +117,11 @@ func (s *AppStore) init() error {
 		`CREATE INDEX IF NOT EXISTS idx_call_logs_started ON call_logs(started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_call_logs_target ON call_logs(target)`,
 		`CREATE INDEX IF NOT EXISTS idx_call_logs_status ON call_logs(status)`,
+		`CREATE TABLE IF NOT EXISTS app_settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
 	}
 
 	for _, query := range queries {
@@ -746,4 +751,60 @@ func (s *AppStore) MarkInterruptedCalls(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// SettingsRepository implementation for AppStore
+
+func (s *AppStore) GetSetting(ctx context.Context, key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func (s *AppStore) SetSetting(ctx context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+	_, err := s.db.ExecContext(ctx, query, key, value, time.Now().Unix())
+	return err
+}
+
+func (s *AppStore) ListSettings(ctx context.Context) (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM app_settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := map[string]string{}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		settings[key] = value
+	}
+	return settings, rows.Err()
+}
+
+func (s *AppStore) DeleteSetting(ctx context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.ExecContext(ctx, `DELETE FROM app_settings WHERE key = ?`, key)
+	return err
 }

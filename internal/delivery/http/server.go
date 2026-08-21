@@ -97,6 +97,10 @@ func (s *HTTPServer) SetTTSProvider(p call.TTSProvider) {
 	s.handler.SetTTSProvider(p)
 }
 
+func (s *HTTPServer) SetSettingsRepo(repo repository.SettingsRepository) {
+	s.handler.SetSettingsRepo(repo)
+}
+
 // SetCallMediaHandler registers the dedicated binary media WebSocket handler.
 func (s *HTTPServer) SetCallMediaHandler(h http.HandlerFunc) {
 	s.callMedia = h

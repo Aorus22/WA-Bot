@@ -1,10 +1,15 @@
-import { Check, Paintbrush, LogOut, LogIn, Wifi, WifiOff, AlertCircle } from 'lucide-react'
+import { Check, Paintbrush, LogOut, LogIn, Wifi, WifiOff, AlertCircle, Sparkles, Mic, Loader2 } from 'lucide-react'
 import { themes } from '@/data/themes'
 import { useAppTheme, setAppTheme } from '@/components/AppThemeProvider'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
+import { api, type SettingsMap } from '@/lib/api'
+import { toast } from 'sonner'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
 import {
 	Select,
 	SelectContent,
@@ -42,6 +47,90 @@ export function SettingsPage() {
 	const [logoutOpen, setLogoutOpen] = useState(false)
 	const navigate = useNavigate()
 	const { isLoggedIn, isConnected, logout } = useAuth()
+
+	// ── AI + TTS settings ─────────────────────────────────────────────────────
+	const [settingsLoading, setSettingsLoading] = useState(true)
+	const [hasGeminiKey, setHasGeminiKey] = useState(false)
+	const [hasFishKey, setHasFishKey] = useState(false)
+
+	const [geminiApiKey, setGeminiApiKey] = useState('')
+	const [aiServerUrl, setAiServerUrl] = useState('')
+	const [savingAi, setSavingAi] = useState(false)
+
+	const [ttsProvider, setTtsProvider] = useState('')
+	const [ttsDefaultVoice, setTtsDefaultVoice] = useState('')
+	const [fishAudioKey, setFishAudioKey] = useState('')
+	const [fishAudioModel, setFishAudioModel] = useState('')
+	const [fishAudioVoiceId, setFishAudioVoiceId] = useState('')
+	const [savingTts, setSavingTts] = useState(false)
+
+	useEffect(() => {
+		let cancelled = false
+		api
+			.getSettings()
+			.then((res) => {
+				if (cancelled) return
+				setHasGeminiKey(Boolean(res.hasGeminiKey))
+				setHasFishKey(Boolean(res.hasFishKey))
+				setAiServerUrl(res.ai_server_url ?? '')
+				setTtsProvider(res.call_tts_provider ?? '')
+				setTtsDefaultVoice(res.call_tts_default_voice ?? '')
+				setFishAudioModel(res.call_tts_fish_audio_model ?? '')
+				setFishAudioVoiceId(res.call_tts_fish_audio_voice_id ?? '')
+			})
+			.catch(() => {
+				if (!cancelled) toast.error('Failed to load settings')
+			})
+			.finally(() => {
+				if (!cancelled) setSettingsLoading(false)
+			})
+		return () => {
+			cancelled = true
+		}
+	}, [])
+
+	const saveAiSettings = async () => {
+		setSavingAi(true)
+		try {
+			const data: SettingsMap = { ai_server_url: aiServerUrl.trim() }
+			// Only send the secret if the user typed a new value — blank keeps the stored one.
+			if (geminiApiKey.trim()) data.gemini_api_key = geminiApiKey.trim()
+			const res = await api.updateSettings(data)
+			setHasGeminiKey(Boolean(res.hasGeminiKey))
+			setAiServerUrl(res.ai_server_url ?? '')
+			setGeminiApiKey('')
+			toast.success('AI configuration saved')
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to save AI configuration')
+		} finally {
+			setSavingAi(false)
+		}
+	}
+
+	const saveTtsSettings = async () => {
+		setSavingTts(true)
+		try {
+			const data: SettingsMap = {
+				call_tts_provider: ttsProvider,
+				call_tts_default_voice: ttsDefaultVoice.trim(),
+				call_tts_fish_audio_model: fishAudioModel.trim(),
+				call_tts_fish_audio_voice_id: fishAudioVoiceId.trim(),
+			}
+			if (fishAudioKey.trim()) data.call_tts_fish_audio_key = fishAudioKey.trim()
+			const res = await api.updateSettings(data)
+			setHasFishKey(Boolean(res.hasFishKey))
+			setTtsProvider(res.call_tts_provider ?? '')
+			setTtsDefaultVoice(res.call_tts_default_voice ?? '')
+			setFishAudioModel(res.call_tts_fish_audio_model ?? '')
+			setFishAudioVoiceId(res.call_tts_fish_audio_voice_id ?? '')
+			setFishAudioKey('')
+			toast.success('Call TTS settings saved')
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to save TTS settings')
+		} finally {
+			setSavingTts(false)
+		}
+	}
 
 	useEffect(() => {
 		const handler = () => setCurrent(useAppTheme())
@@ -198,6 +287,132 @@ export function SettingsPage() {
 										Login
 									</button>
 								)}
+							</div>
+						</div>
+					</div>
+
+					<div className="space-y-4">
+						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">AI Configuration</h2>
+						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+							<div className="flex items-center gap-3 px-4 py-3">
+								<Sparkles className="h-4 w-4 text-muted-foreground" />
+								<div className="flex flex-col">
+									<span className="text-sm font-medium">Gemini + AI Server</span>
+									<span className="text-xs text-muted-foreground">Connect the bot to Gemini and your AI backend</span>
+								</div>
+							</div>
+							<div className="px-4 py-4 space-y-4">
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="gemini_api_key" className="text-xs font-medium">Gemini API Key</Label>
+									<Input
+										id="gemini_api_key"
+										type="password"
+										value={geminiApiKey}
+										onChange={(e) => setGeminiApiKey(e.target.value)}
+										placeholder={hasGeminiKey ? '••••••••' : 'Enter your Gemini API key'}
+										autoComplete="new-password"
+										disabled={settingsLoading}
+									/>
+									<p className="text-xs text-muted-foreground">Stored securely, leave blank to keep</p>
+								</div>
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="ai_server_url" className="text-xs font-medium">AI Server URL</Label>
+									<Input
+										id="ai_server_url"
+										type="url"
+										value={aiServerUrl}
+										onChange={(e) => setAiServerUrl(e.target.value)}
+										placeholder="http://localhost:8981"
+										disabled={settingsLoading}
+									/>
+								</div>
+								<div className="flex justify-end">
+									<Button size="sm" onClick={saveAiSettings} disabled={settingsLoading || savingAi}>
+										{savingAi && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+										{savingAi ? 'Saving...' : 'Save'}
+									</Button>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div className="space-y-4">
+						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Call TTS</h2>
+						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+							<div className="flex items-center gap-3 px-4 py-3">
+								<Mic className="h-4 w-4 text-muted-foreground" />
+								<div className="flex flex-col">
+									<span className="text-sm font-medium">Text-to-Speech Provider</span>
+									<span className="text-xs text-muted-foreground">Choose how incoming calls are spoken</span>
+								</div>
+							</div>
+							<div className="px-4 py-4 space-y-4">
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="call_tts_provider" className="text-xs font-medium">Provider</Label>
+									<Select
+										value={ttsProvider === '' ? 'none' : ttsProvider}
+										onValueChange={(v) => setTtsProvider(v === 'none' ? '' : v)}
+										disabled={settingsLoading}
+									>
+										<SelectTrigger className="w-full">
+											<SelectValue placeholder="Select a provider" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="none">Disabled</SelectItem>
+											<SelectItem value="fish">Fish Audio</SelectItem>
+											<SelectItem value="edge">Edge TTS</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="call_tts_default_voice" className="text-xs font-medium">Default Voice</Label>
+									<Input
+										id="call_tts_default_voice"
+										value={ttsDefaultVoice}
+										onChange={(e) => setTtsDefaultVoice(e.target.value)}
+										placeholder="e.g. en-US-JennyNeural"
+										disabled={settingsLoading}
+									/>
+								</div>
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="call_tts_fish_audio_key" className="text-xs font-medium">Fish Audio API Key</Label>
+									<Input
+										id="call_tts_fish_audio_key"
+										type="password"
+										value={fishAudioKey}
+										onChange={(e) => setFishAudioKey(e.target.value)}
+										placeholder={hasFishKey ? '••••••••' : 'Enter your Fish Audio API key'}
+										autoComplete="new-password"
+										disabled={settingsLoading}
+									/>
+									<p className="text-xs text-muted-foreground">Stored securely, leave blank to keep</p>
+								</div>
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="call_tts_fish_audio_model" className="text-xs font-medium">Fish Audio Model</Label>
+									<Input
+										id="call_tts_fish_audio_model"
+										value={fishAudioModel}
+										onChange={(e) => setFishAudioModel(e.target.value)}
+										placeholder="e.g. fishaudio/fish-speech-1.5"
+										disabled={settingsLoading}
+									/>
+								</div>
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="call_tts_fish_audio_voice_id" className="text-xs font-medium">Fish Audio Voice ID</Label>
+									<Input
+										id="call_tts_fish_audio_voice_id"
+										value={fishAudioVoiceId}
+										onChange={(e) => setFishAudioVoiceId(e.target.value)}
+										placeholder="Voice reference ID"
+										disabled={settingsLoading}
+									/>
+								</div>
+								<div className="flex justify-end">
+									<Button size="sm" onClick={saveTtsSettings} disabled={settingsLoading || savingTts}>
+										{savingTts && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+										{savingTts ? 'Saving...' : 'Save'}
+									</Button>
+								</div>
 							</div>
 						</div>
 					</div>

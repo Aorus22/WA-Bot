@@ -66,6 +66,8 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	apiKeyHandler := handlers.NewAPIKeyHandler(r.handler)
 	extCallHandler := handlers.NewExternalCallHandler(r.handler)
 
+	settingsHandler := handlers.NewSettingsHandler(r.handler, r.handler.GetSettingsRepo())
+
 	api := r.muxRouter.PathPrefix("/api").Subrouter()
 
 	api.HandleFunc("/send-message", messageHandler.SendMessage).Methods("POST", "OPTIONS")
@@ -99,6 +101,11 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/qr-code", r.qrHandler).Methods("GET")
 	api.HandleFunc("/logout", systemHandler.Logout).Methods("POST", "OPTIONS")
 	api.HandleFunc("/health", systemHandler.HealthCheck).Methods("GET")
+
+	// DB-backed TTS + AI settings. No auth middleware for now, matching
+	// /api/triggers and /api/cron.
+	api.HandleFunc("/settings", settingsHandler.Get).Methods("GET")
+	api.HandleFunc("/settings", settingsHandler.Update).Methods("PUT", "OPTIONS")
 
 	api.HandleFunc("/triggers", triggerHandler.GetTriggers).Methods("GET")
 	api.HandleFunc("/triggers", triggerHandler.CreateTrigger).Methods("POST", "OPTIONS")
