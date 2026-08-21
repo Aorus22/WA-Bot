@@ -9,6 +9,7 @@ frontend/
 tmp/
 .serena
 .claude
+.opencode/
 desktop/node_modules/
 desktop/dist/
 compiled/
