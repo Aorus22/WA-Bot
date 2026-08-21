@@ -171,11 +171,11 @@ export const ChatMessageItem = memo(({
 							)}
 						>
 							{isImage && isMedia && (
-							        <div className="mb-2 -mx-[14px] -mt-2 overflow-hidden relative z-10 w-full h-[240px] rounded-none">
+							        <div className="mb-2 -mx-[14px] -mt-2 overflow-hidden relative z-10 w-fit max-w-[calc(100%+28px)] max-h-[360px] rounded-none bg-transparent">
 							                <LazyMedia										src={getMediaUrl(message.mediaUrl)}
 										alt="Image"
-										className="w-full h-full object-cover object-center hover:scale-[1.02] transition-transform duration-500 cursor-zoom-in"
-										containerClassName="w-full h-full"
+										className="block w-auto h-auto max-w-full max-h-[360px] object-contain object-center hover:scale-[1.02] transition-transform duration-500 cursor-zoom-in"
+										containerClassName="w-fit h-auto min-h-0 bg-transparent"
 										loading="lazy"
 										onClick={(e) => {
 											e.stopPropagation()
