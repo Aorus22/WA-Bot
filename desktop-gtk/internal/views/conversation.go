@@ -51,7 +51,7 @@ type Conversation struct {
 	attachBtn        *gtk.MenuButton
 	sendBtn          *gtk.Button
 
-	callBtn     *gtk.Button // 1:1 audio call (header)
+	callBtn      *gtk.Button // 1:1 audio call (header)
 	videoCallBtn *gtk.Button // 1:1 video call (header)
 
 	replyTo  *api.Message // message being replied to (quote bar active)
@@ -364,6 +364,15 @@ func (cv *Conversation) loadInitial(chatID string) {
 			return false
 		})
 	}()
+}
+
+// Refresh reloads the newest page after an additive history import.
+func (cv *Conversation) Refresh() {
+	if !cv.hasChat {
+		return
+	}
+	cv.setLoading(true)
+	cv.loadInitial(cv.current.ID)
 }
 
 // onScroll reacts to scrollbar movement: near-top triggers older-page loads,

@@ -50,6 +50,7 @@ func (r *Router) SetCallMediaHandler(handler http.HandlerFunc) {
 func (r *Router) RegisterRoutes() *mux.Router {
 	messageHandler := handlers.NewMessageHandler(r.handler)
 	chatHandler := handlers.NewChatHandler(r.handler)
+	historySyncHandler := handlers.NewHistorySyncHandler(r.handler)
 	triggerHandler := handlers.NewTriggerHandler(r.handler)
 
 	// Type assertion needed because handler interface doesn't match concrete type directly in struct initialization
@@ -84,6 +85,12 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/chats/{id}/docs", chatHandler.GetChatDocs).Methods("GET")
 	api.HandleFunc("/chats/{id}/links", chatHandler.GetChatLinks).Methods("GET")
 	api.HandleFunc("/chats/{id}/read", chatHandler.MarkAsRead).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{id}/pin", chatHandler.PinChat).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{id}/archive", chatHandler.ArchiveChat).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{id}/mute", chatHandler.MuteChat).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{id}/messages/{messageId}/media", chatHandler.GetHistoricalMedia).Methods("GET")
+	api.HandleFunc("/history-sync", historySyncHandler.Start).Methods("POST", "OPTIONS")
+	api.HandleFunc("/history-sync/status", historySyncHandler.Status).Methods("GET")
 
 	api.HandleFunc("/chats/{chatId}/messages/{id}/delete", msgMgmtHandler.DeleteMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/edit", msgMgmtHandler.EditMessage).Methods("POST", "OPTIONS")

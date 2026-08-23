@@ -414,6 +414,23 @@ func (s *Store) RenameChat(chatID, name, avatar string) {
 	s.emit(Change{Kind: ChatsChanged})
 }
 
+// PatchChatState applies pin/archive/mute changes from REST or WebSocket.
+func (s *Store) PatchChatState(state api.ChatState) {
+	s.mu.Lock()
+	for i := range s.chats {
+		if s.chats[i].ID == state.ChatID {
+			s.chats[i].Archived = state.Archived
+			s.chats[i].PinnedAt = state.PinnedAt
+			s.chats[i].MuteMode = state.MuteMode
+			s.chats[i].MutedUntil = state.MutedUntil
+			break
+		}
+	}
+	s.chats = sortChats(s.chats)
+	s.mu.Unlock()
+	s.emit(Change{Kind: ChatsChanged})
+}
+
 // MarkRead zeroes the unread counter locally.
 func (s *Store) MarkRead(chatID string) {
 	s.mu.Lock()
@@ -507,6 +524,15 @@ func sortChats(chats []api.Chat) []api.Chat {
 	out := make([]api.Chat, len(chats))
 	copy(out, chats)
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].PinnedAt != nil && out[j].PinnedAt == nil {
+			return true
+		}
+		if out[i].PinnedAt == nil && out[j].PinnedAt != nil {
+			return false
+		}
+		if out[i].PinnedAt != nil && out[j].PinnedAt != nil && *out[i].PinnedAt != *out[j].PinnedAt {
+			return *out[i].PinnedAt > *out[j].PinnedAt
+		}
 		return out[i].LastTime > out[j].LastTime
 	})
 	return out

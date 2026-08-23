@@ -91,7 +91,7 @@ func (p *ChatsPane) Widget() gtk.Widgetter { return p.root }
 
 // SetDeps wires collaborators into all halves and activates row selection.
 func (p *ChatsPane) SetDeps(client *api.Client, st *store.Store, cache *media.Cache) {
-	p.list.SetDeps(client, st, cache)
+	p.list.SetDeps(client, st, cache, p.ShowToast)
 	p.list.SetActivateCallback(func(chatID string) {
 		if c, ok := st.Chat(chatID); ok {
 			p.OpenChat(c)
@@ -178,3 +178,6 @@ func (p *ChatsPane) Clear() {
 	p.showRight(rightNone)
 	p.infoPane.Reset()
 }
+
+// RefreshAfterHistory reloads the currently visible conversation.
+func (p *ChatsPane) RefreshAfterHistory() { p.conv.Refresh() }

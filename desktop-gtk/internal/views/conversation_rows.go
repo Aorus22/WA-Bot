@@ -256,7 +256,14 @@ func (cv *Conversation) pictureBody(m api.Message, w, h int) gtk.Widgetter {
 	pic.SetKeepAspectRatio(true)
 	pic.SetCanShrink(true)
 	pic.SetSizeRequest(w, h)
-	frame.SetChild(pic)
+	overlay := gtk.NewOverlay()
+	overlay.SetChild(pic)
+	unavailable := gtk.NewLabel("Media tidak lagi tersedia")
+	unavailable.AddCSSClass("dim-label")
+	unavailable.SetWrap(true)
+	unavailable.SetVisible(false)
+	overlay.AddOverlay(unavailable)
+	frame.SetChild(overlay)
 
 	rawURL := cv.client.MediaURL(m.MediaURL)
 	chat := cv.chatID()
@@ -268,6 +275,7 @@ func (cv *Conversation) pictureBody(m api.Message, w, h int) gtk.Widgetter {
 		cv.cache.ImageAsync(rawURL, func(tex *gdk.Texture, err error) {
 			if err != nil || tex == nil {
 				log.Printf("conversation: image load: %v", err)
+				unavailable.SetVisible(true)
 				return
 			}
 			if cv.chatID() != chat {

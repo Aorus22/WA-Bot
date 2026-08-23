@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
 type MessageStore struct {
 	db *sql.DB
 	mu sync.RWMutex
@@ -31,14 +32,18 @@ type Message struct {
 }
 
 type Chat struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Avatar   string `json:"avatar"`
-	LastMsg  string `json:"lastMsg"`
-	LastTime int64  `json:"lastTime"`
-	Unread   int    `json:"unread"`
-	IsActive bool   `json:"isActive"`
-	IsGroup  bool   `json:"isGroup"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Avatar     string `json:"avatar"`
+	LastMsg    string `json:"lastMsg"`
+	LastTime   int64  `json:"lastTime"`
+	Unread     int    `json:"unread"`
+	IsActive   bool   `json:"isActive"`
+	IsGroup    bool   `json:"isGroup"`
+	Archived   bool   `json:"archived"`
+	PinnedAt   *int64 `json:"pinnedAt"`
+	MuteMode   string `json:"muteMode"`
+	MutedUntil *int64 `json:"mutedUntil"`
 }
 
 type Contact struct {
@@ -85,6 +90,10 @@ func (s *MessageStore) init() error {
                         unread INTEGER DEFAULT 0,
                         is_active INTEGER DEFAULT 0,
                         is_group INTEGER DEFAULT 0,
+			archived INTEGER DEFAULT 0,
+			pinned_at INTEGER,
+			mute_mode TEXT DEFAULT 'off',
+			muted_until INTEGER,
                         created_at INTEGER DEFAULT (strftime('%s', 'now')),
                         updated_at INTEGER DEFAULT (strftime('%s', 'now'))
                 )`,
@@ -100,6 +109,7 @@ func (s *MessageStore) init() error {
                         media_url TEXT,
                         is_automatic INTEGER DEFAULT 0,
                         metadata TEXT,
+			raw_message BLOB,
                         created_at INTEGER DEFAULT (strftime('%s', 'now')),
                         FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
                 )`,
@@ -113,13 +123,48 @@ func (s *MessageStore) init() error {
                         lid TEXT PRIMARY KEY,
                         pn_jid TEXT
                 )`,
+		`CREATE TABLE IF NOT EXISTS history_staged_conversations (
+			chat_id TEXT PRIMARY KEY,
+			name TEXT,
+			unread_count INTEGER DEFAULT 0,
+			archived INTEGER DEFAULT 0,
+			pinned_at INTEGER,
+			mute_end INTEGER,
+			updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS history_staged_messages (
+			chat_id TEXT NOT NULL,
+			message_id TEXT NOT NULL,
+			timestamp INTEGER NOT NULL,
+			raw_message BLOB NOT NULL,
+			imported INTEGER DEFAULT 0,
+			staged_at INTEGER DEFAULT (strftime('%s', 'now')),
+			PRIMARY KEY (chat_id, message_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS history_sync_notifications (
+			id TEXT PRIMARY KEY,
+			processed_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS history_sync_runs (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			state TEXT NOT NULL DEFAULT 'idle',
+			chats_total INTEGER DEFAULT 0,
+			chats_processed INTEGER DEFAULT 0,
+			messages_added INTEGER DEFAULT 0,
+			errors_json TEXT DEFAULT '[]',
+			started_at INTEGER,
+			finished_at INTEGER,
+			last_run_at INTEGER
+		)`,
+		`INSERT OR IGNORE INTO history_sync_runs (id, state) VALUES (1, 'idle')`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_history_staged_pending ON history_staged_messages(chat_id, imported, timestamp DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS update_chat_timestamp
                         AFTER INSERT ON messages
                         BEGIN
                                 UPDATE chats SET last_msg = NEW.content, last_time = NEW.timestamp, updated_at = strftime('%s', 'now')
-                                WHERE id = NEW.chat_id;
+				WHERE id = NEW.chat_id AND COALESCE(last_time, 0) <= NEW.timestamp;
                         END`,
 	}
 
@@ -133,7 +178,23 @@ func (s *MessageStore) init() error {
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN is_automatic INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN sender_name TEXT")
 	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN unread INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN archived INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN pinned_at INTEGER")
+	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN mute_mode TEXT DEFAULT 'off'")
+	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN muted_until INTEGER")
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN raw_message BLOB")
 	_, _ = s.db.Exec("UPDATE chats SET unread = 0 WHERE unread IS NULL")
+	_, _ = s.db.Exec("UPDATE chats SET archived = 0 WHERE archived IS NULL")
+	_, _ = s.db.Exec("UPDATE chats SET mute_mode = 'off' WHERE mute_mode IS NULL OR mute_mode = ''")
+	// Older databases already have the unconditional version of this trigger.
+	// Recreate it so importing old history can never move a chat preview backwards.
+	_, _ = s.db.Exec("DROP TRIGGER IF EXISTS update_chat_timestamp")
+	_, _ = s.db.Exec(`CREATE TRIGGER update_chat_timestamp
+		AFTER INSERT ON messages
+		BEGIN
+			UPDATE chats SET last_msg = NEW.content, last_time = NEW.timestamp, updated_at = strftime('%s', 'now')
+			WHERE id = NEW.chat_id AND COALESCE(last_time, 0) <= NEW.timestamp;
+		END`)
 
 	// Migration: Ensure favorite_stickers has the 'id' column (handling old implementation)
 	var tableExists bool
@@ -159,7 +220,7 @@ func (s *MessageStore) init() error {
 		}
 
 		if !idExists {
-			// Easiest fix: drop and recreate since it's a new feature and data is transient  
+			// Easiest fix: drop and recreate since it's a new feature and data is transient
 			_, _ = s.db.Exec("DROP TABLE favorite_stickers")
 			_, _ = s.db.Exec(`CREATE TABLE favorite_stickers (
                                 id TEXT PRIMARY KEY,
@@ -492,18 +553,26 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
                         c.unread,
                         c.is_active,
                         c.is_group,
+			c.archived,
+			c.pinned_at,
+			c.mute_mode,
+			c.muted_until,
                         c.id as original_id
                     FROM chats c
                 ),
                 grouped_chats AS (
                     SELECT 
                         target_id, 
-                        COALESCE(MAX(CASE WHEN name != target_id AND name != '' AND name NOT LIKE '%@%' THEN name END), MAX(name)) as name, 
+						COALESCE(MAX(CASE WHEN name != target_id AND name != '' AND name NOT LIKE '%@%' THEN name END), MAX(name), target_id) as name,
                         COALESCE(MAX(CASE WHEN avatar != '' THEN avatar END), '') as avatar,
                         MAX(last_time) as last_time,
                         SUM(unread) as unread,
                         MAX(is_active) as is_active,
-                        MAX(is_group) as is_group
+			MAX(is_group) as is_group,
+			MAX(archived) as archived,
+			MAX(pinned_at) as pinned_at,
+			COALESCE(MAX(CASE WHEN mute_mode != 'off' THEN mute_mode END), 'off') as mute_mode,
+			MAX(muted_until) as muted_until
                     FROM normalized_chats
                     GROUP BY target_id
                 )
@@ -515,7 +584,11 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
                     g.last_time,
                     g.unread,
                     g.is_active,
-                    g.is_group
+			g.is_group,
+			g.archived,
+			g.pinned_at,
+			g.mute_mode,
+			g.muted_until
                 FROM grouped_chats g
                 ORDER BY g.last_time DESC
         `
@@ -529,7 +602,8 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 	var chats []Chat
 	for rows.Next() {
 		var chat Chat
-		var isActive, isGroup int
+		var isActive, isGroup, archived int
+		var pinnedAt, mutedUntil sql.NullInt64
 		err := rows.Scan(
 			&chat.ID,
 			&chat.Name,
@@ -539,12 +613,27 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			&chat.Unread,
 			&isActive,
 			&isGroup,
+			&archived,
+			&pinnedAt,
+			&chat.MuteMode,
+			&mutedUntil,
 		)
 		if err != nil {
 			return nil, err
 		}
 		chat.IsActive = isActive == 1
 		chat.IsGroup = isGroup == 1
+		chat.Archived = archived == 1
+		if pinnedAt.Valid && pinnedAt.Int64 > 0 {
+			v := pinnedAt.Int64
+			chat.PinnedAt = &v
+		}
+		if chat.MuteMode == "until" && mutedUntil.Valid && mutedUntil.Int64 > time.Now().UnixMilli() {
+			v := mutedUntil.Int64
+			chat.MutedUntil = &v
+		} else if chat.MuteMode == "until" {
+			chat.MuteMode = "off"
+		}
 		chats = append(chats, chat)
 	}
 

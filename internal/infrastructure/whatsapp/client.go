@@ -9,6 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/purpshell/meowcaller"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -48,6 +49,10 @@ func NewWhatsAppClient(dbURL string, logLevel string, dbLog waLog.Logger) (*What
 		return nil, err
 	}
 	client := whatsmeow.NewClient(deviceStore, waLog.Stdout("Client", logLevel, true))
+	// Pairing history is downloaded by our staging service. Keeping this true
+	// prevents whatsmeow from dispatching it straight into the visible message
+	// pipeline before the user clicks Sync in Settings.
+	client.ManualHistorySyncDownload = true
 
 	w := &WhatsAppClient{
 		client:    client,
@@ -465,6 +470,21 @@ func (w *WhatsAppClient) Logout() error {
 
 func (w *WhatsAppClient) GetClient() interface{} {
 	return w.client
+}
+
+// CoreClient exposes the typed client for history parsing and peer requests.
+func (w *WhatsAppClient) CoreClient() *whatsmeow.Client { return w.client }
+
+func (w *WhatsAppClient) SetChatPinned(ctx context.Context, jid waTypes.JID, pinned bool) error {
+	return w.client.SendAppState(ctx, appstate.BuildPin(jid, pinned))
+}
+
+func (w *WhatsAppClient) SetChatArchived(ctx context.Context, jid waTypes.JID, archived bool, lastMessageTimestamp time.Time, lastMessageKey *waCommon.MessageKey) error {
+	return w.client.SendAppState(ctx, appstate.BuildArchive(jid, archived, lastMessageTimestamp, lastMessageKey))
+}
+
+func (w *WhatsAppClient) SetChatMuted(ctx context.Context, jid waTypes.JID, muted bool, duration time.Duration) error {
+	return w.client.SendAppState(ctx, appstate.BuildMute(jid, muted, duration))
 }
 
 // GetCallClient returns the meowcaller.Client wrapping the same whatsmeow.Client.

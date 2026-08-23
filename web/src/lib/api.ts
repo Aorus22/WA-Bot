@@ -50,6 +50,84 @@ export type Chat = {
 	unread: number
 	isActive: boolean
 	isGroup: boolean
+	archived: boolean
+	pinnedAt: number | null
+	muteMode: "off" | "until" | "forever"
+	mutedUntil: number | null
+}
+
+/**
+ * API responses can come from an older database where nullable chat columns
+ * were serialized as JSON null. Keep that legacy data at the API boundary so
+ * UI components can safely treat chat fields as non-nullable.
+ */
+export function normalizeChat(raw: Partial<Chat> | null | undefined): Chat {
+	const value = raw ?? {}
+	const pinnedAt = value.pinnedAt == null ? null : Number(value.pinnedAt)
+	const mutedUntil = value.mutedUntil == null ? null : Number(value.mutedUntil)
+	return {
+		id: typeof value.id === "string" ? value.id : String(value.id ?? ""),
+		name: typeof value.name === "string" ? value.name : "",
+		avatar: typeof value.avatar === "string" ? value.avatar : "",
+		lastMsg: typeof value.lastMsg === "string" ? value.lastMsg : "",
+		lastTime: Number.isFinite(Number(value.lastTime)) ? Number(value.lastTime) : 0,
+		unread: Number.isFinite(Number(value.unread)) ? Number(value.unread) : 0,
+		isActive: Boolean(value.isActive),
+		isGroup: Boolean(value.isGroup),
+		archived: Boolean(value.archived),
+		pinnedAt: pinnedAt != null && Number.isFinite(pinnedAt) ? pinnedAt : null,
+		muteMode: value.muteMode === "until" || value.muteMode === "forever" ? value.muteMode : "off",
+		mutedUntil: mutedUntil != null && Number.isFinite(mutedUntil) ? mutedUntil : null,
+	}
+}
+
+export type ChatState = Pick<Chat, "archived" | "pinnedAt" | "muteMode" | "mutedUntil"> & {
+	chatId: string
+}
+
+export type HistorySyncError = {
+	chatId?: string
+	message: string
+}
+
+export type HistorySyncStatus = {
+	state: "idle" | "running" | "completed" | "partial" | "failed"
+	pendingChats: number
+	pendingMessages: number
+	chatsTotal: number
+	chatsProcessed: number
+	messagesAdded: number
+	errors: HistorySyncError[]
+	startedAt: number | null
+	finishedAt: number | null
+	lastRunAt: number | null
+}
+
+export function normalizeHistorySyncStatus(raw: Partial<HistorySyncStatus> | null | undefined): HistorySyncStatus {
+	const value = raw ?? {}
+	const states: HistorySyncStatus["state"][] = ["idle", "running", "completed", "partial", "failed"]
+	const state = states.includes(value.state as HistorySyncStatus["state"])
+		? value.state as HistorySyncStatus["state"]
+		: "idle"
+	const errors = Array.isArray(value.errors)
+		? value.errors.filter((error): error is HistorySyncError => Boolean(error) && typeof error === "object")
+			.map((error) => ({
+				chatId: typeof error.chatId === "string" ? error.chatId : undefined,
+				message: typeof error.message === "string" ? error.message : "Unknown history sync error",
+			}))
+		: []
+	return {
+		state,
+		pendingChats: Number(value.pendingChats) || 0,
+		pendingMessages: Number(value.pendingMessages) || 0,
+		chatsTotal: Number(value.chatsTotal) || 0,
+		chatsProcessed: Number(value.chatsProcessed) || 0,
+		messagesAdded: Number(value.messagesAdded) || 0,
+		errors,
+		startedAt: value.startedAt == null ? null : Number(value.startedAt),
+		finishedAt: value.finishedAt == null ? null : Number(value.finishedAt),
+		lastRunAt: value.lastRunAt == null ? null : Number(value.lastRunAt),
+	}
 }
 
 export type Contact = {
@@ -192,6 +270,15 @@ class ApiClient {	private baseUrl: string
 		this.baseUrl = url
 	}
 
+	mediaURL(value: string | undefined): string | undefined {
+		if (!value) return undefined
+		if (value.startsWith("http://") || value.startsWith("https://")) return value
+		if (value === "/api" || value.startsWith("/api/")) {
+			return this.baseUrl.replace(/\/api\/?$/, "") + value
+		}
+		return this.baseUrl + (value.startsWith("/") ? value : `/${value}`)
+	}
+
 	private async request<T>(
 		endpoint: string,
 		options?: RequestInit
@@ -215,13 +302,47 @@ class ApiClient {	private baseUrl: string
 	}
 
 	async getChats(): Promise<Chat[]> {
-		return this.request<Chat[]>("/chats")
+		const raw = await this.request<unknown[]>("/chats")
+		return (Array.isArray(raw) ? raw : [])
+			.map((chat) => normalizeChat(chat as Partial<Chat>))
+			.filter((chat) => chat.id.length > 0)
 	}
 
 	async markAsRead(chatId: string): Promise<{ status: string }> {
 		return this.request<{ status: string }>(`/chats/${chatId}/read`, {
 			method: "POST",
 		})
+	}
+
+	async pinChat(chatId: string, pinned: boolean): Promise<ChatState> {
+		return this.request<ChatState>(`/chats/${encodeURIComponent(chatId)}/pin`, {
+			method: "POST",
+			body: JSON.stringify({ pinned }),
+		})
+	}
+
+	async archiveChat(chatId: string, archived: boolean): Promise<ChatState> {
+		return this.request<ChatState>(`/chats/${encodeURIComponent(chatId)}/archive`, {
+			method: "POST",
+			body: JSON.stringify({ archived }),
+		})
+	}
+
+	async muteChat(chatId: string, mode: "off" | "8h" | "1w" | "forever"): Promise<ChatState> {
+		return this.request<ChatState>(`/chats/${encodeURIComponent(chatId)}/mute`, {
+			method: "POST",
+			body: JSON.stringify({ mode }),
+		})
+	}
+
+	async getHistorySyncStatus(): Promise<HistorySyncStatus> {
+		const raw = await this.request<unknown>("/history-sync/status")
+		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
+	}
+
+	async startHistorySync(): Promise<HistorySyncStatus> {
+		const raw = await this.request<unknown>("/history-sync", { method: "POST" })
+		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
 	}
 
 	async getMessages(chatId: string, limit = 100, before?: number, after?: number): Promise<Message[]> {

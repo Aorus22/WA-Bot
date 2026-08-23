@@ -101,6 +101,13 @@ func (s *HTTPServer) SetSettingsRepo(repo repository.SettingsRepository) {
 	s.handler.SetSettingsRepo(repo)
 }
 
+func (s *HTTPServer) SetHistorySync(service interface {
+	Start() (repository.HistorySyncStatus, error)
+	Status() repository.HistorySyncStatus
+}) {
+	s.handler.SetHistorySync(service)
+}
+
 // SetCallMediaHandler registers the dedicated binary media WebSocket handler.
 func (s *HTTPServer) SetCallMediaHandler(h http.HandlerFunc) {
 	s.callMedia = h

@@ -1,11 +1,12 @@
-import { Check, Paintbrush, LogOut, LogIn, Wifi, WifiOff, AlertCircle, Sparkles, Mic, Loader2 } from 'lucide-react'
+import { Check, Paintbrush, LogOut, LogIn, Wifi, WifiOff, AlertCircle, Sparkles, Mic, Loader2, History } from 'lucide-react'
 import { themes } from '@/data/themes'
 import { useAppTheme, setAppTheme } from '@/components/AppThemeProvider'
 import { cn } from '@/lib/utils'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { api, type SettingsMap } from '@/lib/api'
+import { api, type HistorySyncStatus, type SettingsMap } from '@/lib/api'
+import { useChatStore } from '@/stores/chatStore'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -63,6 +64,52 @@ export function SettingsPage() {
 	const [fishAudioModel, setFishAudioModel] = useState('')
 	const [fishAudioVoiceId, setFishAudioVoiceId] = useState('')
 	const [savingTts, setSavingTts] = useState(false)
+	const [historyStatus, setHistoryStatus] = useState<HistorySyncStatus | null>(null)
+	const [historyLoading, setHistoryLoading] = useState(true)
+	const historyWasRunning = useRef(false)
+
+	const loadHistoryStatus = useCallback(async () => {
+		try {
+			const status = await api.getHistorySyncStatus()
+			setHistoryStatus(status)
+			if (historyWasRunning.current && status.state !== 'running') {
+				const chats = await api.getChats()
+				useChatStore.getState().setChats(chats || [])
+				useChatStore.getState().invalidateMessages()
+				toast.success(`History sync added ${status.messagesAdded} messages`)
+			}
+			historyWasRunning.current = status.state === 'running'
+		} catch {
+			// The card remains available and will retry when the user clicks it.
+		} finally {
+			setHistoryLoading(false)
+		}
+	}, [])
+
+	useEffect(() => {
+		void loadHistoryStatus()
+	}, [loadHistoryStatus])
+
+	useEffect(() => {
+		if (historyStatus?.state !== 'running') return
+		const timer = window.setInterval(() => void loadHistoryStatus(), 1000)
+		return () => window.clearInterval(timer)
+	}, [historyStatus?.state, loadHistoryStatus])
+
+	const startHistorySync = async () => {
+		setHistoryLoading(true)
+		try {
+			const status = await api.startHistorySync()
+			historyWasRunning.current = true
+			setHistoryStatus(status)
+			toast.success('History sync started')
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to start history sync')
+			await loadHistoryStatus()
+		} finally {
+			setHistoryLoading(false)
+		}
+	}
 
 	useEffect(() => {
 		let cancelled = false
@@ -253,7 +300,7 @@ export function SettingsPage() {
 
 					<div className="space-y-4">
 						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Account</h2>
-						<div className="bg-card rounded-lg border overflow-hidden">
+						<div className="bg-card rounded-lg border divide-y overflow-hidden">
 							<div className="flex items-center justify-between px-4 py-3">
 								<div className="flex items-center gap-3">
 									{isConnected ? (
@@ -286,6 +333,49 @@ export function SettingsPage() {
 										<LogIn className="h-3.5 w-3.5" />
 										Login
 									</button>
+								)}
+							</div>
+							<div className="px-4 py-4 space-y-3">
+								<div className="flex items-start justify-between gap-4">
+									<div className="flex items-start gap-3">
+										<History className="h-4 w-4 mt-0.5 text-muted-foreground" />
+										<div className="flex flex-col gap-0.5">
+											<span className="text-sm font-medium">Chat history</span>
+											<span className="text-xs text-muted-foreground">
+												Add up to 50 older messages per chat. Existing messages are never removed.
+											</span>
+										</div>
+									</div>
+									<Button
+										size="sm"
+										onClick={startHistorySync}
+										disabled={!isConnected || historyLoading || historyStatus?.state === 'running'}
+									>
+										{historyStatus?.state === 'running' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+										{historyStatus?.state === 'running' ? 'Syncing…' : 'Sync 50 per chat'}
+									</Button>
+								</div>
+								{historyStatus && (
+									<div className="space-y-2 text-xs text-muted-foreground">
+										<div className="flex flex-wrap gap-x-4 gap-y-1">
+											<span>Status: <b className="text-foreground capitalize">{historyStatus.state}</b></span>
+											<span>Staged: {historyStatus.pendingMessages} messages in {historyStatus.pendingChats} chats</span>
+											<span>Added: {historyStatus.messagesAdded}</span>
+										</div>
+										{historyStatus.state === 'running' && historyStatus.chatsTotal > 0 && (
+											<div className="h-1.5 rounded-full bg-muted overflow-hidden">
+												<div
+													className="h-full bg-[#00a884] transition-all"
+													style={{ width: `${Math.round(historyStatus.chatsProcessed / historyStatus.chatsTotal * 100)}%` }}
+												/>
+											</div>
+										)}
+						{(historyStatus.errors ?? []).length > 0 && (
+							<p className="text-destructive">
+								{(historyStatus.errors ?? []).length} chat(s) had errors. Last: {historyStatus.errors?.at(-1)?.message}
+											</p>
+										)}
+									</div>
 								)}
 							</div>
 						</div>

@@ -33,6 +33,8 @@ const (
 	EventMessageDeleted = "message_deleted"
 	EventMessageEdited  = "message_edited"
 	EventChatNameUpdate = "chat_name_update"
+	EventChatState      = "chat_state"
+	EventChatsChanged   = "chats_changed"
 
 	EventCallIncoming = "call.incoming"
 	EventCallState    = "call.state"
