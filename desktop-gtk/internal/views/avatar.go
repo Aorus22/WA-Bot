@@ -24,6 +24,11 @@ func newChatAvatar(client *api.Client, cache *media.Cache, stale func() bool, c 
 		return av
 	}
 	url := client.AvatarURL(c.ID)
+	// Memory-cache hit: apply synchronously so rebuilt rows never blink.
+	if tex := cache.MemoryTexture(url); tex != nil {
+		av.SetCustomImage(tex)
+		return av
+	}
 	cache.ImageAsync(url, func(tex *gdk.Texture, err error) {
 		if err != nil || tex == nil || stale() {
 			return
