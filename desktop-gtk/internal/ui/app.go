@@ -47,7 +47,8 @@ type App struct {
 	wsSock  *ws.Client
 	login   *views.Login
 	pane    *views.ChatsPane
-	dash    *views.Dashboard
+	calls   *views.Calls
+	callWin *views.CallWindow
 	setting *views.Settings
 
 	sessionUp bool // WhatsApp session believed connected
@@ -94,11 +95,11 @@ func (a *App) onActivate() {
 
 	a.store = store.New()
 	a.pane = views.NewChatsPane()
-	a.dash = views.NewDashboard()
+	a.calls = views.NewCalls()
 	a.setting = views.NewSettings(a.cfg.UserDataDir, a.cfg.Manager)
 
-	w.AddDashboard(a.dash)
 	w.AddChats(a.pane)
+	w.AddCalls(a.calls)
 	w.AddSettings(a.setting)
 
 	a.login = views.NewLogin()
@@ -163,7 +164,9 @@ func (a *App) awaitBackend() {
 func (a *App) bootstrapViews(port int) {
 	a.cache = media.NewCache(a.client, a.cfg.UserDataDir)
 	a.pane.SetDeps(a.client, a.store, a.cache)
-	a.dash.SetClient(a.client)
+	a.calls.SetDeps(a.client, a.store, a.pane.ShowToast)
+	a.calls.SetOpenChatCallback(a.openChatByID)
+	a.callWin = views.NewCallWindow(a.client, a.store)
 	a.setting.SetBackendPort(port)
 	a.wireThemePicker()
 
@@ -252,6 +255,34 @@ func (a *App) startWebSocket(port int) {
 		a.store.RenameChat(n.ChatID, n.Name, n.Avatar)
 	})
 
+	// Call events: drive the call-mode window and refresh the history page.
+	// GTK has no local call audio; an incoming ring offers Decline only.
+	handleCallState := func(payload json.RawMessage) {
+		var cs views.CallState
+		if err := ws.Decode(payload, &cs); err != nil || cs.ID == "" {
+			return
+		}
+		glib.IdleAdd(func() bool {
+			a.callWin.Update(cs)
+			return false
+		})
+	}
+	a.wsSock.On(ws.EventCallIncoming, handleCallState)
+	a.wsSock.On(ws.EventCallState, handleCallState)
+	a.wsSock.On(ws.EventCallEnded, func(payload json.RawMessage) {
+		var e struct {
+			ID string `json:"id"`
+		}
+		if err := ws.Decode(payload, &e); err != nil {
+			return
+		}
+		glib.IdleAdd(func() bool {
+			a.callWin.Ended(e.ID)
+			a.calls.Refresh()
+			return false
+		})
+	})
+
 	a.wsSock.On(ws.EventAuthSuccess, func(_ json.RawMessage) {
 		glib.IdleAdd(func() bool {
 			log.Printf("ws: auth_success — session established")
@@ -294,6 +325,15 @@ func (a *App) startWebSocket(port int) {
 			return false
 		})
 	})
+}
+
+// openChatByID switches to the chats page and opens the given chat
+// (wired to the Calls page "View chat" action).
+func (a *App) openChatByID(chatID string) {
+	a.window.SwitchTo("chats")
+	if chat, ok := a.store.Chat(chatID); ok {
+		a.pane.OpenChat(chat)
+	}
 }
 
 // fetchChats refreshes the chat list snapshot into the store.
@@ -426,7 +466,7 @@ func (a *App) onLogoutClicked() {
 	}()
 }
 
-// registerShortcuts wires Ctrl+Q (quit) and Ctrl+1..3 page switching.
+// registerShortcuts wires Ctrl+Q (quit) and Ctrl+1..2, Ctrl+, page switching.
 func (a *App) registerShortcuts() {
 	quitAction := gio.NewSimpleAction("quit", nil)
 	quitAction.ConnectActivate(func(p *glib.Variant) { a.adwApp.Quit() })
@@ -438,8 +478,8 @@ func (a *App) registerShortcuts() {
 		page  string
 		accel string
 	}{
-		{"dashboard", "dashboard", "<Primary>1"},
-		{"chats", "chats", "<Primary>2"},
+		{"chats", "chats", "<Primary>1"},
+		{"calls", "calls", "<Primary>2"},
 		{"settings", "settings", "<Primary>comma"},
 	}
 	for _, sw := range switches {

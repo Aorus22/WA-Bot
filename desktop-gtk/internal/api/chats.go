@@ -202,6 +202,34 @@ func (c *Client) SendText(ctx context.Context, target, message string) error {
 	return c.doJSON(ctx, "POST", "/api/send-message", body, nil)
 }
 
+// contentRequest is the body shape for the reply and edit endpoints.
+type contentRequest struct {
+	Content string `json:"content"`
+}
+
+// ReplyMessage sends a text message quoting msgID
+// (POST /api/chats/{chatId}/messages/{msgId}/reply). The backend broadcasts a
+// new_message echo for the sent reply, which confirms our optimistic temp row.
+func (c *Client) ReplyMessage(ctx context.Context, chatID, msgID, content string) error {
+	path := "/api/chats/" + url.PathEscape(chatID) + "/messages/" + url.PathEscape(msgID) + "/reply"
+	return c.doJSON(ctx, "POST", path, contentRequest{Content: content}, nil)
+}
+
+// EditMessage edits the text of an own message
+// (POST /api/chats/{chatId}/messages/{msgId}/edit).
+func (c *Client) EditMessage(ctx context.Context, chatID, msgID, content string) error {
+	path := "/api/chats/" + url.PathEscape(chatID) + "/messages/" + url.PathEscape(msgID) + "/edit"
+	return c.doJSON(ctx, "POST", path, contentRequest{Content: content}, nil)
+}
+
+// DeleteMessage revokes a message for everyone
+// (POST /api/chats/{chatId}/messages/{msgId}/delete). The backend also
+// deletes it from its DB and broadcasts message_deleted.
+func (c *Client) DeleteMessage(ctx context.Context, chatID, msgID string) error {
+	path := "/api/chats/" + url.PathEscape(chatID) + "/messages/" + url.PathEscape(msgID) + "/delete"
+	return c.doJSON(ctx, "POST", path, map[string]any{}, nil)
+}
+
 // SendMedia sends a media file (image/document) to the given chat.
 // mediaType must be one of "image", "video", "document" (per backend validation).
 // filePath is a local file path; the file is uploaded as multipart/form-data.

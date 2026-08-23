@@ -9,6 +9,10 @@ import (
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
+	pango "github.com/diamondburned/gotk4/pkg/pango"
+
+	"wa-bot-desktop/internal/api"
+	"wa-bot-desktop/internal/store"
 )
 
 const (
@@ -75,7 +79,117 @@ func (cv *Conversation) buildComposer() gtk.Widgetter {
 	row.Append(cv.sendBtn)
 
 	frame.SetChild(row)
-	return frame
+
+	cv.replyBar, cv.replyWho, cv.replyTxt = cv.buildContextBar("mail-reply-sender-symbolic", cv.cancelReply)
+	cv.editBar, _, cv.editTxt = cv.buildContextBar("document-edit-symbolic", cv.cancelEdit)
+
+	wrap := gtk.NewBox(gtk.OrientationVertical, 0)
+	wrap.Append(cv.replyBar)
+	wrap.Append(cv.editBar)
+	wrap.Append(frame)
+	return wrap
+}
+
+// buildContextBar constructs the hidden quote bar shown above the input frame
+// while composing a reply or an edit. Returns the bar plus its who/text labels.
+func (cv *Conversation) buildContextBar(icon string, closeFn func()) (*gtk.Box, *gtk.Label, *gtk.Label) {
+	bar := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	bar.AddCSSClass("context-bar")
+	bar.SetMarginStart(10)
+	bar.SetMarginEnd(10)
+	bar.SetMarginBottom(4)
+	bar.SetVisible(false)
+
+	img := gtk.NewImageFromIconName(icon)
+	img.SetPixelSize(16)
+	img.SetVAlign(gtk.AlignStart)
+	bar.Append(img)
+
+	col := gtk.NewBox(gtk.OrientationVertical, 0)
+	col.SetHExpand(true)
+	who := gtk.NewLabel("")
+	who.AddCSSClass("context-who")
+	who.SetXAlign(0)
+	col.Append(who)
+	txt := gtk.NewLabel("")
+	txt.AddCSSClass("context-text")
+	txt.SetEllipsize(pango.EllipsizeEnd)
+	txt.SetXAlign(0)
+	col.Append(txt)
+	bar.Append(col)
+
+	close := gtk.NewButtonFromIconName("window-close-symbolic")
+	close.AddCSSClass("flat")
+	close.SetVAlign(gtk.AlignStart)
+	close.SetTooltipText("Batal")
+	close.ConnectClicked(closeFn)
+	bar.Append(close)
+
+	return bar, who, txt
+}
+
+// StartReply primes the composer to send a quoted reply to m.
+func (cv *Conversation) StartReply(m api.Message) {
+	if !cv.hasChat {
+		return
+	}
+	cv.cancelEdit()
+	cv.replyTo = &m
+	cv.replyWho.SetText("Membalas " + replyTargetName(cv.current, m))
+	cv.replyTxt.SetText(oneLine(msgPreview(m)))
+	cv.replyBar.SetVisible(true)
+	cv.composerTextView.GrabFocus()
+}
+
+// StartEdit loads own message m into the composer for editing.
+func (cv *Conversation) StartEdit(m api.Message) {
+	if !cv.hasChat {
+		return
+	}
+	cv.cancelReply()
+	cv.editing = &m
+	cv.editTxt.SetText(oneLine(msgPreview(m)))
+	cv.editBar.SetVisible(true)
+	cv.composerTextView.Buffer().SetText(m.Content)
+	cv.composerTextView.GrabFocus()
+}
+
+func (cv *Conversation) cancelReply() {
+	cv.replyTo = nil
+	cv.replyBar.SetVisible(false)
+}
+
+// cancelEdit exits edit mode and restores an empty composer. No-op when no
+// edit is active so switching to reply mode never wipes a draft.
+func (cv *Conversation) cancelEdit() {
+	if cv.editing == nil {
+		return
+	}
+	cv.editing = nil
+	cv.editBar.SetVisible(false)
+	cv.composerTextView.Buffer().SetText("")
+}
+
+// resetReplyEdit drops reply/edit state without touching draft text (chat switch).
+func (cv *Conversation) resetReplyEdit() {
+	cv.replyTo = nil
+	cv.replyBar.SetVisible(false)
+	cv.editing = nil
+	cv.editBar.SetVisible(false)
+}
+
+// replyTargetName picks the display name shown in the reply quote bar.
+func replyTargetName(c api.Chat, m api.Message) string {
+	if m.From == store.OutgoingFrom {
+		return "Anda"
+	}
+	if n := m.SenderName; n != "" {
+		return n
+	}
+	if n := displayName(c); n != "" {
+		return n
+	}
+	return shortJID(m.From)
 }
 
 // buildAttachPopover builds the image/video/document picker menu.
@@ -201,7 +315,8 @@ func (cv *Conversation) onComposerChanged() {
 		return false
 	})
 }
-// onSend performs an optimistic text send.
+// onSend sends composer text: an edit of an own message when edit mode is
+// active, otherwise a plain text or quoted-reply message (optimistic).
 func (cv *Conversation) onSend() {
 	if !cv.hasChat {
 		return
@@ -212,6 +327,31 @@ func (cv *Conversation) onSend() {
 	}
 	id := cv.current.ID
 
+	if cv.editing != nil {
+		msg := *cv.editing
+		cv.cancelEdit() // also clears the composer
+		cv.store.EditMessage(id, msg.ID, text)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if err := cv.client.EditMessage(ctx, id, msg.ID, text); err != nil {
+				glib.IdleAdd(func() bool {
+					cv.store.EditMessage(id, msg.ID, msg.Content) // revert
+					if cv.toast != nil {
+						cv.toast("Gagal mengedit pesan: " + err.Error())
+					}
+					return false
+				})
+			}
+		}()
+		return
+	}
+
+	ref := cv.replyTo
+	if ref != nil {
+		cv.cancelReply()
+	}
+
 	temp := cv.store.AddOutgoingTemp(id, text, "text")
 	cv.composerTextView.Buffer().SetText("")
 	cv.stopTypingIndicator(id)
@@ -220,7 +360,13 @@ func (cv *Conversation) onSend() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		if err := cv.client.SendText(ctx, id, text); err != nil {
+		var err error
+		if ref != nil {
+			err = cv.client.ReplyMessage(ctx, id, ref.ID, text)
+		} else {
+			err = cv.client.SendText(ctx, id, text)
+		}
+		if err != nil {
 			glib.IdleAdd(func() bool {
 				cv.store.PatchTempStatus(id, temp.ID, "failed")
 				if cv.toast != nil {
@@ -229,6 +375,47 @@ func (cv *Conversation) onSend() {
 				return false
 			})
 		}
+	}()
+}
+
+// startCall places an outgoing audio/video call via the backend. The GTK app
+// has no local call media; the peer is rung (bot/TTS calls answer server-side).
+func (cv *Conversation) startCall(callType string) {
+	if !cv.hasChat || cv.current.IsGroup {
+		return
+	}
+	target := cv.current.ID
+	name := displayName(cv.current)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := cv.client.CreateCall(ctx, target, callType); err != nil {
+			glib.IdleAdd(func() bool {
+				if cv.toast == nil {
+					return false
+				}
+				switch {
+				case strings.Contains(err.Error(), "call_already_active"):
+					cv.toast("Masih ada panggilan aktif")
+				case strings.Contains(err.Error(), "whatsapp_not_connected"):
+					cv.toast("WhatsApp belum terhubung")
+				default:
+					cv.toast("Gagal memanggil " + name + ": " + err.Error())
+				}
+				return false
+			})
+			return
+		}
+		glib.IdleAdd(func() bool {
+			if cv.toast != nil {
+				if callType == "video" {
+					cv.toast("Memanggil video " + name + "…")
+				} else {
+					cv.toast("Memanggil " + name + "…")
+				}
+			}
+			return false
+		})
 	}()
 }
 

@@ -34,6 +34,87 @@ const widgetCSS = `
 }
 .quote-who { font-size: 11px; font-weight: bold; color: @accent_bg_color; }
 .quote-text { font-size: 11px; }
+.context-bar {
+  background: @card_bg_color;
+  border: 1px solid @wa_border_color;
+  border-radius: 10px;
+  padding: 5px 8px;
+}
+.context-bar .context-who { font-size: 11px; font-weight: bold; color: @accent_bg_color; }
+.context-bar .context-text { font-size: 12px; }
+.call-missed { color: @error_fg_color; }
+
+/* Calls page (web CallHistoryPage parity) */
+.call-chip {
+  border-radius: 9999px;
+  padding: 5px 14px;
+  font-weight: 600;
+}
+.call-chip:checked {
+  background: @accent_bg_color;
+  color: @accent_fg_color;
+}
+.call-group-label {
+  font-size: 11px;
+  font-weight: bold;
+  color: @wa_muted_fg_color;
+}
+.call-badge {
+  background: alpha(@window_fg_color, 0.08);
+  border-radius: 9999px;
+}
+.call-badge-missed {
+  background: alpha(@error_fg_color, 0.12);
+}
+.call-icon-accent { color: @accent_bg_color; }
+.call-icon-missed { color: @error_fg_color; }
+.call-meta-missed { color: @error_fg_color; font-weight: bold; }
+.call-video-dot {
+  background: @window_bg_color;
+  border-radius: 9999px;
+  padding: 2px;
+  color: @wa_muted_fg_color;
+}
+.call-dot {
+  background: @error_fg_color;
+  border-radius: 9999px;
+}
+.call-empty-circle {
+  background: alpha(@window_fg_color, 0.08);
+  border-radius: 9999px;
+  color: @wa_muted_fg_color;
+}
+.call-detail {
+  border-left: 1px solid @wa_border_color;
+}
+.call-hero {
+  background: alpha(@accent_bg_color, 0.12);
+  border-radius: 9999px;
+}
+.call-hero-missed {
+  background: alpha(@error_fg_color, 0.12);
+}
+.detail-value { font-weight: bold; }
+
+/* Call mode window */
+.call-pill {
+  border: 1px solid @wa_border_color;
+  border-radius: 9999px;
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: bold;
+  color: @wa_muted_fg_color;
+}
+.call-round {
+  border-radius: 9999px;
+  min-width: 64px;
+  min-height: 64px;
+  padding: 0;
+}
+.call-status {
+  font-size: 14px;
+  color: alpha(@window_fg_color, 0.65);
+}
 .caption { font-size: 11px; }
 .dim-label { color: @wa_muted_fg_color; }
 .tick-read { color: @accent_bg_color; font-weight: bold; }

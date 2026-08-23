@@ -33,6 +33,10 @@ const (
 	EventMessageDeleted = "message_deleted"
 	EventMessageEdited  = "message_edited"
 	EventChatNameUpdate = "chat_name_update"
+
+	EventCallIncoming = "call.incoming"
+	EventCallState    = "call.state"
+	EventCallEnded    = "call.ended"
 )
 
 // Envelope is the wire format of every message on /ws.
@@ -161,7 +165,7 @@ func (c *Client) Authenticate(userID string) {
 	c.Send("authenticate", map[string]string{"userId": userID})
 }
 
-// Ping sends the app-level keepalive the web dashboard also uses.
+// Ping sends the app-level keepalive the web client also uses.
 func (c *Client) Ping() { c.Send("ping", nil) }
 
 // loop dials, reads, and reconnects with capped exponential backoff until

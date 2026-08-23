@@ -13,9 +13,9 @@ import (
 // Window wraps an Adw.ApplicationWindow with the WA Bot title, a libadwaita
 // ToolbarView (header bar + content), and an AdwViewStack that a sidebar
 // ListBox drives. Three pages are pre-registered:
-//   - "dashboard" (added via AddDashboard)
-//   - "chats"     (placeholder for Phase 8)
-//   - "settings"  (placeholder for Phase 11)
+//   - "chats"    (chat list + conversation)
+//   - "calls"    (call history, added via AddCalls)
+//   - "settings"
 type Window struct {
 	// AdwWin is the Adw.ApplicationWindow.
 	AdwWin *adw.ApplicationWindow
@@ -129,16 +129,16 @@ func addSidebarRow(lb *gtk.ListBox, label, iconName string) *gtk.ListBoxRow {
 	return row
 }
 
-// AddDashboard registers a Dashboard view as the "dashboard" page.
-func (w *Window) AddDashboard(d *views.Dashboard) {
-	w.stack.AddTitledWithIcon(d.Widget(), "dashboard", "Dashboard", "view-grid-symbolic")
-	w.registerPage("dashboard")
-}
-
 // AddChats registers a ChatsPane view as the "chats" page.
 func (w *Window) AddChats(c *views.ChatsPane) {
 	w.stack.AddTitledWithIcon(c.Widget(), "chats", "Chats", "chat-bubble-symbolic")
 	w.registerPage("chats")
+}
+
+// AddCalls registers a Calls view as the "calls" page.
+func (w *Window) AddCalls(c *views.Calls) {
+	w.stack.AddTitledWithIcon(c.Widget(), "calls", "Calls", "call-start-symbolic")
+	w.registerPage("calls")
 }
 
 // AddSettings registers a Settings view as the "settings" page.
@@ -170,10 +170,10 @@ func (w *Window) registerPage(name string) {
 
 	var icon, label string
 	switch name {
-	case "dashboard":
-		icon, label = "view-grid-symbolic", "Dashboard"
 	case "chats":
 		icon, label = "chat-bubble-symbolic", "Chats"
+	case "calls":
+		icon, label = "call-start-symbolic", "Calls"
 	case "settings":
 		icon, label = "preferences-system-symbolic", "Settings"
 	default:
