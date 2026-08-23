@@ -199,12 +199,16 @@ func (cl *ChatList) buildRow(gen uint64, c api.Chat) *gtk.ListBoxRow {
 	row.SetActivatable(true)
 	row.SetSelectable(true)
 	row.SetName(c.ID)
+	// Uniform row height: avatar (44px) + vertical margins dominate, so a
+	// multi-line last message can never stretch the row.
+	row.SetSizeRequest(-1, 64)
 
 	box := gtk.NewBox(gtk.OrientationHorizontal, 10)
 	box.SetMarginTop(6)
 	box.SetMarginBottom(6)
 	box.SetMarginStart(8)
 	box.SetMarginEnd(8)
+	box.SetVAlign(gtk.AlignCenter)
 
 	box.Append(newChatAvatar(cl.client, cl.cache, func() bool { return cl.gen.Load() != gen }, c))
 
@@ -212,16 +216,17 @@ func (cl *ChatList) buildRow(gen uint64, c api.Chat) *gtk.ListBoxRow {
 	mid.SetHExpand(true)
 	mid.SetVAlign(gtk.AlignCenter)
 
-	name := gtk.NewLabel(displayName(c))
+	name := gtk.NewLabel(store.OneLine(displayName(c), 40))
 	name.AddCSSClass("heading")
 	name.SetEllipsize(3) // PANGO_ELLIPSIZE_END
 	name.SetXAlign(0)
 	name.SetMaxWidthChars(22)
 	mid.Append(name)
 
-	preview := gtk.NewLabel(c.LastMsg)
+	preview := gtk.NewLabel(store.OneLine(c.LastMsg, 80))
 	preview.AddCSSClass("dim-label")
 	preview.SetEllipsize(3)
+	preview.SetSingleLineMode(true)
 	preview.SetXAlign(0)
 	preview.SetMaxWidthChars(26)
 	mid.Append(preview)

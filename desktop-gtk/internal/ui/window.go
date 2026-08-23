@@ -23,6 +23,8 @@ type Window struct {
 	Win *gtk.Window
 	// stack is the Adw.ViewStack; pages are registered into it.
 	stack *adw.ViewStack
+	// navList is the window-level navigation sidebar ListBox.
+	navList *gtk.ListBox
 	// pageNames is the list of registered page names in order.
 	pageNames []string
 	// version is the app version string.
@@ -64,8 +66,8 @@ func NewWindow(app *adw.Application, name, version string) (*Window, error) {
 	split := adw.NewOverlaySplitView()
 	split.SetSidebar(sidebar)
 	split.SetContent(toolbarView)
-	split.SetMinSidebarWidth(200)
-	split.SetMaxSidebarWidth(280)
+	split.SetMinSidebarWidth(110)
+	split.SetMaxSidebarWidth(150)
 
 	// Root overlay lets the login screen cover everything when needed.
 	root := gtk.NewOverlay()
@@ -78,6 +80,7 @@ func NewWindow(app *adw.Application, name, version string) (*Window, error) {
 		AdwWin:  adwWin,
 		Win:     (*gtk.Window)(&adwWin.Window),
 		stack:   stack,
+		navList: sidebar,
 		version: version,
 		overlay: root,
 	}
@@ -160,60 +163,42 @@ func (w *Window) ShowLogin(show bool) {
 }
 
 // registerPage appends a sidebar row for the given page name.
-// Called by AddXxx methods. The ListBox is the first child of the
-// OverlaySplitView's sidebar, so we look it up.
+// Called by AddXxx methods; row order matches ViewStack registration order.
 func (w *Window) registerPage(name string) {
 	idx := len(w.pageNames)
 	w.pageNames = append(w.pageNames, name)
-	// Locate the sidebar ListBox by walking children of the split view.
-	split := w.AdwWin.Content()
-	if split == nil {
-		return
+
+	var icon, label string
+	switch name {
+	case "dashboard":
+		icon, label = "view-grid-symbolic", "Dashboard"
+	case "chats":
+		icon, label = "chat-bubble-symbolic", "Chats"
+	case "settings":
+		icon, label = "preferences-system-symbolic", "Settings"
+	default:
+		icon, label = "applications-symbolic", name
 	}
-	_ = idx
-	// NOTE: We rely on the order of registration matching the order of rows
-	// in the sidebar. The sidebar ListBox is created in NewWindow; the rows
-	// are appended here in the same order as the ViewStack pages.
-	if sb := findFirstListBox(split); sb != nil {
-		var icon string
-		var label string
-		switch name {
-		case "dashboard":
-			icon, label = "view-grid-symbolic", "Dashboard"
-		case "chats":
-			icon, label = "chat-bubble-symbolic", "Chats"
-		case "settings":
-			icon, label = "preferences-system-symbolic", "Settings"
-		default:
-			icon, label = "applications-symbolic", name
-		}
-		addSidebarRow(sb, label, icon)
-	}
+	addSidebarRow(w.navList, label, icon)
+
 	// Auto-select the first page
 	if idx == 0 {
 		w.stack.SetVisibleChildName(name)
 	}
 }
 
-// findFirstListBox walks a widget tree and returns the first ListBox it finds.
-// Used to locate the sidebar ListBox we built in NewWindow.
-func findFirstListBox(w gtk.Widgetter) *gtk.ListBox {
-	if w == nil {
-		return nil
-	}
-	if lb, ok := w.(*gtk.ListBox); ok {
-		return lb
-	}
-	// We don't have a generic "get first child" API, but in our tree the
-	// ListBox is at a known position: it's the first child of the OverlaySplitView's
-	// sidebar. Returning nil here is safe — the caller already added the row in
-	// the right order during NewWindow; this helper is best-effort only.
-	return nil
-}
-
-// SwitchTo selects the page with the given name.
+// SwitchTo selects the page with the given name and highlights its
+// navigation row.
 func (w *Window) SwitchTo(name string) {
 	w.stack.SetVisibleChildName(name)
+	for i, n := range w.pageNames {
+		if n == name {
+			if row := w.navList.RowAtIndex(i); row != nil {
+				w.navList.SelectRow(row)
+			}
+			break
+		}
+	}
 }
 
 // Show presents the window.
