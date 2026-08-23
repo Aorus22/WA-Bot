@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=WA Bot
+GenericName=WhatsApp Bot
+Comment=Native GTK4 frontend for WA-Bot
+Exec=wa-bot-desktop %F
+Icon=wa-bot-desktop
+Terminal=false
+Categories=Network;InstantMessaging;
+StartupNotify=true
+StartupWMClass=wa-bot-desktop
+MimeType=x-scheme-handler/whatsapp;
+Keywords=WhatsApp;Chat;Bot;GTK;
