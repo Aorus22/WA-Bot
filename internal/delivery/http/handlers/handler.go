@@ -42,6 +42,10 @@ type Handler struct {
 	apiKeyRepo     repository.APIKeyRepository
 	ttsProvider    call.TTSProvider
 	settingsRepo   repository.SettingsRepository
+	historySync    interface {
+		Start() (repository.HistorySyncStatus, error)
+		Status() repository.HistorySyncStatus
+	}
 }
 
 func NewHandler(
@@ -146,6 +150,13 @@ func (h *Handler) GetTTSProvider() call.TTSProvider {
 
 func (h *Handler) SetSettingsRepo(repo repository.SettingsRepository) {
 	h.settingsRepo = repo
+}
+
+func (h *Handler) SetHistorySync(service interface {
+	Start() (repository.HistorySyncStatus, error)
+	Status() repository.HistorySyncStatus
+}) {
+	h.historySync = service
 }
 
 func (h *Handler) GetSettingsRepo() repository.SettingsRepository {

@@ -168,6 +168,10 @@ func (a *App) bootstrapViews(port int) {
 	a.calls.SetOpenChatCallback(a.openChatByID)
 	a.callWin = views.NewCallWindow(a.client, a.store)
 	a.setting.SetBackendPort(port)
+	a.setting.SetDeps(a.client, a.pane.ShowToast, func() {
+		go a.fetchChats()
+		a.pane.RefreshAfterHistory()
+	})
 	a.wireThemePicker()
 
 	a.startWebSocket(port)
@@ -253,6 +257,22 @@ func (a *App) startWebSocket(port int) {
 			return
 		}
 		a.store.RenameChat(n.ChatID, n.Name, n.Avatar)
+	})
+
+	a.wsSock.On(ws.EventChatState, func(payload json.RawMessage) {
+		var state api.ChatState
+		if err := ws.Decode(payload, &state); err != nil || state.ChatID == "" {
+			return
+		}
+		a.store.PatchChatState(state)
+	})
+
+	a.wsSock.On(ws.EventChatsChanged, func(_ json.RawMessage) {
+		go a.fetchChats()
+		glib.IdleAdd(func() bool {
+			a.pane.RefreshAfterHistory()
+			return false
+		})
 	})
 
 	// Call events: drive the call-mode window and refresh the history page.
@@ -394,6 +414,9 @@ func (a *App) presentQR(code string) {
 // markSessionUp hides the login screen and switches to the chats page.
 func (a *App) markSessionUp(phone string) {
 	a.sessionUp = true
+	if a.setting != nil {
+		a.setting.SetWhatsAppConnected(true)
+	}
 	a.login.SetConnected(phone)
 	a.window.ShowLogin(false)
 	a.window.SwitchTo("chats")
@@ -402,6 +425,9 @@ func (a *App) markSessionUp(phone string) {
 // showLoginScreen reveals the pairing screen.
 func (a *App) showLoginScreen(pollQR bool, statusText string) {
 	a.sessionUp = false
+	if a.setting != nil {
+		a.setting.SetWhatsAppConnected(false)
+	}
 	a.window.SwitchTo("chats")
 	a.login.SetWaiting(statusText)
 	a.window.ShowLogin(true)

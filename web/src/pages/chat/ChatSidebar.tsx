@@ -1,10 +1,21 @@
 import { useState, useEffect, useRef, memo, useMemo } from "react"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Search } from "lucide-react"
+import { Archive, ChevronLeft, Pin, Search, VolumeX } from "lucide-react"
 import { api, type Chat } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chatStore"
+import { toast } from "sonner"
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuSeparator,
+    ContextMenuSub,
+    ContextMenuSubContent,
+    ContextMenuSubTrigger,
+    ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 
 interface ChatSidebarProps {
     selectedChatId: string | null
@@ -25,13 +36,13 @@ interface ChatSidebarProps {
 
 // Get avatar URL - prefer actual avatar, fallback to proxy
 const getAvatarUrl = (chat: Chat): string | undefined => {
-    if (chat.avatar && chat.avatar.length > 0 && !chat.avatar.startsWith("data:")) {
-        return chat.avatar
+	const avatar = chat.avatar || ""
+	if (avatar.length > 0 && !avatar.startsWith("data:")) {
+		return avatar
     }
     // Use avatar proxy endpoint
     if (chat.id.includes("@") || chat.id.match(/^\d+$/)) {
-        const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000"
-        return `${API_BASE}/avatar/${encodeURIComponent(chat.id)}`
+        return api.mediaURL(`/avatar/${encodeURIComponent(chat.id)}`)
     }
     return undefined
 }
@@ -52,6 +63,7 @@ export const ChatSidebar = memo(({
     const upsertChat = useChatStore(s => s.upsertChat)
     const [searchQuery, setSearchQuery] = useState("")
     const [loading, setLoading] = useState(false)
+    const [archivedMode, setArchivedMode] = useState(false)
     const processedUpdateIds = useRef<Set<string>>(new Set())
 
     useEffect(() => {
@@ -84,6 +96,10 @@ export const ChatSidebar = memo(({
                     unread: selectedChatId === chatUpdate.chatId ? 0 : 1,
                     isActive: true,
                     isGroup: chatUpdate.chatId.includes("@g.us"),
+                    archived: false,
+                    pinnedAt: null,
+                    muteMode: "off",
+                    mutedUntil: null,
                 }
                 upsertChat(newChat)
             } else {
@@ -140,13 +156,40 @@ export const ChatSidebar = memo(({
         }
     }
 
+    const archivedChats = useMemo(() => (chats || []).filter(chat => chat.archived), [chats])
+    const archivedUnread = useMemo(
+        () => archivedChats.reduce((total, chat) => total + (Number(chat.unread) || 0), 0),
+        [archivedChats]
+    )
     const filteredChats = useMemo(() => {
-        return (chats || []).filter((chat) =>
-            searchQuery === "" ||
-            chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            chat.lastMsg.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-    }, [chats, searchQuery])
+        const query = searchQuery.toLowerCase()
+		return (chats || [])
+            .filter((chat) => Boolean(chat.archived) === archivedMode)
+            .filter((chat) =>
+                query === "" ||
+				(chat.name || "").toLowerCase().includes(query) ||
+				(chat.lastMsg || "").toLowerCase().includes(query)
+            )
+            .sort((a, b) => {
+                if (a.pinnedAt && !b.pinnedAt) return -1
+                if (!a.pinnedAt && b.pinnedAt) return 1
+                if (a.pinnedAt && b.pinnedAt && a.pinnedAt !== b.pinnedAt) return b.pinnedAt - a.pinnedAt
+                return b.lastTime - a.lastTime
+            })
+    }, [chats, searchQuery, archivedMode])
+
+    const applyChatAction = async (chat: Chat, action: "pin" | "archive" | "mute", value: boolean | "off" | "8h" | "1w" | "forever") => {
+        try {
+            const state = action === "pin"
+                ? await api.pinChat(chat.id, Boolean(value))
+                : action === "archive"
+                    ? await api.archiveChat(chat.id, Boolean(value))
+                    : await api.muteChat(chat.id, value as "off" | "8h" | "1w" | "forever")
+            useChatStore.getState().patchChatState(state)
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to update chat")
+        }
+    }
 
     const formatTime = (timestamp: number) => {
         const date = new Date(timestamp)
@@ -171,7 +214,18 @@ export const ChatSidebar = memo(({
             {/* Header */}
             <div className="flex flex-col p-5 space-y-4 shrink-0">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-2xl font-bold tracking-tight">Messages</h2>
+                    <div className="flex items-center gap-2">
+                        {archivedMode && (
+                            <button
+                                aria-label="Back to messages"
+                                onClick={() => setArchivedMode(false)}
+                                className="rounded-full p-1.5 hover:bg-muted"
+                            >
+                                <ChevronLeft className="h-5 w-5" />
+                            </button>
+                        )}
+                        <h2 className="text-2xl font-bold tracking-tight">{archivedMode ? "Archived" : "Messages"}</h2>
+                    </div>
                 </div>
 
                 {/* Search - Expandable or always visible */}
@@ -187,7 +241,20 @@ export const ChatSidebar = memo(({
             </div>
 
             {/* Chat List */}
-            <div data-sidebar-scroll className="flex-1 overflow-y-auto px-2 min-h-0">				{loading ? (
+            <div data-sidebar-scroll className="flex-1 overflow-y-auto px-2 min-h-0">
+            {!archivedMode && !searchQuery && archivedChats.length > 0 && !loading && (
+                <button
+                    onClick={() => setArchivedMode(true)}
+                    className="w-full flex items-center gap-4 px-4 py-3 rounded-2xl hover:bg-muted/50 text-left mb-1"
+                >
+                    <span className="h-11 w-11 rounded-full bg-muted flex items-center justify-center">
+                        <Archive className="h-5 w-5 text-[#00a884]" />
+                    </span>
+                    <span className="flex-1 font-semibold">Archived</span>
+                    {archivedUnread > 0 && <span className="text-xs font-bold text-[#00a884]">{archivedUnread}</span>}
+                </button>
+            )}
+				{loading ? (
                 <div className="flex flex-col items-center justify-center py-12 space-y-3 opacity-50">
                     <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                     <p className="text-sm font-medium">Syncing chats...</p>
@@ -205,7 +272,9 @@ export const ChatSidebar = memo(({
             ) : (
                 <div className="space-y-1 pb-4">
                     {filteredChats.map((chat) => (
-                        <div key={chat.id} data-chat-item>
+                        <ContextMenu key={chat.id}>
+                            <ContextMenuTrigger asChild>
+                            <div data-chat-item>
                             <button
                                 onClick={() => onChatSelect(chat)}
                                 className={cn(
@@ -224,7 +293,7 @@ export const ChatSidebar = memo(({
                                     <Avatar className="h-14 w-14 border-2 border-background shadow-sm group-hover:scale-105 transition-transform duration-200">
                                         <AvatarImage src={getAvatarUrl(chat)} />
                                         <AvatarFallback className="bg-primary/10 text-primary font-bold text-lg">
-                                            {chat.name.charAt(0).toUpperCase()}
+	                                            {(chat.name || "?").charAt(0).toUpperCase()}
                                         </AvatarFallback>
                                     </Avatar>
                                 </div>
@@ -233,16 +302,20 @@ export const ChatSidebar = memo(({
                                     {/* Left: Name and Message */}
                                     <div className="min-w-0 flex flex-col justify-center h-full">
                                         <h3 className={cn(
-                                            "font-bold truncate group-hover:text-primary transition-colors",
+                                            "font-bold truncate group-hover:text-primary transition-colors flex items-center gap-1.5",
                                             (Number(chat.unread) || 0) > 0 ? "text-foreground" : "text-foreground/90"
                                         )}>
-                                            {chat.name}
+                                            <span className="truncate">{chat.name}</span>
+                                            {chat.pinnedAt && <Pin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                                         </h3>
                                         <p className={cn(
                                             "text-sm truncate",
                                             (Number(chat.unread) || 0) > 0 ? "text-foreground font-semibold" : "text-muted-foreground/80"
                                         )}>
-                                            {chat.lastMsg || "Tap to chat"}
+                                            <span className="inline-flex items-center gap-1 min-w-0">
+                                                {chat.muteMode !== "off" && <VolumeX className="h-3.5 w-3.5 shrink-0" />}
+                                                <span className="truncate">{chat.lastMsg || "Tap to chat"}</span>
+                                            </span>
                                         </p>
                                     </div>
 
@@ -263,7 +336,32 @@ export const ChatSidebar = memo(({
                                     </div>
                                 </div>
                             </button>
-                        </div>
+                            </div>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent className="w-48">
+                                <ContextMenuItem onSelect={() => applyChatAction(chat, "pin", !chat.pinnedAt)}>
+                                    <Pin className="h-4 w-4" /> {chat.pinnedAt ? "Unpin" : "Pin"}
+                                </ContextMenuItem>
+                                <ContextMenuItem onSelect={() => applyChatAction(chat, "archive", !chat.archived)}>
+                                    <Archive className="h-4 w-4" /> {chat.archived ? "Unarchive" : "Archive"}
+                                </ContextMenuItem>
+                                <ContextMenuSeparator />
+                                {chat.muteMode !== "off" ? (
+                                    <ContextMenuItem onSelect={() => applyChatAction(chat, "mute", "off")}>
+                                        <VolumeX className="h-4 w-4" /> Unmute
+                                    </ContextMenuItem>
+                                ) : (
+                                    <ContextMenuSub>
+                                        <ContextMenuSubTrigger><VolumeX className="h-4 w-4" /> Mute</ContextMenuSubTrigger>
+                                        <ContextMenuSubContent className="w-40">
+                                            <ContextMenuItem onSelect={() => applyChatAction(chat, "mute", "8h")}>8 hours</ContextMenuItem>
+                                            <ContextMenuItem onSelect={() => applyChatAction(chat, "mute", "1w")}>1 week</ContextMenuItem>
+                                            <ContextMenuItem onSelect={() => applyChatAction(chat, "mute", "forever")}>Always</ContextMenuItem>
+                                        </ContextMenuSubContent>
+                                    </ContextMenuSub>
+                                )}
+                            </ContextMenuContent>
+                        </ContextMenu>
                     ))}
                 </div>
             )}

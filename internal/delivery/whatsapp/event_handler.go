@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	waProto "go.mau.fi/whatsmeow/proto/waE2E"
 	waTypes "go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	waProto "go.mau.fi/whatsmeow/proto/waE2E"
 
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
@@ -26,15 +26,16 @@ type HTTPServer interface {
 }
 
 type WhatsAppEventHandler struct {
-	handlerUC  HandlerUseCaseInterface
-	waService  *WhatsAppService
-	stateRepo  repository.UserStateRepository
-	waClient   *whatsappInfra.WhatsAppClient
-	msgStore   *repository.MessageStore
-	httpServer HTTPServer
-	storage    repository.StorageRepository
-	luaService LuaService
-	aiClient   *ai.AIClient
+	handlerUC   HandlerUseCaseInterface
+	waService   *WhatsAppService
+	stateRepo   repository.UserStateRepository
+	waClient    *whatsappInfra.WhatsAppClient
+	msgStore    *repository.MessageStore
+	httpServer  HTTPServer
+	storage     repository.StorageRepository
+	luaService  LuaService
+	aiClient    *ai.AIClient
+	historySync *HistorySyncService
 }
 
 type LuaService interface {
@@ -74,9 +75,18 @@ func (h *WhatsAppEventHandler) SetAIClient(client *ai.AIClient) {
 	h.aiClient = client
 }
 
+func (h *WhatsAppEventHandler) SetHistorySyncService(service *HistorySyncService) {
+	h.historySync = service
+}
+
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
+		if h.historySync != nil {
+			if notif := v.Message.GetProtocolMessage().GetHistorySyncNotification(); notif != nil {
+				h.historySync.StageNotification(v.Info.ID, notif)
+			}
+		}
 		fmt.Printf("\n[MSG_IN] ID: %s | From: %s | Alt: %s | Group: %v\n", v.Info.ID, v.Info.Sender.String(), v.Info.SenderAlt.String(), v.Info.IsGroup)
 
 		// Save LID mapping for all messages (both private and group)
@@ -98,10 +108,85 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 			}
 		}
 
-
 		h.handleMessage(v)
 	case *events.Receipt:
 		h.handleReceipt(v)
+	case *events.HistorySync:
+		if h.historySync != nil {
+			if err := h.historySync.StageData(v.Data); err != nil {
+				fmt.Printf("[HISTORY] Failed to stage event: %v\n", err)
+			}
+		}
+	case *events.Pin:
+		h.handlePin(v)
+	case *events.Mute:
+		h.handleMute(v)
+	case *events.Archive:
+		h.handleArchive(v)
+	}
+}
+
+func (h *WhatsAppEventHandler) handlePin(evt *events.Pin) {
+	if h.msgStore == nil || evt.Action == nil {
+		return
+	}
+	state, err := h.msgStore.GetChatState(evt.JID.String())
+	if err != nil {
+		return
+	}
+	if evt.Action.GetPinned() {
+		pinnedAt := evt.Timestamp.UnixMilli()
+		state.PinnedAt = &pinnedAt
+	} else {
+		state.PinnedAt = nil
+	}
+	h.persistAndBroadcastChatState(state)
+}
+
+func (h *WhatsAppEventHandler) handleMute(evt *events.Mute) {
+	if h.msgStore == nil || evt.Action == nil {
+		return
+	}
+	state, err := h.msgStore.GetChatState(evt.JID.String())
+	if err != nil {
+		return
+	}
+	state.MuteMode = "off"
+	state.MutedUntil = nil
+	if evt.Action.GetMuted() {
+		end := evt.Action.GetMuteEndTimestamp()
+		if end < 0 {
+			state.MuteMode = "forever"
+		} else if end > time.Now().UnixMilli() {
+			state.MuteMode = "until"
+			state.MutedUntil = &end
+		}
+	}
+	h.persistAndBroadcastChatState(state)
+}
+
+func (h *WhatsAppEventHandler) handleArchive(evt *events.Archive) {
+	if h.msgStore == nil || evt.Action == nil {
+		return
+	}
+	state, err := h.msgStore.GetChatState(evt.JID.String())
+	if err != nil {
+		return
+	}
+	state.Archived = evt.Action.GetArchived()
+	if state.Archived {
+		state.PinnedAt = nil
+	}
+	h.persistAndBroadcastChatState(state)
+}
+
+func (h *WhatsAppEventHandler) persistAndBroadcastChatState(state repository.ChatState) {
+	if err := h.msgStore.UpdateChatState(state); err != nil {
+		fmt.Printf("[CHAT_STATE] Failed to persist %s: %v\n", state.ChatID, err)
+		return
+	}
+	if h.httpServer != nil {
+		h.httpServer.BroadcastMessage("chat_state", state)
 	}
 }
 

@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { type Chat, type Message } from "@/lib/api"
+import { normalizeChat, type Chat, type ChatState, type Message } from "@/lib/api"
 
 export interface ChatMessagesEntry {
 	messages: Message[]
@@ -21,6 +21,8 @@ interface ChatStore {
 	setChatsLoaded: (v: boolean) => void
 	setChatsLoading: (v: boolean) => void
 	upsertChat: (chat: Chat) => void
+	patchChatState: (state: ChatState) => void
+	invalidateMessages: () => void
 
 	ensureChatState: (chatId: string) => void
 	setMessages: (chatId: string, msgs: Message[], hasMore: boolean) => void
@@ -49,7 +51,7 @@ export const useChatStore = create<ChatStore>((set) => ({
 	chatsLoading: false,
 	messagesByChat: {},
 
-	setChats: (chats) => set({ chats }),
+	setChats: (chats) => set({ chats: chats.map(normalizeChat) }),
 
 	setChatsLoaded: (v) => set({ chatsLoaded: v }),
 
@@ -57,6 +59,7 @@ export const useChatStore = create<ChatStore>((set) => ({
 
 	upsertChat: (chat) =>
 		set((state) => {
+			chat = normalizeChat(chat)
 			const existing = state.chats.find((c) => c.id === chat.id)
 			if (!existing) {
 				return { chats: [chat, ...state.chats] }
@@ -82,6 +85,25 @@ export const useChatStore = create<ChatStore>((set) => ({
 				chats: state.chats.map((c) => (c.id === chat.id ? merged : c)),
 			}
 		}),
+
+	patchChatState: (chatState) =>
+		set((state) => ({
+			chats: state.chats.map((chat) =>
+				chat.id === chatState.chatId
+					? { ...chat, ...chatState }
+					: chat
+			),
+		})),
+
+	invalidateMessages: () =>
+		set((state) => ({
+			messagesByChat: Object.fromEntries(
+				Object.entries(state.messagesByChat).map(([chatId, entry]) => [
+					chatId,
+					{ ...entry, loaded: false, loading: false },
+				])
+			),
+		})),
 
 	ensureChatState: (chatId) =>
 		set((state) => {

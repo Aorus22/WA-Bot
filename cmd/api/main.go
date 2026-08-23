@@ -143,6 +143,10 @@ func InitializeApp() (*App, error) {
 		return nil, fmt.Errorf("failed to create message store: %w", err)
 	}
 	httpServer.SetMessageRepo(msgStore)
+	historySyncService := whatsapp.NewHistorySyncService(waClient, msgStore)
+	historySyncService.SetBroadcaster(httpServer)
+	httpServer.SetHistorySync(historySyncService)
+	eventHandler.SetHistorySyncService(historySyncService)
 
 	appStore, err := repository.NewAppStore("file:database/wa-bot-app.db?_foreign_keys=on")
 	if err != nil {

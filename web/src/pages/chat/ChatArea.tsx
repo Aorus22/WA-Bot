@@ -29,40 +29,20 @@ interface ChatAreaProps {
     onCacheUpdate?: (messages: Message[], hasMore: boolean) => void
 }
 
-const getApiBase = () => {
-    const envUrl = import.meta.env.VITE_API_URL
-    if (envUrl) return envUrl
-    return typeof window !== "undefined" ? `${window.location.origin}/api` : ""
-}
-
 const getMediaUrl = (url: string | undefined): string | undefined => {
-    if (!url) return undefined
-    if (url.startsWith("http://") || url.startsWith("https://")) return url
-
-    const apiBase = getApiBase()
-    const parts = url.split("/")
-    if (parts.length > 1) {
-        const filename = parts.pop()!
-        const path = parts.join("/")
-        const encodedFilename = encodeURIComponent(filename)
-        const fullUrl = `${apiBase}${path}/${encodedFilename}`
-        return fullUrl
-    }
-
-    return `${apiBase}${url}`
+    return api.mediaURL(url)
 }
 
 const getAvatarUrl = (target: Chat | string): string | undefined => {
-    const apiBase = getApiBase()
-
     if (typeof target !== "string") {
-        if (target.avatar && target.avatar.length > 0 && !target.avatar.startsWith("data:")) {
-            return target.avatar
+        const avatar = target.avatar || ""
+        if (avatar.length > 0 && !avatar.startsWith("data:")) {
+            return avatar
         }
-        return `${apiBase}/avatar/${encodeURIComponent(target.id)}`
+        return api.mediaURL(`/avatar/${encodeURIComponent(target.id)}`)
     }
 
-    return `${apiBase}/avatar/${encodeURIComponent(target)}`
+    return api.mediaURL(`/avatar/${encodeURIComponent(target)}`)
 }
 
 const formatTime = (timestamp: number) => {
@@ -180,7 +160,7 @@ const formatRecordingTime = (seconds: number) => {
         } else {
             loadMessages()
         }
-    }, [chat?.id])
+    }, [chat?.id, entry?.loaded])
 
     // Stop any in-progress recording when switching chats
     useEffect(() => {
@@ -655,12 +635,12 @@ const formatRecordingTime = (seconds: number) => {
                         <Avatar className="h-10 w-10 border-2 border-background shadow-sm group-hover:scale-105 transition-transform">
                             <AvatarImage src={getAvatarUrl(chat)} />
                             <AvatarFallback className="bg-primary/10 text-primary font-bold">
-                                {chat.name.charAt(0).toUpperCase()}
+                                {(chat.name || "?").charAt(0).toUpperCase()}
                             </AvatarFallback>
                         </Avatar>
                     </div>
                     <div className="flex flex-col">
-                        <h3 className="font-bold text-base leading-tight tracking-tight group-hover:text-primary transition-colors">{chat.name}</h3>
+                        <h3 className="font-bold text-base leading-tight tracking-tight group-hover:text-primary transition-colors">{chat.name || chat.id}</h3>
                         <p className="text-[11px] font-medium text-muted-foreground truncate max-w-[180px] md:max-w-[250px]">
                             {chat.id}
                         </p>

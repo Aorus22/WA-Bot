@@ -16,14 +16,18 @@ import (
 // Chat is one entry in GET /api/chats.
 // Fields match the backend's repository.Chat JSON shape.
 type Chat struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Avatar   string `json:"avatar"`
-	LastMsg  string `json:"lastMsg"`
-	LastTime int64  `json:"lastTime"`
-	Unread   int    `json:"unread"`
-	IsActive bool   `json:"isActive"`
-	IsGroup  bool   `json:"isGroup"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Avatar     string `json:"avatar"`
+	LastMsg    string `json:"lastMsg"`
+	LastTime   int64  `json:"lastTime"`
+	Unread     int    `json:"unread"`
+	IsActive   bool   `json:"isActive"`
+	IsGroup    bool   `json:"isGroup"`
+	Archived   bool   `json:"archived"`
+	PinnedAt   *int64 `json:"pinnedAt"`
+	MuteMode   string `json:"muteMode"`
+	MutedUntil *int64 `json:"mutedUntil"`
 }
 
 // Message is one entry in GET /api/chats/{id}/messages.

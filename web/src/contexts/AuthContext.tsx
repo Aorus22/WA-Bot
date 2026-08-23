@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, ty
 import { useWebSocket, type WSMessage } from "@/hooks/use-websocket"
 import { emitWSMessage } from "@/lib/ws-bus"
 import { api, type Message } from "@/lib/api"
+import { useChatStore } from "@/stores/chatStore"
 
 interface ChatUpdate {
 	chatId: string
@@ -115,6 +116,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 						chatAvatar: message.payload.avatar,
 					})
 				}
+				break
+			case "chat_state":
+				if (message.payload?.chatId) {
+					useChatStore.getState().patchChatState(message.payload)
+				}
+				break
+			case "chats_changed":
+				useChatStore.getState().invalidateMessages()
+				api.getChats()
+					.then((chats) => useChatStore.getState().setChats(chats || []))
+					.catch((error) => console.error("Failed to refresh chats:", error))
 				break
 		}
 	}, [])

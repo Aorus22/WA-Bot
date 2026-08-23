@@ -30,6 +30,8 @@ export function LazyMedia({
 }: LazyMediaProps) {
   const [isVisible, setIsVisible] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const hasError = failedSrc === src
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -64,16 +66,23 @@ export function LazyMedia({
       className={cn("relative overflow-hidden w-full h-full min-h-[100px] bg-muted/20", containerClassName)}
       onClick={onClick}
     >
-      {(!isLoaded || !isVisible) && (
+      {!hasError && (!isLoaded || !isVisible) && (
         <Skeleton className="absolute inset-0 z-0 w-full h-full" />
       )}
+
+      {hasError && (
+        <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-muted-foreground">
+          Media is no longer available
+        </div>
+      )}
       
-      {isVisible && (
+      {isVisible && !hasError && (
         type === "image" ? (
           <img
             src={src}
             alt={alt}
             onLoad={handleLoad}
+            onError={() => setFailedSrc(src)}
             loading={loading}
             className={cn(
               "transition-opacity duration-700 ease-in-out",
@@ -86,6 +95,7 @@ export function LazyMedia({
           <video
             src={src}
             onLoadedData={handleLoad}
+            onError={() => setFailedSrc(src)}
             controls={controls}
             className={cn(
               "transition-opacity duration-700 ease-in-out",
