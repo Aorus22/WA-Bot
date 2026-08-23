@@ -38,9 +38,13 @@ type Conversation struct {
 	headerName   *gtk.Label
 	headerSub    *gtk.Label
 
-	listBox  *gtk.ListBox
-	scroller *gtk.ScrolledWindow
-	adj      *gtk.Adjustment
+	listBox    *gtk.ListBox
+	scroller   *gtk.ScrolledWindow
+	msgOverlay *gtk.Overlay
+	loadSpinW  *gtk.Box
+	loadSpin   *gtk.Spinner
+	loading    int // in-flight initial loads
+	adj        *gtk.Adjustment
 
 	composerTextView *gtk.TextView
 	attachBtn        *gtk.MenuButton
@@ -122,12 +126,33 @@ func NewConversation() *Conversation {
 	cv.scroller.SetVExpand(true)
 	cv.scroller.SetHExpand(true)
 
+	// Loading overlay above the message list: switching chats is instant,
+	// history fetches show this spinner instead of freezing/stale content.
+	cv.msgOverlay = gtk.NewOverlay()
+	cv.msgOverlay.SetChild(cv.scroller)
+	cv.msgOverlay.SetVExpand(true)
+	cv.msgOverlay.SetHExpand(true)
+
+	spinWrap := gtk.NewBox(gtk.OrientationVertical, 10)
+	spinWrap.SetHAlign(gtk.AlignCenter)
+	spinWrap.SetVAlign(gtk.AlignCenter)
+	spinWrap.SetVisible(false)
+	cv.loadSpin = gtk.NewSpinner()
+	cv.loadSpin.SetSizeRequest(28, 28)
+	cv.loadSpin.Start()
+	spinLbl := gtk.NewLabel("Memuat pesan…")
+	spinLbl.AddCSSClass("dim-label")
+	spinWrap.Append(cv.loadSpin)
+	spinWrap.Append(spinLbl)
+	cv.loadSpinW = spinWrap
+	cv.msgOverlay.AddOverlay(spinWrap)
+
 	// ---- Composer ----
 	composer := cv.buildComposer()
 
 	cv.content = gtk.NewBox(gtk.OrientationVertical, 0)
 	cv.content.Append(header)
-	cv.content.Append(cv.scroller)
+	cv.content.Append(cv.msgOverlay)
 	cv.content.Append(composer)
 	cv.content.SetVisible(false)
 	cv.root.Append(cv.content)
@@ -175,7 +200,9 @@ func (cv *Conversation) chatID() string {
 	return cv.current.ID
 }
 
-// OpenChat displays the given chat, loading its history as needed.
+// OpenChat switches to the given chat instantly: the previous chat's rows
+// are dropped immediately and, if history still has to be fetched, a
+// spinner is shown instead of stale content.
 func (cv *Conversation) OpenChat(c api.Chat) {
 	cv.hasChat = true
 	cv.current = c
@@ -196,14 +223,37 @@ func (cv *Conversation) OpenChat(c api.Chat) {
 	cv.empty.SetVisible(false)
 	cv.content.SetVisible(true)
 
+	// Instant switch: never leave the old chat's bubbles on screen.
+	cv.clearRows()
+	cv.renderedIDs = nil
+
 	page, _ := cv.store.Messages(c.ID)
-	if len(page.Items) == 0 && !cv.fetchedOnce[c.ID] {
+	if len(page.Items) > 0 {
+		cv.fullRebuild()
+		cv.scrollToBottom()
+		return
+	}
+	if !cv.fetchedOnce[c.ID] {
 		cv.fetchedOnce[c.ID] = true
+		cv.setLoading(true)
 		cv.loadInitial(c.ID)
 	}
-	cv.syncMessages()
-	if len(page.Items) > 0 {
-		cv.scrollToBottom()
+}
+
+// setLoading tracks in-flight initial loads; the spinner overlay is visible
+// while any of them runs.
+func (cv *Conversation) setLoading(on bool) {
+	if on {
+		cv.loading++
+	} else if cv.loading > 0 {
+		cv.loading--
+	}
+	visible := cv.loading > 0
+	cv.loadSpinW.SetVisible(visible)
+	if visible {
+		cv.loadSpin.Start()
+	} else {
+		cv.loadSpin.Stop()
 	}
 }
 
@@ -224,6 +274,7 @@ func (cv *Conversation) loadInitial(chatID string) {
 		defer cancel()
 		msgs, err := cv.client.GetMessages(ctx, chatID, pageSize, 0)
 		glib.IdleAdd(func() bool {
+			cv.setLoading(false) // balance even if the user switched away
 			if err != nil {
 				log.Printf("conversation: initial load %s: %v", chatID, err)
 				if cv.toast != nil {
