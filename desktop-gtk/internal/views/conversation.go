@@ -58,7 +58,8 @@ type Conversation struct {
 	renderedIDs []string
 	ticks       map[string]*gtk.Label // msgID -> status glyph label (outgoing)
 
-	onSidebar func()
+	onSidebar     func()
+	onHeaderClick func()
 
 	// typing presence state
 	typingActive bool
@@ -99,7 +100,6 @@ func NewConversation() *Conversation {
 	header.Append(sidebarBtn)
 
 	cv.headerAvatar = adw.NewAvatar(36, "?", false)
-	header.Append(cv.headerAvatar)
 
 	hcol := gtk.NewBox(gtk.OrientationVertical, 0)
 	cv.headerName = gtk.NewLabel("")
@@ -111,7 +111,25 @@ func NewConversation() *Conversation {
 	cv.headerSub.AddCSSClass("dim-label")
 	cv.headerSub.SetXAlign(0)
 	hcol.Append(cv.headerSub)
-	header.Append(hcol)
+
+	// Identity block opens the right-side chat info panel (web parity:
+	// clicking anywhere on the header shows the sheet). It expands over the
+	// remaining header width; the sidebar-toggle button stays outside so
+	// button clicks never double-trigger the panel.
+	ident := gtk.NewBox(gtk.OrientationHorizontal, 10)
+	ident.Append(cv.headerAvatar)
+	ident.Append(hcol)
+	chevron := gtk.NewImageFromIconName("system-search-symbolic")
+	chevron.SetMarginStart(6)
+	chevron.SetTooltipText("Info chat")
+	ident.Append(chevron)
+	addClick(ident, func() {
+		if cv.onHeaderClick != nil {
+			cv.onHeaderClick()
+		}
+	})
+	ident.SetHExpand(true)
+	header.Append(ident)
 
 	// ---- Message list ----
 	cv.listBox = gtk.NewListBox()
@@ -192,6 +210,9 @@ func (cv *Conversation) SetDeps(client *api.Client, st *store.Store, cache *medi
 
 // SetSidebarCallback wires the toggle-sidebar button.
 func (cv *Conversation) SetSidebarCallback(cb func()) { cv.onSidebar = cb }
+
+// SetHeaderCallback wires the identity-block click (opens the info panel).
+func (cv *Conversation) SetHeaderCallback(cb func()) { cv.onHeaderClick = cb }
 
 func (cv *Conversation) chatID() string {
 	if !cv.hasChat {
