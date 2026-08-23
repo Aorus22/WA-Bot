@@ -1,7 +1,45 @@
-const { app, BrowserWindow, ipcMain, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, dialog } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+
+const DEFAULT_EXTERNAL_BACKEND_PORT = 8080;
+
+function hasCliFlag(name) {
+    return process.argv.some((arg) => arg === `--${name}` || arg === `-${name}`);
+}
+
+function getCliValue(name) {
+    const longName = `--${name}`;
+    const shortName = `-${name}`;
+
+    for (let i = 0; i < process.argv.length; i += 1) {
+        const arg = process.argv[i];
+        if (arg.startsWith(`${longName}=`) || arg.startsWith(`${shortName}=`)) {
+            return arg.slice(arg.indexOf('=') + 1);
+        }
+        if (arg === longName || arg === shortName) {
+            return process.argv[i + 1] ?? '';
+        }
+    }
+
+    return null;
+}
+
+function parseBackendPort(value) {
+    if (value === null) {
+        return DEFAULT_EXTERNAL_BACKEND_PORT;
+    }
+    if (!/^\d+$/.test(value)) {
+        return null;
+    }
+
+    const port = Number.parseInt(value, 10);
+    return port >= 1 && port <= 65535 ? port : null;
+}
+
+const noBackend = hasCliFlag('no-backend');
+const externalBackendPort = noBackend ? parseBackendPort(getCliValue('port')) : null;
 
 let mainWindow;
 let backendProcess;
@@ -188,7 +226,20 @@ ipcMain.handle('get-window-state', () => {
 });
 
 app.on('ready', () => {
-    startBackend();
+    if (noBackend) {
+        if (externalBackendPort === null) {
+            dialog.showErrorBox(
+                'Invalid backend port',
+                'Use --port with a value between 1 and 65535, for example: --no-backend --port 3090'
+            );
+            app.quit();
+            return;
+        }
+        backendPort = externalBackendPort;
+        console.log(`Backend manager disabled; connecting to existing backend on port ${backendPort}`);
+    } else {
+        startBackend();
+    }
     createWindow();
 });
 

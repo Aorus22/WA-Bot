@@ -51,6 +51,21 @@ type Conversation struct {
 	attachBtn        *gtk.MenuButton
 	sendBtn          *gtk.Button
 
+	callBtn     *gtk.Button // 1:1 audio call (header)
+	videoCallBtn *gtk.Button // 1:1 video call (header)
+
+	replyTo  *api.Message // message being replied to (quote bar active)
+	editing  *api.Message // own message being edited
+	replyBar *gtk.Box
+	replyWho *gtk.Label
+	replyTxt *gtk.Label
+	editBar  *gtk.Box
+	editTxt  *gtk.Label
+
+	// ctxPopover is the shared bubble context menu, parented outside the
+	// scrolled list; its menu model is rebuilt per right-click.
+	ctxPopover *gtk.PopoverMenu
+
 	current           api.Chat
 	hasChat           bool
 	fetchedOnce       map[string]bool
@@ -142,10 +157,28 @@ func NewConversation() *Conversation {
 	})
 	header.Append(searchBtn)
 
+	// 1:1 call actions, WhatsApp-style: audio + video next to the search
+	// button. Hidden for group chats (no local media; the backend rings the
+	// peer and the call service handles media server-side).
+	cv.callBtn = gtk.NewButtonFromIconName("call-start-symbolic")
+	cv.callBtn.SetTooltipText("Panggilan suara")
+	cv.callBtn.SetVisible(false)
+	cv.callBtn.ConnectClicked(func() { cv.startCall("audio") })
+	header.Append(cv.callBtn)
+
+	cv.videoCallBtn = gtk.NewButtonFromIconName("camera-video-symbolic")
+	cv.videoCallBtn.SetTooltipText("Panggilan video")
+	cv.videoCallBtn.SetVisible(false)
+	cv.videoCallBtn.ConnectClicked(func() { cv.startCall("video") })
+	header.Append(cv.videoCallBtn)
+
 	// ---- Message list ----
 	cv.listBox = gtk.NewListBox()
 	cv.listBox.SetSelectionMode(gtk.SelectionNone)
 	cv.listBox.SetShowSeparators(false)
+	// Never let the list take keyboard focus: a focus fallback (e.g. after a
+	// context popover closes) would move focus to row 0 and scroll to top.
+	cv.listBox.SetFocusable(false)
 	cv.listBox.SetHExpand(true)
 	cv.listBox.SetVExpand(true)
 
@@ -241,6 +274,7 @@ func (cv *Conversation) chatID() string {
 func (cv *Conversation) OpenChat(c api.Chat) {
 	cv.hasChat = true
 	cv.current = c
+	cv.resetReplyEdit()
 	cv.store.SetActiveChat(c.ID)
 	cv.store.MarkRead(c.ID)
 	go cv.client.MarkRead(context.Background(), c.ID)
@@ -257,6 +291,8 @@ func (cv *Conversation) OpenChat(c api.Chat) {
 
 	cv.empty.SetVisible(false)
 	cv.content.SetVisible(true)
+	cv.callBtn.SetVisible(!c.IsGroup && c.ID != "")
+	cv.videoCallBtn.SetVisible(!c.IsGroup && c.ID != "")
 
 	// Instant switch: never leave the old chat's bubbles on screen.
 	cv.clearRows()
@@ -296,6 +332,9 @@ func (cv *Conversation) setLoading(on bool) {
 func (cv *Conversation) Clear() {
 	cv.hasChat = false
 	cv.current = api.Chat{}
+	cv.resetReplyEdit()
+	cv.callBtn.SetVisible(false)
+	cv.videoCallBtn.SetVisible(false)
 	cv.renderedIDs = nil
 	cv.clearRows()
 	cv.content.SetVisible(false)

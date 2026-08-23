@@ -91,24 +91,26 @@ func (p *ChatsPane) Widget() gtk.Widgetter { return p.root }
 
 // SetDeps wires collaborators into all halves and activates row selection.
 func (p *ChatsPane) SetDeps(client *api.Client, st *store.Store, cache *media.Cache) {
-	toast := func(msg string) {
-		t := adw.NewToast(msg)
-		t.SetTimeout(5)
-		p.root.AddToast(t)
-	}
 	p.list.SetDeps(client, st, cache)
 	p.list.SetActivateCallback(func(chatID string) {
 		if c, ok := st.Chat(chatID); ok {
 			p.OpenChat(c)
 		}
 	})
-	p.conv.SetDeps(client, st, cache, toast)
-	p.infoPane.SetDeps(client, cache, toast)
-	p.search.SetDeps(client, toast)
+	p.conv.SetDeps(client, st, cache, p.ShowToast)
+	p.infoPane.SetDeps(client, cache, p.ShowToast)
+	p.search.SetDeps(client, p.ShowToast)
 	p.search.wireActivation(func(msgID string) {
 		p.showRight(rightNone)
 		p.conv.TeleportTo(msgID)
 	})
+}
+
+// ShowToast surfaces a transient message in the pane's toast overlay.
+func (p *ChatsPane) ShowToast(msg string) {
+	t := adw.NewToast(msg)
+	t.SetTimeout(5)
+	p.root.AddToast(t)
 }
 
 // OpenChat displays a chat in the conversation pane. The search sheet closes

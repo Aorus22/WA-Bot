@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diamondburned/gotk4-adwaita/pkg/adw"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
@@ -63,7 +64,9 @@ func (cv *Conversation) buildRow(m api.Message) (*gtk.ListBoxRow, *gtk.Label) {
 	// Reply quote.
 	if m.ReplyToID != "" {
 		if ref, found := cv.store.Message(cv.current.ID, m.ReplyToID); found {
-			bubble.Append(buildQuote(ref))
+			q := buildQuote(ref)
+			addClick(q, func() { cv.scrollToMessage(m.ReplyToID) })
+			bubble.Append(q)
 		}
 	}
 
@@ -88,8 +91,107 @@ func (cv *Conversation) buildRow(m api.Message) (*gtk.ListBoxRow, *gtk.Label) {
 	}
 	bubble.Append(meta)
 
+	cv.addBubbleMenu(align, m)
+
 	row.SetChild(align)
 	return row, tick
+}
+
+// addBubbleMenu attaches the right-click handler that opens the shared
+// context menu for this message.
+func (cv *Conversation) addBubbleMenu(w gtk.Widgetter, m api.Message) {
+	gc := gtk.NewGestureClick()
+	gc.SetButton(gdk.BUTTON_SECONDARY)
+	gtk.BaseWidget(w).AddController(gc)
+	gc.ConnectPressed(func(nPress int, x, y float64) {
+		cv.openBubbleMenu(w, x, y, m)
+	})
+}
+
+// openBubbleMenu shows the context popover anchored at the clicked point.
+// The popover is parented to cv.content — outside the scrolled message list —
+// so mapping and dismissing it can never perturb list layout or trigger the
+// focus-return scroll-to-first-row jump.
+func (cv *Conversation) openBubbleMenu(host gtk.Widgetter, x, y float64, m api.Message) {
+	if !cv.hasChat {
+		return
+	}
+
+	menu := gio.NewMenu()
+	menu.Append("Balas", "msg.reply")
+	if strings.TrimSpace(m.Content) != "" {
+		menu.Append("Salin Teks", "msg.copy")
+	}
+	outgoing := m.From == store.OutgoingFrom
+	if outgoing && isEditableText(m) {
+		menu.Append("Edit", "msg.edit")
+	}
+	if outgoing {
+		menu.Append("Hapus untuk Semua Orang", "msg.delete")
+	}
+
+	group := gio.NewSimpleActionGroup()
+	add := func(name string, fn func()) {
+		act := gio.NewSimpleAction(name, nil)
+		act.ConnectActivate(func(*glib.Variant) { fn() })
+		group.Insert(act)
+	}
+	add("reply", func() { cv.StartReply(m) })
+	add("copy", func() { gtk.BaseWidget(host).Clipboard().SetText(m.Content) })
+	add("edit", func() { cv.StartEdit(m) })
+	add("delete", func() { cv.confirmDelete(m) })
+	gtk.BaseWidget(cv.content).InsertActionGroup("msg", group)
+
+	if cv.ctxPopover == nil {
+		cv.ctxPopover = gtk.NewPopoverMenuFromModel(menu)
+		gtk.BaseWidget(cv.ctxPopover).SetParent(cv.content)
+	} else {
+		cv.ctxPopover.SetMenuModel(menu)
+	}
+
+	gx, gy, ok := gtk.BaseWidget(host).TranslateCoordinates(cv.content, x, y)
+	if !ok {
+		return
+	}
+	rect := gdk.NewRectangle(int(gx)-2, int(gy)-2, 4, 4)
+	cv.ctxPopover.SetPointingTo(&rect)
+	cv.ctxPopover.Popup()
+}
+
+// confirmDelete asks for confirmation, then revokes the message for everyone.
+func (cv *Conversation) confirmDelete(m api.Message) {
+	dialog := adw.NewMessageDialog(MainWindow, "Hapus pesan?", "Pesan ini akan dihapus untuk semua orang.")
+	dialog.AddResponse("cancel", "Batal")
+	dialog.AddResponse("delete", "Hapus")
+	dialog.SetCloseResponse("cancel")
+	dialog.SetResponseAppearance("delete", adw.ResponseDestructive)
+	dialog.ConnectResponse(func(resp string) {
+		if resp != "delete" {
+			return
+		}
+		chatID := cv.chatID()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := cv.client.DeleteMessage(ctx, chatID, m.ID); err != nil {
+				log.Printf("conversation: delete message: %v", err)
+				glib.IdleAdd(func() bool {
+					if cv.toast != nil {
+						cv.toast("Gagal menghapus pesan: " + err.Error())
+					}
+					return false
+				})
+				return
+			}
+			cv.store.DeleteMessage(chatID, m.ID) // WS echo is idempotent
+		}()
+	})
+	dialog.Show()
+}
+
+// isEditableText reports whether m can be edited (own plain text message).
+func isEditableText(m api.Message) bool {
+	return m.Type == "" || m.Type == "text"
 }
 
 // buildQuote renders the quoted reply preview inside a bubble.

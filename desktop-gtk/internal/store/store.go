@@ -183,7 +183,10 @@ func (s *Store) ResetContext(chatID string, msgsAsc []api.Message, hasPrev, hasN
 func (s *Store) HasNext(chatID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.messages[chatID].hasNext
+	if cs := s.messages[chatID]; cs != nil {
+		return cs.hasNext
+	}
+	return false
 }
 
 // SetHasNext updates the newer-history flag after a REST next-page fetch.
@@ -465,7 +468,11 @@ func (s *Store) Reset() {
 func (s *Store) Message(chatID, msgID string) (api.Message, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, m := range s.messages[chatID].items {
+	cs := s.messages[chatID]
+	if cs == nil {
+		return api.Message{}, false
+	}
+	for _, m := range cs.items {
 		if m.ID == msgID {
 			return m, true
 		}
