@@ -20,8 +20,8 @@ import (
 
 const (
 	infoPageSize     = 30
-	infoTileSize     = 104 // square media tile edge
-	infoBottomMargin = 90  // px above scroll end that triggers the next page
+	infoTileSize     = 92 // square media tile edge (3 columns fit the min pane width)
+	infoBottomMargin = 90 // px above scroll end that triggers the next page
 )
 
 var linkPattern = regexp.MustCompile(`https?://[^\s]+`)
@@ -401,7 +401,11 @@ func (t *infoMediaTab) appendPage(msgs []api.Message, hasMore bool) {
 
 func (t *infoMediaTab) buildTile(m api.Message) gtk.Widgetter {
 	frame := gtk.NewFrame("")
+	// Fixed square, centered in its FlowBox cell — never stretches into a
+	// rectangle regardless of pane width.
 	frame.SetSizeRequest(infoTileSize, infoTileSize)
+	frame.SetHAlign(gtk.AlignCenter)
+	frame.SetVAlign(gtk.AlignCenter)
 
 	if m.Type != "image" || m.MediaURL == "" {
 		box := gtk.NewBox(gtk.OrientationVertical, 4)
@@ -417,7 +421,8 @@ func (t *infoMediaTab) buildTile(m api.Message) gtk.Widgetter {
 	pic := gtk.NewPictureForPaintable(nil)
 	pic.SetKeepAspectRatio(true)
 	pic.SetCanShrink(true)
-	pic.SetSizeRequest(infoTileSize, infoTileSize)
+	pic.SetHExpand(true)
+	pic.SetVExpand(true)
 	frame.SetChild(pic)
 
 	rawURL := t.ci.client.MediaURL(m.MediaURL)

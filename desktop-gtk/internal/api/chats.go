@@ -132,6 +132,41 @@ func (c *Client) MarkRead(ctx context.Context, chatID string) error {
 	return c.doJSON(ctx, "POST", "/api/chats/"+url.PathEscape(chatID)+"/read", map[string]any{}, nil)
 }
 
+// SearchMessages runs a keyword search inside one chat
+// (GET /api/chats/{id}/search?q=&limit=), newest matches first.
+func (c *Client) SearchMessages(ctx context.Context, chatID, query string, limit int) ([]Message, error) {
+	q := url.Values{}
+	q.Set("q", query)
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/api/chats/" + url.PathEscape(chatID) + "/search?" + q.Encode()
+	var msgs []Message
+	if err := c.doJSON(ctx, "GET", path, nil, &msgs); err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
+// GetMessageContext fetches a window of messages around msgId
+// (GET /api/chats/{id}/messages/{msgId}/context?limit=) — used to teleport
+// the conversation view to a search hit.
+func (c *Client) GetMessageContext(ctx context.Context, chatID, msgID string, limit int) ([]Message, error) {
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/api/chats/" + url.PathEscape(chatID) + "/messages/" + url.PathEscape(msgID) + "/context"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var msgs []Message
+	if err := c.doJSON(ctx, "GET", path, nil, &msgs); err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
 // SendTyping forwards a typing presence indicator for the chat
 // (POST /api/chats/{chatId}/typing, body {"isTyping": bool}).
 func (c *Client) SendTyping(ctx context.Context, chatID string, isTyping bool) error {
