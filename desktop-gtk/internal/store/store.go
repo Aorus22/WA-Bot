@@ -50,6 +50,7 @@ type Change struct {
 type Page struct {
 	Items   []api.Message // ascending by Timestamp
 	HasMore bool          // older history exists on the server
+	HasNext bool          // newer history exists (true after a context teleport)
 }
 
 // Store is the state container.
@@ -65,7 +66,8 @@ type Store struct {
 
 type chatState struct {
 	items   []api.Message // ascending by Timestamp
-	hasMore bool
+	hasMore bool          // older history exists
+	hasNext bool          // newer history exists (set after a context teleport)
 }
 
 // New returns an empty Store.
@@ -165,6 +167,34 @@ func (s *Store) ResetMessages(chatID string, newestFirst []api.Message, hasMore 
 	s.emit(Change{Kind: MessagesReset, ChatID: chatID})
 }
 
+// ResetContext replaces the message page with a window around a target
+// message (search teleport). Input must already be ascending by timestamp.
+// Both sides may have more history on the server.
+func (s *Store) ResetContext(chatID string, msgsAsc []api.Message, hasPrev, hasNext bool) {
+	cp := make([]api.Message, len(msgsAsc))
+	copy(cp, msgsAsc)
+	s.mu.Lock()
+	s.messages[chatID] = &chatState{items: cp, hasMore: hasPrev, hasNext: hasNext}
+	s.mu.Unlock()
+	s.emit(Change{Kind: MessagesReset, ChatID: chatID})
+}
+
+// HasNext reports whether newer history exists beyond the loaded page.
+func (s *Store) HasNext(chatID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.messages[chatID].hasNext
+}
+
+// SetHasNext updates the newer-history flag after a REST next-page fetch.
+func (s *Store) SetHasNext(chatID string, v bool) {
+	s.mu.Lock()
+	if cs := s.messages[chatID]; cs != nil {
+		cs.hasNext = v
+	}
+	s.mu.Unlock()
+}
+
 // PrependOlder merges an older DESC page at the front.
 func (s *Store) PrependOlder(chatID string, olderDesc []api.Message, hasMore bool) {
 	s.mu.Lock()
@@ -184,19 +214,19 @@ func (s *Store) PrependOlder(chatID string, olderDesc []api.Message, hasMore boo
 }
 
 // AppendNewer merges a newer ASC page at the back, skipping duplicates by ID.
+// Always emits so pending anchor flags get consumed even on empty pages.
 func (s *Store) AppendNewer(chatID string, newerAsc []api.Message) {
-	if len(newerAsc) == 0 {
-		return
-	}
 	s.mu.Lock()
-	cs := s.ensureLocked(chatID)
-	have := make(map[string]struct{}, len(cs.items))
-	for _, m := range cs.items {
-		have[m.ID] = struct{}{}
-	}
-	for _, m := range newerAsc {
-		if _, dup := have[m.ID]; !dup {
-			cs.items = append(cs.items, m)
+	if len(newerAsc) > 0 {
+		cs := s.ensureLocked(chatID)
+		have := make(map[string]struct{}, len(cs.items))
+		for _, m := range cs.items {
+			have[m.ID] = struct{}{}
+		}
+		for _, m := range newerAsc {
+			if _, dup := have[m.ID]; !dup {
+				cs.items = append(cs.items, m)
+			}
 		}
 	}
 	s.mu.Unlock()
@@ -232,6 +262,8 @@ func (s *Store) ApplyIncoming(m api.Message) {
 			}
 			if !dup {
 				cs.items = appendSortedMessage(cs.items, m)
+				// A brand-new message becomes the tail: nothing newer exists.
+				cs.hasNext = false
 			}
 		}
 	}
@@ -402,7 +434,7 @@ func (s *Store) Messages(chatID string) (Page, bool) {
 	}
 	items := make([]api.Message, len(cs.items))
 	copy(items, cs.items)
-	return Page{Items: items, HasMore: cs.hasMore}, true
+	return Page{Items: items, HasMore: cs.hasMore, HasNext: cs.hasNext}, true
 }
 
 // PatchStatusByID applies a message_status event without knowing the chat ID

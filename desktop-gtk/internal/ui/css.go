@@ -83,4 +83,8 @@ const widgetCSS = `
   background-color: alpha(@accent_bg_color, 0.30);
   color: @window_fg_color;
 }
+.msg-highlight {
+  background-color: alpha(@accent_bg_color, 0.25);
+  border-radius: 8px;
+}
 `

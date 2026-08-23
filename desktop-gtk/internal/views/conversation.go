@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,16 +51,20 @@ type Conversation struct {
 	attachBtn        *gtk.MenuButton
 	sendBtn          *gtk.Button
 
-	current     api.Chat
-	hasChat     bool
-	fetchedOnce map[string]bool
-	loadingOld  bool
+	current           api.Chat
+	hasChat           bool
+	fetchedOnce       map[string]bool
+	loadingOld        bool
+	loadingNext       bool // a newer-page fetch is in flight
+	pendingKeepAnchor int  // next append must preserve the viewport anchor
 
 	renderedIDs []string
-	ticks       map[string]*gtk.Label // msgID -> status glyph label (outgoing)
+	ticks       map[string]*gtk.Label      // msgID -> status glyph label (outgoing)
+	rows        map[string]*gtk.ListBoxRow // msgID -> rendered row (teleport/highlight)
 
 	onSidebar     func()
 	onHeaderClick func()
+	onSearchClick func()
 
 	// typing presence state
 	typingActive bool
@@ -72,6 +77,7 @@ func NewConversation() *Conversation {
 	cv := &Conversation{
 		fetchedOnce: make(map[string]bool),
 		ticks:       make(map[string]*gtk.Label),
+		rows:        make(map[string]*gtk.ListBoxRow),
 	}
 
 	cv.root = gtk.NewBox(gtk.OrientationVertical, 0)
@@ -119,10 +125,6 @@ func NewConversation() *Conversation {
 	ident := gtk.NewBox(gtk.OrientationHorizontal, 10)
 	ident.Append(cv.headerAvatar)
 	ident.Append(hcol)
-	chevron := gtk.NewImageFromIconName("system-search-symbolic")
-	chevron.SetMarginStart(6)
-	chevron.SetTooltipText("Info chat")
-	ident.Append(chevron)
 	addClick(ident, func() {
 		if cv.onHeaderClick != nil {
 			cv.onHeaderClick()
@@ -130,6 +132,15 @@ func NewConversation() *Conversation {
 	})
 	ident.SetHExpand(true)
 	header.Append(ident)
+
+	searchBtn := gtk.NewButtonFromIconName("system-search-symbolic")
+	searchBtn.SetTooltipText("Cari pesan")
+	searchBtn.ConnectClicked(func() {
+		if cv.onSearchClick != nil {
+			cv.onSearchClick()
+		}
+	})
+	header.Append(searchBtn)
 
 	// ---- Message list ----
 	cv.listBox = gtk.NewListBox()
@@ -213,6 +224,9 @@ func (cv *Conversation) SetSidebarCallback(cb func()) { cv.onSidebar = cb }
 
 // SetHeaderCallback wires the identity-block click (opens the info panel).
 func (cv *Conversation) SetHeaderCallback(cb func()) { cv.onHeaderClick = cb }
+
+// SetSearchCallback wires the header search button (opens the search panel).
+func (cv *Conversation) SetSearchCallback(cb func()) { cv.onSearchClick = cb }
 
 func (cv *Conversation) chatID() string {
 	if !cv.hasChat {
@@ -313,34 +327,70 @@ func (cv *Conversation) loadInitial(chatID string) {
 	}()
 }
 
-// onScroll reacts to scrollbar movement: near-top triggers older-page loads.
+// onScroll reacts to scrollbar movement: near-top triggers older-page loads,
+// near-bottom triggers newer-page loads (after a context teleport).
 func (cv *Conversation) onScroll() {
-	if !cv.hasChat || cv.loadingOld {
+	if !cv.hasChat {
 		return
 	}
 	id := cv.chatID()
-	page, ok := cv.store.Messages(id)
-	if !ok || !page.HasMore || len(page.Items) == 0 {
-		return
+
+	// --- older pages (top edge) ---
+	if !cv.loadingOld {
+		page, ok := cv.store.Messages(id)
+		if ok && page.HasMore && len(page.Items) > 0 && cv.adj.Value() < loadOlderAt {
+			cv.loadingOld = true
+			before := page.Items[0].Timestamp
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				msgs, err := cv.client.GetMessages(ctx, id, pageSize, before)
+				glib.IdleAdd(func() bool {
+					if err != nil {
+						log.Printf("conversation: older page %s: %v", id, err)
+					} else {
+						cv.store.PrependOlder(id, msgs, len(msgs) == pageSize)
+					}
+					cv.loadingOld = false
+					return false
+				})
+			}()
+		}
 	}
-	if cv.adj.Value() < loadOlderAt {
-		cv.loadingOld = true
-		before := page.Items[0].Timestamp
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			msgs, err := cv.client.GetMessages(ctx, id, pageSize, before)
-			glib.IdleAdd(func() bool {
-				if err != nil {
-					log.Printf("conversation: older page %s: %v", id, err)
-				} else {
-					cv.store.PrependOlder(id, msgs, len(msgs) == pageSize)
-				}
-				cv.loadingOld = false
-				return false
-			})
-		}()
+
+	// --- newer pages (bottom edge) ---
+	if !cv.loadingNext && cv.pendingKeepAnchor == 0 {
+		if cv.store.HasNext(id) && cv.nearBottom() {
+			cv.loadingNext = true
+			cv.pendingKeepAnchor++ // appended page must NOT pin the viewport
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				msgs, err := cv.client.GetMessagesAfter(ctx, id, pageSize, cv.nextCursor())
+				glib.IdleAdd(func() bool {
+					if err != nil {
+						log.Printf("conversation: newer page %s: %v", id, err)
+					} else {
+						cv.store.AppendNewer(id, msgs)
+						if len(msgs) < pageSize {
+							cv.store.SetHasNext(id, false)
+						}
+					}
+					cv.loadingNext = false
+					return false
+				})
+			}()
+		}
 	}
+}
+
+// nextCursor returns the timestamp of the newest loaded message.
+func (cv *Conversation) nextCursor() int64 {
+	page, _ := cv.store.Messages(cv.chatID())
+	if n := len(page.Items); n > 0 {
+		return page.Items[n-1].Timestamp
+	}
+	return 0
 }
 
 // clearRows removes every rendered row and tick ref.
@@ -353,6 +403,7 @@ func (cv *Conversation) clearRows() {
 		cv.listBox.Remove(row)
 	}
 	cv.ticks = make(map[string]*gtk.Label)
+	cv.rows = make(map[string]*gtk.ListBoxRow)
 }
 
 // syncMessages applies incremental changes: fast-path appends, in-place tick
@@ -370,13 +421,21 @@ func (cv *Conversation) syncMessages() {
 		newIDs[i] = m.ID
 	}
 
+	// A newer-page REST fetch sets this: the appended rows must not yank the
+	// viewport to the bottom while the user reads mid-history.
+	keepAnchor := false
+	if cv.pendingKeepAnchor > 0 {
+		cv.pendingKeepAnchor--
+		keepAnchor = true
+	}
+
 	if equalStrings(cv.renderedIDs, newIDs) {
 		cv.updateTicks(page)
 		return
 	}
 
 	if isPrefix(cv.renderedIDs, newIDs) && len(newIDs) > len(cv.renderedIDs) {
-		atBottom := cv.nearBottom()
+		atBottom := cv.nearBottom() && !keepAnchor
 
 		var prevTS int64
 		if n := len(cv.renderedIDs); n > 0 {
@@ -387,6 +446,10 @@ func (cv *Conversation) syncMessages() {
 			cv.fullRebuild()
 			return
 		}
+		gapBefore := float64(0)
+		if !atBottom {
+			gapBefore = cv.bottomGap()
+		}
 		for i := start; i < len(newIDs); i++ {
 			m := page.Items[i]
 			if dayOf(prevTS) != dayOf(m.Timestamp) {
@@ -394,6 +457,7 @@ func (cv *Conversation) syncMessages() {
 			}
 			row, tick := cv.buildRow(m)
 			cv.listBox.Append(row)
+			cv.rows[m.ID] = row
 			if tick != nil {
 				cv.ticks[m.ID] = tick
 			}
@@ -402,6 +466,14 @@ func (cv *Conversation) syncMessages() {
 		cv.renderedIDs = newIDs
 		if atBottom {
 			cv.scrollToBottom()
+		} else if gapBefore > 0 {
+			glib.IdleAdd(func() bool {
+				want := cv.adj.Upper() - gapBefore
+				if want >= 0 {
+					cv.adj.SetValue(want)
+				}
+				return false
+			})
 		}
 		cv.updateTicks(page)
 		return
@@ -437,6 +509,7 @@ func (cv *Conversation) fullRebuild() {
 		}
 		row, tick := cv.buildRow(m)
 		cv.listBox.Append(row)
+		cv.rows[m.ID] = row
 		if tick != nil {
 			cv.ticks[m.ID] = tick
 		}
@@ -496,4 +569,70 @@ func (cv *Conversation) updateTicks(page store.Page) {
 		resetCSS(lbl, []string{"dim-label", "tick-read", "tick-failed"})
 		lbl.AddCSSClass(classForTick(m.Status))
 	}
+}
+
+// TeleportTo loads a context window around msgID (search hit), replaces the
+// rendered page, then scrolls to and briefly highlights the target message.
+func (cv *Conversation) TeleportTo(msgID string) {
+	if !cv.hasChat {
+		return
+	}
+	id := cv.current.ID
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		msgs, err := cv.client.GetMessageContext(ctx, id, msgID, pageSize)
+		glib.IdleAdd(func() bool {
+			if err != nil {
+				if cv.toast != nil {
+					cv.toast("Gagal memuat konteks pesan: " + err.Error())
+				}
+				return false
+			}
+			if cv.chatID() != id {
+				return false
+			}
+			// Backend returns [older DESC] + target + [newer ASC]; normalize.
+			sort.SliceStable(msgs, func(a, b int) bool {
+				return msgs[a].Timestamp < msgs[b].Timestamp
+			})
+			cv.fetchedOnce[id] = true
+			// A saturated window (limit+1 incl. target) means both sides
+			// likely continue beyond what we received.
+			sidesFull := len(msgs) >= pageSize
+			cv.store.ResetContext(id, msgs, sidesFull, sidesFull)
+			cv.scrollToMessage(msgID)
+			return false
+		})
+	}()
+}
+
+// scrollToMessage pins the target row near the top of the viewport and
+// flashes it. Must run after the rebuild has been laid out.
+func (cv *Conversation) scrollToMessage(msgID string) {
+	glib.IdleAdd(func() bool {
+		row := cv.rows[msgID]
+		if row == nil {
+			return false
+		}
+		offset := float64(0)
+		for i := 0; ; i++ {
+			r := cv.listBox.RowAtIndex(i)
+			if r == nil {
+				break
+			}
+			if r == row {
+				break
+			}
+			offset += float64(r.Height())
+		}
+		cv.adj.SetValue(offset - 12)
+
+		row.AddCSSClass("msg-highlight")
+		glib.TimeoutSecondsAdd(2, func() bool {
+			row.RemoveCSSClass("msg-highlight")
+			return false
+		})
+		return false
+	})
 }
