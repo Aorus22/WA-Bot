@@ -30,6 +30,7 @@ type ChatList struct {
 	cache  *media.Cache
 	filter string
 	gen    atomic.Uint64 // bumped on every rebuild; invalidates stale avatar loads
+	queued bool          // a rebuild is already scheduled on the main loop
 	unsub  func()
 
 	onActivate func(chatID string)
@@ -102,12 +103,25 @@ func (cl *ChatList) SetDeps(client *api.Client, st *store.Store, cache *media.Ca
 		if c.Kind != store.ChatsChanged {
 			return
 		}
-		glib.IdleAdd(func() bool {
-			cl.rebuild()
-			return false
-		})
+		cl.queueRebuild()
 	})
 	cl.rebuild()
+}
+
+// queueRebuild schedules one rebuild on the GTK main thread, collapsing
+// bursts of change events (e.g. mark-read + list refresh on every chat
+// switch) into a single pass instead of freezing the UI with back-to-back
+// full rebuilds.
+func (cl *ChatList) queueRebuild() {
+	if cl.queued {
+		return
+	}
+	cl.queued = true
+	glib.IdleAdd(func() bool {
+		cl.queued = false
+		cl.rebuild()
+		return false
+	})
 }
 
 // SetActivateCallback registers the row-activation handler.

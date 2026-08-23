@@ -145,8 +145,8 @@ func (cv *Conversation) bodyWidget(m api.Message) gtk.Widgetter {
 	}
 }
 
-// pictureBody renders an image/sticker bubble with async loading and
-// click-to-open (external viewer).
+// pictureBody renders an image/sticker bubble with async loading; clicking
+// opens the in-app zoomable viewer.
 func (cv *Conversation) pictureBody(m api.Message, w, h int) gtk.Widgetter {
 	frame := gtk.NewFrame("")
 	frame.AddCSSClass("media-frame")
@@ -158,6 +158,7 @@ func (cv *Conversation) pictureBody(m api.Message, w, h int) gtk.Widgetter {
 
 	rawURL := cv.client.MediaURL(m.MediaURL)
 	chat := cv.chatID()
+	var curTex *gdk.Texture
 	cv.cache.ImageAsync(rawURL, func(tex *gdk.Texture, err error) {
 		if err != nil || tex == nil {
 			log.Printf("conversation: image load: %v", err)
@@ -166,10 +167,35 @@ func (cv *Conversation) pictureBody(m api.Message, w, h int) gtk.Widgetter {
 		if cv.chatID() != chat {
 			return
 		}
+		curTex = tex
 		pic.SetPaintable(tex)
 	})
 
-	addClick(frame, func() { go cv.openExternal(rawURL) })
+	addClick(frame, func() {
+		if curTex != nil {
+			ShowImageViewer(MainWindow, curTex)
+			return
+		}
+		// Not loaded yet (or load raced): fetch, decode, then open.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer cancel()
+			localPath, err := cv.cache.Get(ctx, rawURL)
+			if err != nil {
+				log.Printf("conversation: image open: %v", err)
+				return
+			}
+			glib.IdleAdd(func() bool {
+				tex, err := media.TextureFromFile(localPath)
+				if err == nil {
+					curTex = tex
+					pic.SetPaintable(tex)
+					ShowImageViewer(MainWindow, tex)
+				}
+				return false
+			})
+		}()
+	})
 	return frame
 }
 
