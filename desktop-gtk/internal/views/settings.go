@@ -29,6 +29,7 @@ type Settings struct {
 
 	// App group widgets
 	userDataRow *adw.ActionRow
+	themeRow    *adw.ActionRow
 
 	// About group widgets
 	versionRow *adw.ActionRow
@@ -110,6 +111,12 @@ func NewSettings(userDataDir string, mgr *backend.Manager) *Settings {
 	s.userDataRow.SetActivatableWidget(openUserDataBtn)
 	appGroup.Add(s.userDataRow)
 
+	// Theme picker row; options are wired later via SetThemeOptions.
+	s.themeRow = adw.NewActionRow()
+	s.themeRow.SetTitle("Tema")
+	s.themeRow.SetSubtitle("Warna aplikasi — porting dari preset web")
+	appGroup.Add(s.themeRow)
+
 	s.root.Add(appGroup)
 
 	// ─── About group ───
@@ -155,6 +162,22 @@ func (s *Settings) SetVersions(gtkVer, adwVer string) {
 	if adwVer != "" {
 		s.adwRow.SetSubtitle(adwVer)
 	}
+}
+
+// SetThemeOptions fills the theme dropdown with display labels, preselects
+// the current theme, and invokes onSelected (with the chosen index) whenever
+// the user picks a different one.
+func (s *Settings) SetThemeOptions(labels []string, selectedIndex int, onSelected func(index int)) {
+	dd := gtk.NewDropDownFromStrings(labels)
+	if selectedIndex >= 0 && selectedIndex < len(labels) {
+		dd.SetSelected(uint(selectedIndex))
+	}
+	dd.SetVAlign(gtk.AlignCenter)
+	dd.Object.NotifyProperty("selected", func() {
+		onSelected(int(dd.Selected()))
+	})
+	s.themeRow.AddSuffix(dd)
+	s.themeRow.SetActivatableWidget(dd)
 }
 
 // restartBackend stops the manager (sends SIGINT, waits 3s) and restarts it.

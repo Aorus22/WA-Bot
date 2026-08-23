@@ -159,17 +159,22 @@ func (cv *Conversation) pictureBody(m api.Message, w, h int) gtk.Widgetter {
 	rawURL := cv.client.MediaURL(m.MediaURL)
 	chat := cv.chatID()
 	var curTex *gdk.Texture
-	cv.cache.ImageAsync(rawURL, func(tex *gdk.Texture, err error) {
-		if err != nil || tex == nil {
-			log.Printf("conversation: image load: %v", err)
-			return
-		}
-		if cv.chatID() != chat {
-			return
-		}
-		curTex = tex
+	if tex := cv.cache.MemoryTexture(rawURL); tex != nil {
+		curTex = tex // instant: no async reload flicker on rebuilds
 		pic.SetPaintable(tex)
-	})
+	} else {
+		cv.cache.ImageAsync(rawURL, func(tex *gdk.Texture, err error) {
+			if err != nil || tex == nil {
+				log.Printf("conversation: image load: %v", err)
+				return
+			}
+			if cv.chatID() != chat {
+				return
+			}
+			curTex = tex
+			pic.SetPaintable(tex)
+		})
+	}
 
 	addClick(frame, func() {
 		if curTex != nil {

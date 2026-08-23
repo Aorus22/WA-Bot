@@ -5,6 +5,7 @@ package ui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 	"wa-bot-desktop/internal/api"
 	"wa-bot-desktop/internal/backend"
+	"wa-bot-desktop/internal/config"
 	"wa-bot-desktop/internal/media"
 	"wa-bot-desktop/internal/store"
 	"wa-bot-desktop/internal/views"
@@ -49,6 +51,7 @@ type App struct {
 	setting *views.Settings
 
 	sessionUp bool // WhatsApp session believed connected
+	config    config.Config
 }
 
 // NewApp constructs the App but does not run the GTK main loop.
@@ -75,7 +78,12 @@ func (a *App) Run(ctx context.Context) int {
 
 func (a *App) onActivate() {
 	log.Printf("Adw app activated; constructing window")
-	loadCSS()
+	// Theme before anything is drawn so startup never flashes the wrong look.
+	a.config = config.Load(a.cfg.UserDataDir)
+	if a.config.Theme == "" {
+		a.config.Theme = DefaultThemeName
+	}
+	ApplyTheme(a.config.Theme)
 
 	w, err := NewWindow(a.adwApp, a.cfg.Name, a.cfg.Version)
 	if err != nil {
@@ -157,6 +165,7 @@ func (a *App) bootstrapViews(port int) {
 	a.pane.SetDeps(a.client, a.store, a.cache)
 	a.dash.SetClient(a.client)
 	a.setting.SetBackendPort(port)
+	a.wireThemePicker()
 
 	a.startWebSocket(port)
 
@@ -359,6 +368,34 @@ func (a *App) showLoginScreen(pollQR bool, statusText string) {
 	if pollQR {
 		go a.pollInitialQR()
 	}
+}
+
+// wireThemePicker populates the Settings theme dropdown and persists +
+// applies the user's choice immediately.
+func (a *App) wireThemePicker() {
+	labels := make([]string, len(Themes))
+	selected := 0
+	cur := ActiveTheme()
+	for i := range Themes {
+		variant := "light"
+		if luminance(Themes[i].Colors.Background) < 0.5 {
+			variant = "dark"
+		}
+		labels[i] = fmt.Sprintf("%s · %s", Themes[i].Label, variant)
+		if Themes[i].Name == cur.Name {
+			selected = i
+		}
+	}
+	a.setting.SetThemeOptions(labels, selected, func(i int) {
+		if i < 0 || i >= len(Themes) {
+			return
+		}
+		a.config.Theme = Themes[i].Name
+		ApplyTheme(Themes[i].Name)
+		if err := config.Save(a.cfg.UserDataDir, a.config); err != nil {
+			log.Printf("theme: save failed: %v", err)
+		}
+	})
 }
 
 // onRetryQR refetches the latest QR from the backend and restarts polling.

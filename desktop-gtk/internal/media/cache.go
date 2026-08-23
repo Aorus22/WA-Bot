@@ -30,6 +30,13 @@ type Cache struct {
 
 	mu       sync.Mutex
 	inflight map[string]*call
+
+	// Decoded-texture memory cache (URL -> GdkTexture). Written and read on
+	// the GTK main thread only; the mutex is just belt-and-suspenders. This
+	// lets rebuilt widgets (chat rows, bubbles) apply images synchronously
+	// instead of blinking through an async reload.
+	memMu sync.Mutex
+	mem   map[string]*gdk.Texture
 }
 
 type call struct {
@@ -46,6 +53,7 @@ func NewCache(client *api.Client, userDataDir string) *Cache {
 		client:   client,
 		dir:      dir,
 		inflight: make(map[string]*call),
+		mem:      make(map[string]*gdk.Texture),
 	}
 }
 
@@ -55,14 +63,39 @@ func (c *Cache) Dir() string { return c.dir }
 // Clear removes every cached file (called on logout).
 func (c *Cache) Clear() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	entries, err := os.ReadDir(c.dir)
-	if err != nil {
+	if err == nil {
+		for _, e := range entries {
+			_ = os.RemoveAll(filepath.Join(c.dir, e.Name()))
+		}
+	}
+	c.mu.Unlock()
+
+	c.memMu.Lock()
+	c.mem = make(map[string]*gdk.Texture)
+	c.memMu.Unlock()
+}
+
+// MemoryTexture returns the previously decoded texture for rawURL, if any.
+// Call from the GTK main thread.
+func (c *Cache) MemoryTexture(rawURL string) *gdk.Texture {
+	c.memMu.Lock()
+	defer c.memMu.Unlock()
+	return c.mem[rawURL]
+}
+
+// RememberTexture stores a decoded texture under its URL so future widget
+// rebuilds can apply it instantly. Call from the GTK main thread.
+func (c *Cache) RememberTexture(rawURL string, tex *gdk.Texture) {
+	if tex == nil {
 		return
 	}
-	for _, e := range entries {
-		_ = os.RemoveAll(filepath.Join(c.dir, e.Name()))
+	c.memMu.Lock()
+	defer c.memMu.Unlock()
+	if c.mem == nil {
+		c.mem = make(map[string]*gdk.Texture)
 	}
+	c.mem[rawURL] = tex
 }
 
 // Get returns the local path for rawURL, downloading it once. Concurrent
@@ -99,7 +132,8 @@ func (c *Cache) Get(ctx context.Context, rawURL string) (string, error) {
 }
 
 // ImageAsync downloads rawURL off-thread and invokes done on the GTK main
-// thread with the decoded texture (or error).
+// thread with the decoded texture (or error). Successful textures are stored
+// in the memory cache so later widget rebuilds apply them instantly.
 func (c *Cache) ImageAsync(rawURL string, done func(tex *gdk.Texture, err error)) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -110,6 +144,9 @@ func (c *Cache) ImageAsync(rawURL string, done func(tex *gdk.Texture, err error)
 			tex, err = TextureFromFile(path)
 		}
 		glib.IdleAdd(func() bool {
+			if err == nil && tex != nil {
+				c.RememberTexture(rawURL, tex)
+			}
 			done(tex, err)
 			return false
 		})
