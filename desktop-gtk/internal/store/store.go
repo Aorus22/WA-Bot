@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -496,9 +497,28 @@ func isTemp(m api.Message) bool {
 	return len(m.ID) > len(TempIDPrefix) && m.ID[:len(TempIDPrefix)] == TempIDPrefix
 }
 
+// OneLine flattens a preview string onto one line: newlines/tabs become
+// spaces, whitespace runs collapse, and overlong text is cut at maxRunes
+// with an ellipsis. Keeps chat-list rows a uniform height no matter how
+// long (or multi-line) the last message was.
+func OneLine(s string, maxRunes int) string {
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return s
+}
+
 func previewOf(m api.Message) string {
-	if m.Content != "" {
-		return m.Content
+	if s := strings.TrimSpace(m.Content); s != "" {
+		return OneLine(s, 80)
 	}
 	switch m.Type {
 	case "image":
