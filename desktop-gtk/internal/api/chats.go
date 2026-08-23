@@ -92,6 +92,41 @@ func (c *Client) GetMessagesAfter(ctx context.Context, chatID string, limit int,
 	return c.getMessages(ctx, chatID, q)
 }
 
+// GetChatMedia fetches the chat's shared media (GET /api/chats/{id}/media),
+// newest first, paginated by `before` (unix millis).
+func (c *Client) GetChatMedia(ctx context.Context, chatID string, limit int, before int64) ([]Message, error) {
+	return c.getChatSection(ctx, chatID, "media", limit, before)
+}
+
+// GetChatDocs fetches the chat's shared documents.
+func (c *Client) GetChatDocs(ctx context.Context, chatID string, limit int, before int64) ([]Message, error) {
+	return c.getChatSection(ctx, chatID, "docs", limit, before)
+}
+
+// GetChatLinks fetches the chat's messages containing links.
+func (c *Client) GetChatLinks(ctx context.Context, chatID string, limit int, before int64) ([]Message, error) {
+	return c.getChatSection(ctx, chatID, "links", limit, before)
+}
+
+func (c *Client) getChatSection(ctx context.Context, chatID, section string, limit int, before int64) ([]Message, error) {
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	if before > 0 {
+		q.Set("before", strconv.FormatInt(before, 10))
+	}
+	path := "/api/chats/" + url.PathEscape(chatID) + "/" + section
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var msgs []Message
+	if err := c.doJSON(ctx, "GET", path, nil, &msgs); err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
 // MarkRead marks all messages in the chat as read (POST /api/chats/{id}/read).
 func (c *Client) MarkRead(ctx context.Context, chatID string) error {
 	return c.doJSON(ctx, "POST", "/api/chats/"+url.PathEscape(chatID)+"/read", map[string]any{}, nil)
