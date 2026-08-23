@@ -1,0 +1,19 @@
+# Build artifacts
+wa-bot-desktop
+wa-bot-desktop.exe
+*.exe
+*.app/
+
+# Runtime storage (media cache) — anchored so internal/media Go pkg stays tracked
+/media/
+
+# Local config
+.env.local
+.idea/
+.vscode/
+*.swp
+.DS_Store
+build*.err
+build*.out
+*.err
+*.out

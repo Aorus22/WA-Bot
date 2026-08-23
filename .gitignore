@@ -1,7 +1,7 @@
 .env
 docker-compose
 database/
-media/
+/media/
 wa-bot.exe
 wa-bot
 wa-bot-backend.exe
@@ -10,6 +10,7 @@ tmp/
 .serena
 .claude
 .opencode/
+.zcode/
 desktop/node_modules/
 desktop/dist/
 compiled/
