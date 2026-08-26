@@ -141,6 +141,44 @@ func PrepareAudioFile(ctx context.Context, audioURL string) (*AudioResult, error
 	}, nil
 }
 
+// PrepareAudioMultipart accepts raw audio bytes from a multipart upload, writes
+// them to a temp file, enforces the max audio size and validates the MP3/WAV
+// format, returning an AudioResult (whose Cleanup removes the temp file).
+func PrepareAudioMultipart(data []byte) (*AudioResult, error) {
+	if int64(len(data)) > MaxAudioFileSize {
+		return nil, ErrAudioDownloadFailed // too large for a call
+	}
+	if len(data) == 0 {
+		return nil, ErrUnsupportedAudio
+	}
+	tmp, err := os.CreateTemp("", "wa-audio-up-*")
+	if err != nil {
+		return nil, ErrAudioDownloadFailed
+	}
+	path := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(path)
+		return nil, ErrAudioDownloadFailed
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, ErrAudioDownloadFailed
+	}
+	format, err := sniffAudioFormat(path)
+	if err != nil {
+		_ = os.Remove(path)
+		return nil, err
+	}
+	return &AudioResult{
+		Path:   path,
+		Format: format,
+		Cleanup: func() {
+			_ = os.Remove(path)
+		},
+	}, nil
+}
+
 // resolveAllowed resolves host and returns the first validated address. Every
 // resolved address is checked; if any is in a blocked range the whole download
 // is refused, so DNS rebinding cannot slip through the initial check.
