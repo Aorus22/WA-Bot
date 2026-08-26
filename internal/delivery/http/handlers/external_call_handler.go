@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"wa-bot/internal/delivery/http/middleware"
@@ -53,6 +54,15 @@ func NewExternalCallHandler(h *Handler) *ExternalCallHandler {
 // source BEFORE dialing so the peer does not wait, then returns 202 Accepted
 // immediately; the dial itself runs asynchronously in the service.
 func (eh *ExternalCallHandler) CreateCall(w http.ResponseWriter, r *http.Request) {
+	// Multipart (file upload) path: POST /api/external/v1/calls with
+	// Content-Type: multipart/form-data. Supports a file field for direct
+	// audio upload (mode/type/hangup as form values), avoiding the need to
+	// host an audio_url.
+	if isMultipart(r) {
+		eh.createCallMultipart(w, r)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxExternalBodyBytes)
 	var req externalCallRequest
 	if err := eh.handler.readJSON(r, &req); err != nil {
@@ -166,6 +176,145 @@ func (eh *ExternalCallHandler) CreateCall(w http.ResponseWriter, r *http.Request
 		"id":     state.ID,
 		"status": "preparing",
 	})
+}
+
+// isMultipart reports whether the request is a multipart/form-data upload.
+func isMultipart(r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	return strings.HasPrefix(strings.ToLower(ct), "multipart/form-data")
+}
+
+// multipartMaxBytes bounds the content length for multipart uploads so a large
+// file is rejected before any parsing work. Set above MaxAudioFileSize.
+const multipartMaxBytes = 30 << 20 // 30MB
+
+// createCallMultipart handles POST /api/external/v1/calls as multipart/form-data.
+// Form fields: target (required), type, media_mode (default audio_file),
+// audio_url (optional, legacy), hangup_after_playback, and file (the audio
+// upload). Uploading via the file field avoids hosting an audio_url.
+func (eh *ExternalCallHandler) createCallMultipart(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, multipartMaxBytes)
+	if err := r.ParseMultipartForm(multipartMaxBytes); err != nil {
+		eh.handler.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid_multipart", "message": "failed to parse multipart form",
+		})
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
+	target := r.FormValue("target")
+	if target == "" {
+		eh.handler.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid_target", "message": "target is required",
+		})
+		return
+	}
+
+	mediaMode := entity.MediaMode(r.FormValue("media_mode"))
+	if mediaMode == "" {
+		mediaMode = entity.MediaModeAudioFile
+	}
+	var audio *call.AudioResult
+	switch mediaMode {
+	case entity.MediaModeAudioFile:
+		// 1) Direct file upload field "file".
+		data, _, err := eh.handler.readMultipartFile(r, "file")
+		if err == nil {
+			res, aerr := call.PrepareAudioMultipart(data)
+			if aerr != nil {
+				sendMultipartAudioError(eh.handler, w, aerr)
+				return
+			}
+			audio = res
+			mediaMode = entity.MediaModeAudioFile
+			break
+		}
+		// 2) Legacy: audio_url form field (server download).
+		audioURL := r.FormValue("audio_url")
+		if audioURL == "" {
+			eh.handler.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid_media", "message": "audio_file media requires file upload or audio_url",
+			})
+			return
+		}
+		res, aerr := call.PrepareAudioFile(r.Context(), audioURL)
+		if aerr != nil {
+			sendMultipartAudioError(eh.handler, w, aerr)
+			return
+		}
+		audio = res
+	case entity.MediaModeTTS:
+		text := r.FormValue("text")
+		voice := r.FormValue("voice")
+		ref := r.FormValue("reference_id")
+		if eh.tts == nil {
+			eh.handler.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{
+				"error": "tts_unavailable", "message": "tts provider is not configured",
+			})
+			return
+		}
+		res, err := eh.tts.Synthesize(r.Context(), call.TTSRequest{Text: text, Voice: voice, ReferenceID: ref})
+		if err != nil {
+			eh.handler.sendJSONWithStatus(w, http.StatusBadGateway, map[string]string{
+				"error": "tts_failed", "message": "failed to synthesize speech",
+			})
+			return
+		}
+		audio = res
+	default:
+		eh.handler.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid_media", "message": "unsupported media mode",
+		})
+		return
+	}
+
+	callType := entity.CallType(r.FormValue("type"))
+	if callType == "" {
+		callType = entity.CallTypeAudio
+	}
+	if callType != entity.CallTypeAudio {
+		eh.handler.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{
+			"error": "video_not_ready", "message": "only audio calls are supported",
+		})
+		if audio != nil && audio.Cleanup != nil {
+			audio.Cleanup()
+		}
+		return
+	}
+	hangup := r.FormValue("hangup_after_playback") == "true"
+
+	state, err := eh.callSvc.StartExternalCall(r.Context(), call.ExternalCallRequest{
+		Target:              target,
+		Type:                callType,
+		MediaMode:           mediaMode,
+		Audio:               audio,
+		HangupAfterPlayback: hangup,
+		APIKeyID:            middleware.APIKeyIDFromContext(r.Context()),
+	})
+	if err != nil {
+		if audio != nil && audio.Cleanup != nil {
+			audio.Cleanup()
+		}
+		writeExternalCallError(eh.handler, w, err)
+		return
+	}
+	eh.handler.sendJSONWithStatus(w, http.StatusAccepted, map[string]interface{}{
+		"id":     state.ID,
+		"status": "preparing",
+	})
+}
+
+// sendMultipartAudioError maps audio-prep errors to HTTP responses in the
+// multipart path (mirrors the JSON path's error mapping).
+func sendMultipartAudioError(h *Handler, w http.ResponseWriter, err error) {
+	switch {
+	case err == call.ErrUnsupportedAudio:
+		h.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{"error": "unsupported_audio", "message": "unsupported audio format"})
+	case err == call.ErrBlockedAddress:
+		h.sendJSONWithStatus(w, http.StatusBadRequest, map[string]string{"error": "audio_download_failed", "message": "audio source address is blocked"})
+	default:
+		h.sendJSONWithStatus(w, http.StatusBadGateway, map[string]string{"error": "audio_download_failed", "message": "failed to process audio"})
+	}
 }
 
 // GetCallStatus returns the status of an external call (calls:read). Ownership
