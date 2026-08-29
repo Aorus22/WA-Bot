@@ -181,6 +181,16 @@ func (s *Store) Chat(id string) (api.Chat, bool) {
 	return api.Chat{}, false
 }
 
+// sortMessages enforces ascending timestamp order (stable). Chat pages load
+// dynamically (pagination, history-sync imports, WS appends) and can carry
+// ties or out-of-order rows; renderers always consume a sorted list.
+func sortMessages(items []api.Message) []api.Message {
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].Timestamp < items[j].Timestamp
+	})
+	return items
+}
+
 // ResetMessages replaces the message page for a chat. Input is the raw API
 // result: newest-first DESC slice from GetMessages.
 func (s *Store) ResetMessages(chatID string, newestFirst []api.Message, hasMore bool) {
@@ -188,6 +198,7 @@ func (s *Store) ResetMessages(chatID string, newestFirst []api.Message, hasMore 
 	for i, m := range newestFirst {
 		asc[len(newestFirst)-1-i] = m
 	}
+	asc = sortMessages(asc)
 	s.mu.Lock()
 	s.rev++
 	s.messages[chatID] = &chatState{items: asc, hasMore: hasMore, rev: s.rev}
@@ -199,8 +210,7 @@ func (s *Store) ResetMessages(chatID string, newestFirst []api.Message, hasMore 
 // message (search teleport). Input must already be ascending by timestamp.
 // Both sides may have more history on the server.
 func (s *Store) ResetContext(chatID string, msgsAsc []api.Message, hasPrev, hasNext bool) {
-	cp := make([]api.Message, len(msgsAsc))
-	copy(cp, msgsAsc)
+	cp := sortMessages(append([]api.Message(nil), msgsAsc...))
 	s.mu.Lock()
 	s.rev++
 	s.messages[chatID] = &chatState{items: cp, hasMore: hasPrev, hasNext: hasNext, rev: s.rev}
@@ -239,7 +249,7 @@ func (s *Store) PrependOlder(chatID string, olderDesc []api.Message, hasMore boo
 	for i := len(olderDesc) - 1; i >= 0; i-- {
 		asc = append(asc, olderDesc[i])
 	}
-	cs.items = append(asc, cs.items...)
+	cs.items = sortMessages(append(asc, cs.items...))
 	cs.hasMore = hasMore
 	s.touchLocked(cs)
 	s.mu.Unlock()

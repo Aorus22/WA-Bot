@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -135,6 +136,11 @@ func (w *WhatsAppClient) GetChannelMessages(ctx context.Context, channelID strin
 	if err != nil {
 		return nil, nil, err
 	}
+	// WhatsApp returns channel posts newest-first; normalize to ascending
+	// (oldest -> newest) so clients can render and page them like a chat.
+	sort.SliceStable(msgs, func(i, j int) bool {
+		return msgs[i].MessageServerID < msgs[j].MessageServerID
+	})
 	out := make([]*ChannelMessage, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, channelMessageOf(m))

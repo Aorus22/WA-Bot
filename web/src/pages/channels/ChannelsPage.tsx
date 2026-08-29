@@ -35,6 +35,11 @@ type ChannelPost = {
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
+/** Frontend ordering guard: channel posts must render oldest -> newest. */
+function sortPostsAsc(posts: ChannelPost[]): ChannelPost[] {
+	return [...posts].sort((a, b) => a.serverId - b.serverId)
+}
+
 export default function ChannelsPage() {
 	const [channels, setChannels] = useState<Channel[]>([])
 	const [loading, setLoading] = useState(true)
@@ -185,7 +190,7 @@ function ChannelConversation({ channel, onChange, onUnfollowed }: {
 
 	const load = useCallback(async () => {
 		try {
-			const fresh = (await api.getChannelMessages(channel.jid, 30)) || []
+			const fresh = sortPostsAsc((await api.getChannelMessages(channel.jid, 30)) || [])
 			setPosts(fresh)
 			setHasMore(fresh.length === 30)
 		} catch (err) {
@@ -199,8 +204,8 @@ function ChannelConversation({ channel, onChange, onUnfollowed }: {
 		if (loadingMore || posts.length === 0) return
 		setLoadingMore(true)
 		try {
-			const older = (await api.getChannelMessages(channel.jid, 30, posts[posts.length - 1].serverId)) || []
-			setPosts((prev) => [...prev, ...older.filter((o) => !prev.some((p) => p.id === o.id))])
+			const older = sortPostsAsc((await api.getChannelMessages(channel.jid, 30, posts[posts.length - 1].serverId)) || [])
+			setPosts((prev) => sortPostsAsc([...prev, ...older.filter((o) => !prev.some((p) => p.id === o.id))]))
 			setHasMore(older.length === 30)
 		} catch (err) {
 			console.error("Failed to load older posts:", err)
@@ -318,6 +323,16 @@ function ChannelConversation({ channel, onChange, onUnfollowed }: {
 					<p className="text-sm text-muted-foreground text-center py-16 opacity-60">No posts yet</p>
 				) : (
 					<div className="space-y-8 max-w-3xl mx-auto">
+						{loadingMore && (
+							<div className="flex justify-center py-2">
+								<div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+							</div>
+						)}
+						{hasMore && !loadingMore && (
+							<div className="flex justify-center pb-2">
+								<Button variant="outline" size="sm" onClick={loadMore}>Load older posts</Button>
+							</div>
+						)}
 						{grouped.map((group) => (
 							<div key={group.dateKey}>
 								<div className="flex justify-center sticky top-0 z-20 py-2 pointer-events-none">
@@ -367,12 +382,6 @@ function ChannelConversation({ channel, onChange, onUnfollowed }: {
 								</div>
 							</div>
 						))}
-						{loadingMore && <p className="text-center text-xs text-muted-foreground py-2">Loading older posts…</p>}
-						{hasMore && !loadingMore && (
-							<div className="flex justify-center py-2">
-								<Button variant="outline" size="sm" onClick={loadMore}>Load older posts</Button>
-							</div>
-						)}
 					</div>
 				)}
 			</div>

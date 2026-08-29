@@ -23,7 +23,7 @@ import (
 // ("Status Saya" + recent updates) and an in-pane viewer on the right,
 // mirroring the official desktop client layout.
 type Status struct {
-	root   *gtk.Box
+	root   *adw.OverlaySplitView
 	list   *gtk.ListBox
 	status *gtk.Label
 
@@ -55,8 +55,6 @@ type Status struct {
 // NewStatus constructs the Status page widgets.
 func NewStatus() *Status {
 	s := &Status{}
-
-	s.root = gtk.NewBox(gtk.OrientationHorizontal, 0)
 
 	// ─── Left: status list ───
 	left := gtk.NewBox(gtk.OrientationVertical, 0)
@@ -122,9 +120,6 @@ func NewStatus() *Status {
 	scroller.SetVExpand(true)
 	scroller.SetHExpand(true)
 	left.Append(scroller)
-
-	s.root.Append(left)
-	s.root.Append(gtk.NewSeparator(gtk.OrientationVertical))
 
 	// ─── Right: empty state / viewer ───
 	s.right = gtk.NewBox(gtk.OrientationVertical, 0)
@@ -195,7 +190,14 @@ func NewStatus() *Status {
 	s.viewer.Append(nav)
 
 	s.right.Append(s.viewer)
-	s.root.Append(s.right)
+
+	// Same sidebar geometry as the Chats pane (never 50:50).
+	split := adw.NewOverlaySplitView()
+	split.SetSidebar(left)
+	split.SetContent(s.right)
+	split.SetMinSidebarWidth(260)
+	split.SetMaxSidebarWidth(360)
+	s.root = split
 	return s
 }
 

@@ -35,6 +35,15 @@ interface ChatStore {
 	setMessageLoading: (chatId: string, field: "loading" | "loadingMore" | "loadingNewer", v: boolean) => void
 }
 
+/**
+ * Frontend ordering guard: chat pages are loaded dynamically (pagination,
+ * history-sync imports, WS appends) and the backend's timestamp ordering can
+ * carry ties/out-of-order rows. Re-sort ascending (stable) before storing so
+ * renderers and date grouping always see a chronological list.
+ */
+const sortAsc = (msgs: Message[]): Message[] =>
+	[...msgs].sort((a, b) => a.timestamp - b.timestamp)
+
 const emptyEntry = (): ChatMessagesEntry => ({
 	messages: [],
 	hasMore: true,
@@ -119,7 +128,7 @@ export const useChatStore = create<ChatStore>((set) => ({
 					...state.messagesByChat,
 					[chatId]: {
 						...prev,
-						messages: msgs,
+						messages: sortAsc(msgs),
 						hasMore,
 						hasMoreNext: false,
 						loaded: true,
@@ -153,7 +162,7 @@ export const useChatStore = create<ChatStore>((set) => ({
 					...state.messagesByChat,
 					[chatId]: {
 						...prev,
-						messages: [...prev.messages, ...msgs],
+						messages: sortAsc([...prev.messages, ...msgs]),
 						hasMoreNext: msgs.length > 0,
 						loadingNewer: false,
 					},
@@ -203,7 +212,7 @@ export const useChatStore = create<ChatStore>((set) => ({
 			return {
 				messagesByChat: {
 					...state.messagesByChat,
-					[chatId]: { ...prev, messages: [...prev.messages, msg] },
+					[chatId]: { ...prev, messages: sortAsc([...prev.messages, msg]) },
 				},
 			}
 		}),
