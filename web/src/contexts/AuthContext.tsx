@@ -68,6 +68,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 						type: payload.type,
 						mediaUrl: payload.mediaUrl,
 						isAutomatic: payload.isAutomatic,
+						senderName: payload.senderName,
+						replyToId: payload.replyToId,
+						forwarded: payload.forwarded,
+						reactions: payload.reactions,
+						extra: payload.extra,
 					},
 				})
 				setChatUpdate({
@@ -81,6 +86,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				})
 				break
 			}
+			case "message_reaction":
+				if (message.payload?.id) {
+					useChatStore.getState().patchMessage(message.payload.chatId, message.payload.id, {
+						reactions: message.payload.reactions || [],
+					})
+				}
+				break
+			case "poll_update":
+				if (message.payload?.id) {
+					useChatStore.getState().patchMessage(message.payload.chatId, message.payload.id, {
+						extra: message.payload.extra,
+					})
+				}
+				break
 			case "message_deleted":
 				if (message.payload) {
 					setIncomingMessage({
@@ -115,6 +134,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 						chatName: message.payload.name,
 						chatAvatar: message.payload.avatar,
 					})
+				}
+				break
+			case "group_updated":
+				if (message.payload?.group?.name) {
+					useChatStore.setState((state) => ({
+						chats: state.chats.map((chat) =>
+							chat.id === message.payload.chatId
+								? { ...chat, name: message.payload.group.name }
+								: chat
+						),
+					}))
 				}
 				break
 			case "chat_state":

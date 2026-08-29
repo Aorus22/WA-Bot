@@ -3,10 +3,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot, Mic } from "lucide-react"
+import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot, Mic, Forward, SmilePlus } from "lucide-react"
 import { LazyMedia } from "@/components/LazyMedia"
 import { isMarkdownContent } from "./renderMd"
 import { WAAudioPlayer } from "./WAAudioPlayer"
+import { PollBubble, LocationBubble, ContactBubble, ReactionChips, ForwardedLabel, LinkPreviewCard, ViewOnceStrip } from "./MessageBubbles"
+
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "👎"]
 
 export const ChatMessageItem = memo(({
 	message,
@@ -25,6 +28,9 @@ export const ChatMessageItem = memo(({
 	getMediaUrl,
 	getAvatarUrl,
 	isHighlighted,
+	onReact,
+	onForward,
+	onVote,
 }: any) => {
 	const swipeRef = useRef(0)
 	const rowRef = useRef<HTMLDivElement>(null)
@@ -73,8 +79,13 @@ export const ChatMessageItem = memo(({
 	const isSticker = message.type === "sticker"
 	const isDocument = message.type === "document"
 	const isAudio = message.type === "audio" || message.type === "ptt" || message.type === "voice"
+	const isPoll = message.type === "poll"
+	const isLocation = message.type === "location"
+	const isContact = message.type === "contact"
+	const isGif = message.type === "gif"
 	const isMedia = message.mediaUrl && message.mediaUrl.length > 0
 	const showSenderInfo = !isMe && chat?.isGroup && isFirstInSequence
+	const isViewOnce = Boolean(message.extra?.viewOnce) && (isImage || isVideo)
 
 	return (
 		<div
@@ -119,12 +130,14 @@ export const ChatMessageItem = memo(({
 					</div>
 				)}
 
-				<div className={cn("flex flex-col", isMe ? "items-end" : "items-start")}>
-					{showSenderInfo && (
-						<span className="text-[11px] font-bold mb-1 ml-1 text-primary/80">{message.senderName || message.from.split("@")[0]}</span>
-					)}
+					<div className={cn("flex flex-col", isMe ? "items-end" : "items-start")}>
+						{showSenderInfo && (
+							<span className="text-[11px] font-bold mb-1 ml-1 text-primary/80">{message.senderName || message.from.split("@")[0]}</span>
+						)}
 
-					{repliedMsg && (
+						<ReactionChips reactions={message.reactions} isMe={isMe} onReact={onReact} />
+
+						{repliedMsg && (
 						<div
 						        className="mb-0 p-2 bg-black/5 dark:bg-white/5 border-l-4 border-primary text-[12px] opacity-80 cursor-pointer hover:opacity-100 transition-opacity relative z-10 max-w-[65vw] sm:max-w-[320px] overflow-hidden"
 						        onClick={() => document.getElementById(repliedMsg.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}
@@ -170,7 +183,31 @@ export const ChatMessageItem = memo(({
 									)
 							)}
 						>
-							{isImage && isMedia && (
+								{message.forwarded && <ForwardedLabel />}
+								{isViewOnce && <ViewOnceStrip meta={message.extra.viewOnce} type={message.type} />}
+								{isPoll && message.extra?.poll && (
+									<PollBubble poll={message.extra.poll} isMe={isMe} onVote={onVote} myVote={message.extra.poll.votes?.["me"]} />
+								)}
+								{isLocation && message.extra?.location && (
+									<LocationBubble location={message.extra.location} getMediaUrl={getMediaUrl} />
+								)}
+								{isContact && message.extra?.contact && (
+									<ContactBubble contact={message.extra.contact} />
+								)}
+								{isGif && isMedia && (
+									<div className="mb-1 -mx-[14px] -mt-2 overflow-hidden relative z-10 w-full max-h-[360px] rounded-none bg-black/10">
+										<LazyMedia
+											type="video"
+											src={getMediaUrl(message.mediaUrl)}
+											className="w-full max-h-[360px] object-contain"
+											controls
+										/>
+									</div>
+								)}
+								{!isPoll && !isLocation && !isContact && message.extra?.linkPreview && (
+									<LinkPreviewCard preview={message.extra.linkPreview} getMediaUrl={getMediaUrl} />
+								)}
+								{isImage && isMedia && (
 							        <div className="mb-2 -mx-[14px] -mt-2 overflow-hidden relative z-10 w-fit max-w-[calc(100%+28px)] max-h-[360px] rounded-none bg-transparent">
 							                <LazyMedia										src={getMediaUrl(message.mediaUrl)}
 										alt="Image"
@@ -249,7 +286,7 @@ export const ChatMessageItem = memo(({
 									<span className="text-[11px] font-bold">Audio unavailable</span>
 								</div>
 							)}
-							{message.content && !["[Image]", "[Video]", "[Sticker]", "[Document]", "[Audio]", "[Voice Message]"].includes(message.content) && !isDocument && !isAudio && (
+							{message.content && !["[Image]", "[Video]", "[Sticker]", "[Document]", "[Audio]", "[Voice Message]", "[GIF]", "[Lokasi]", "[Lokasi Langsung]", "[Kontak]", "[Sekali Lihat]"].includes(message.content) && !isDocument && !isAudio && !isPoll && !isLocation && !isContact && (
 							        <div className={cn("break-words [word-break:break-word] leading-relaxed relative z-10", !isMarkdownContent(message.content) && "whitespace-pre-wrap")}>{renderFormattedContent(message.content)}</div>
 							)}
 							{!(isAudio && isMedia) && (
@@ -329,7 +366,29 @@ export const ChatMessageItem = memo(({
 									</PopoverTrigger>
 									<PopoverContent className="w-48 p-1 shadow-xl border-border/40 backdrop-blur-xl bg-background/95" align={isMe ? "end" : "start"}>
 										<div className="flex flex-col">
+											<div className="flex items-center justify-between gap-0.5 px-1 py-1 border-b border-border/40 mb-1">
+												{QUICK_REACTIONS.map((emoji) => {
+													const mine = message.reactions?.some((r: any) => r.emoji === emoji && r.senders?.includes("me"))
+													return (
+														<button
+															key={emoji}
+															onClick={() => onReact?.(mine ? "" : emoji)}
+															className={cn("p-1 text-[16px] rounded-full hover:bg-muted transition-transform hover:scale-125", mine && "bg-primary/15")}
+														>
+															{emoji}
+														</button>
+													)
+												})}
+											</div>
 											<button onClick={onReply} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Reply className="h-4 w-4 text-primary" /><span className="font-medium">Reply</span></button>
+											<button onClick={() => onForward?.()} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Forward className="h-4 w-4 text-primary" /><span className="font-medium">Forward</span></button>
+											<button onClick={() => {
+												const picker = document.createElement("input")
+												picker.type = "text"
+												// Emoji quick-pick fallback via prompt
+												const emoji = window.prompt("React with emoji:") || ""
+												if (emoji.trim()) onReact?.(emoji.trim())
+											}} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><SmilePlus className="h-4 w-4 text-primary" /><span className="font-medium">React…</span></button>
 											{isMe && (
 												<>
 													<button onClick={onEdit} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Edit3 className="h-4 w-4 text-orange-500" /><span className="font-medium">Edit</span></button>

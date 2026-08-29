@@ -6,6 +6,8 @@ import { api, type Chat } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chatStore"
 import { toast } from "sonner"
+import { NewGroupDialog, JoinGroupDialog } from "./GroupPanels"
+import { Users, Link as LinkIcon } from "lucide-react"
 import {
     ContextMenu,
     ContextMenuContent,
@@ -62,6 +64,8 @@ export const ChatSidebar = memo(({
     const setChatsLoading = useChatStore(s => s.setChatsLoading)
     const upsertChat = useChatStore(s => s.upsertChat)
     const [searchQuery, setSearchQuery] = useState("")
+    const [newGroupOpen, setNewGroupOpen] = useState(false)
+    const [joinGroupOpen, setJoinGroupOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [archivedMode, setArchivedMode] = useState(false)
     const processedUpdateIds = useRef<Set<string>>(new Set())
@@ -226,6 +230,24 @@ export const ChatSidebar = memo(({
                         )}
                         <h2 className="text-2xl font-bold tracking-tight">{archivedMode ? "Archived" : "Messages"}</h2>
                     </div>
+                    {!archivedMode && (
+                        <div className="flex items-center gap-1">
+                            <button
+                                aria-label="New group"
+                                onClick={() => setNewGroupOpen(true)}
+                                className="rounded-full p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                            >
+                                <Users className="h-4.5 w-4.5" />
+                            </button>
+                            <button
+                                aria-label="Join via link"
+                                onClick={() => setJoinGroupOpen(true)}
+                                className="rounded-full p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                            >
+                                <LinkIcon className="h-4.5 w-4.5" />
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Search - Expandable or always visible */}
@@ -366,6 +388,8 @@ export const ChatSidebar = memo(({
                 </div>
             )}
             </div>
-        </div>
+                    <NewGroupDialog open={newGroupOpen} onOpenChange={setNewGroupOpen} />
+            <JoinGroupDialog open={joinGroupOpen} onOpenChange={setJoinGroupOpen} />
+</div>
     )
 })

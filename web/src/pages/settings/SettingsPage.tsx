@@ -10,6 +10,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import {
 	Select,
@@ -57,6 +58,8 @@ export function SettingsPage() {
 	const [geminiApiKey, setGeminiApiKey] = useState('')
 	const [aiServerUrl, setAiServerUrl] = useState('')
 	const [savingAi, setSavingAi] = useState(false)
+	const [readReceipts, setReadReceipts] = useState(true)
+	const [savingReceipts, setSavingReceipts] = useState(false)
 
 	const [ttsProvider, setTtsProvider] = useState('')
 	const [ttsDefaultVoice, setTtsDefaultVoice] = useState('')
@@ -124,6 +127,7 @@ export function SettingsPage() {
 				setTtsDefaultVoice(res.call_tts_default_voice ?? '')
 				setFishAudioModel(res.call_tts_fish_audio_model ?? '')
 				setFishAudioVoiceId(res.call_tts_fish_audio_voice_id ?? '')
+				setReadReceipts((res.read_receipts ?? 'true') !== 'false')
 			})
 			.catch(() => {
 				if (!cancelled) toast.error('Failed to load settings')
@@ -151,6 +155,19 @@ export function SettingsPage() {
 			toast.error(err instanceof Error ? err.message : 'Failed to save AI configuration')
 		} finally {
 			setSavingAi(false)
+		}
+	}
+
+	const toggleReadReceipts = async (enabled: boolean) => {
+		setSavingReceipts(true)
+		try {
+			const res = await api.updateSettings({ read_receipts: enabled ? 'true' : 'false' })
+			setReadReceipts((res.read_receipts ?? (enabled ? 'true' : 'false')) !== 'false')
+			toast.success(enabled ? 'Read receipts enabled' : 'Read receipts disabled')
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to save setting')
+		} finally {
+			setSavingReceipts(false)
 		}
 	}
 
@@ -422,6 +439,24 @@ export function SettingsPage() {
 										{savingAi ? 'Saving...' : 'Save'}
 									</Button>
 								</div>
+							</div>
+						</div>
+					</div>
+
+					<div className="space-y-4">
+						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Privacy</h2>
+						<div className="bg-card rounded-lg border overflow-hidden">
+							<div className="flex items-center gap-3 px-4 py-3.5">
+								<Check className="h-4 w-4 text-primary" />
+								<div className="flex flex-col flex-1 min-w-0">
+									<span className="text-sm font-medium">Read receipts</span>
+									<span className="text-xs text-muted-foreground">Send blue ticks to WhatsApp when you open a chat. Off keeps reads local only.</span>
+								</div>
+								<Switch
+									checked={readReceipts}
+									onCheckedChange={(v) => toggleReadReceipts(Boolean(v))}
+									disabled={savingReceipts}
+								/>
 							</div>
 						</div>
 					</div>

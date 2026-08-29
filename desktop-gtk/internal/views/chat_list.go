@@ -69,7 +69,43 @@ func NewChatList() *ChatList {
 	cl.modeTitle = gtk.NewLabel("Chat")
 	cl.modeTitle.AddCSSClass("title-2")
 	cl.modeTitle.SetXAlign(0)
+	cl.modeTitle.SetHExpand(true)
 	modeRow.Append(cl.modeTitle)
+
+	newBtn := gtk.NewMenuButton()
+	newBtn.SetIconName("list-add-symbolic")
+	newBtn.SetTooltipText("Grup baru")
+	newMenu := gtk.NewPopover()
+	newMenuBox := gtk.NewBox(gtk.OrientationVertical, 0)
+	newMenuBox.SetMarginTop(4)
+	newMenuBox.SetMarginBottom(4)
+	addMenuBtn := func(label, icon string, fn func()) {
+		btn := gtk.NewButton()
+		content := gtk.NewBox(gtk.OrientationHorizontal, 8)
+		content.SetMarginTop(4)
+		content.SetMarginBottom(4)
+		content.SetMarginStart(8)
+		content.SetMarginEnd(8)
+		content.Append(gtk.NewImageFromIconName(icon))
+		content.Append(gtk.NewLabel(label))
+		btn.SetChild(content)
+		btn.AddCSSClass("flat")
+		btn.ConnectClicked(func() {
+			newMenu.Popdown()
+			fn()
+		})
+		newMenuBox.Append(btn)
+	}
+	addMenuBtn("Buat Grup", "system-users-symbolic", func() {
+		OpenCreateGroupDialog(cl.client, cl.store.Chats(), cl.toast)
+	})
+	addMenuBtn("Gabung via Link", "web-browser-symbolic", func() {
+		OpenJoinGroupDialog(cl.client, cl.toast)
+	})
+	newMenu.SetChild(newMenuBox)
+	newBtn.SetPopover(newMenu)
+	newBtn.SetMarginEnd(10)
+	modeRow.Append(newBtn)
 	cl.root.Append(modeRow)
 
 	cl.search = gtk.NewSearchEntry()

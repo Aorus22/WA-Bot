@@ -61,11 +61,16 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	stickerHandler := handlers.NewStickerHandler(r.handler)
 	systemHandler := handlers.NewSystemHandler(r.handler)
 	msgMgmtHandler := handlers.NewMessageManagementHandler(r.handler)
+	msgTypeHandler := handlers.NewMessageTypeHandler(r.handler)
 	aiHandler := handlers.NewAIHandler(r.handler)
 
 	callHandler := handlers.NewCallHandler(r.handler)
 	apiKeyHandler := handlers.NewAPIKeyHandler(r.handler)
 	extCallHandler := handlers.NewExternalCallHandler(r.handler)
+
+	groupHandler := handlers.NewGroupHandler(r.handler)
+	statusHandler := handlers.NewStatusHandler(r.handler)
+	channelHandler := handlers.NewChannelHandler(r.handler)
 
 	settingsHandler := handlers.NewSettingsHandler(r.handler, r.handler.GetSettingsRepo())
 
@@ -85,6 +90,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/chats/{id}/docs", chatHandler.GetChatDocs).Methods("GET")
 	api.HandleFunc("/chats/{id}/links", chatHandler.GetChatLinks).Methods("GET")
 	api.HandleFunc("/chats/{id}/read", chatHandler.MarkAsRead).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{id}/presence-subscribe", chatHandler.SubscribePresence).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{id}/pin", chatHandler.PinChat).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{id}/archive", chatHandler.ArchiveChat).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{id}/mute", chatHandler.MuteChat).Methods("POST", "OPTIONS")
@@ -96,13 +102,50 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/chats/{chatId}/messages/{id}/edit", msgMgmtHandler.EditMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/reply", msgMgmtHandler.ReplyMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/react", messageHandler.SendReaction).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/forward", msgTypeHandler.ForwardMessage).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/vote", msgTypeHandler.SendPollVote).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/typing", messageHandler.SendTyping).Methods("POST", "OPTIONS")
+
+	api.HandleFunc("/chats/{chatId}/poll", msgTypeHandler.SendPoll).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/location", msgTypeHandler.SendLocation).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/contact", msgTypeHandler.SendContact).Methods("POST", "OPTIONS")
+
+	// Group management (phase 2 parity).
+	api.HandleFunc("/groups/preview", groupHandler.PreviewLink).Methods("GET")
+	api.HandleFunc("/groups/join", groupHandler.JoinLink).Methods("POST", "OPTIONS")
+	api.HandleFunc("/groups/create", groupHandler.CreateGroup).Methods("POST", "OPTIONS")
+	api.HandleFunc("/groups/{id}", groupHandler.GetGroup).Methods("GET")
+	api.HandleFunc("/groups/{id}", groupHandler.UpdateGroup).Methods("PATCH", "OPTIONS")
+	api.HandleFunc("/groups/{id}/photo", groupHandler.SetGroupPhoto).Methods("POST", "OPTIONS")
+	api.HandleFunc("/groups/{id}/participants", groupHandler.UpdateParticipants).Methods("POST", "OPTIONS")
+	api.HandleFunc("/groups/{id}/invite-link", groupHandler.InviteLink).Methods("GET", "POST", "OPTIONS")
+	api.HandleFunc("/groups/{id}/join-requests", groupHandler.JoinRequests).Methods("GET")
+	api.HandleFunc("/groups/{id}/join-requests", groupHandler.UpdateJoinRequests).Methods("POST", "OPTIONS")
+	api.HandleFunc("/groups/{id}/leave", groupHandler.LeaveGroup).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/stickers/favorites", stickerHandler.GetFavorites).Methods("GET")
 	api.HandleFunc("/stickers/favorite", stickerHandler.FavoriteSticker).Methods("POST", "OPTIONS")
 	api.HandleFunc("/stickers/favorites/{id}", stickerHandler.DeleteFavorite).Methods("DELETE", "OPTIONS")
 
 	api.HandleFunc("/contacts", chatHandler.GetContacts).Methods("GET")
+
+	// Status (stories): list, post, viewed receipts, media, privacy.
+	// Namespaced under /statuses to avoid clashing with GET /api/status.
+	api.HandleFunc("/statuses", statusHandler.List).Methods("GET")
+	api.HandleFunc("/statuses/text", statusHandler.PostText).Methods("POST", "OPTIONS")
+	api.HandleFunc("/statuses/media", statusHandler.PostMedia).Methods("POST", "OPTIONS")
+	api.HandleFunc("/statuses/{id}/viewed", statusHandler.Viewed).Methods("POST", "OPTIONS")
+	api.HandleFunc("/statuses/{id}/media", statusHandler.Media).Methods("GET")
+	api.HandleFunc("/statuses/privacy", statusHandler.Privacy).Methods("GET")
+
+	// Channels (newsletters): list/follow/unfollow/mute/messages/react.
+	api.HandleFunc("/channels", channelHandler.List).Methods("GET")
+	api.HandleFunc("/channels", channelHandler.Follow).Methods("POST", "OPTIONS")
+	api.HandleFunc("/channels/preview", channelHandler.Preview).Methods("GET")
+	api.HandleFunc("/channels/{id}", channelHandler.Unfollow).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/channels/{id}/mute", channelHandler.Mute).Methods("POST", "OPTIONS")
+	api.HandleFunc("/channels/{id}/messages", channelHandler.Messages).Methods("GET")
+	api.HandleFunc("/channels/{id}/messages/{serverId}/react", channelHandler.React).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/status", systemHandler.GetStatus).Methods("GET")
 	api.HandleFunc("/qr-code", r.qrHandler).Methods("GET")

@@ -168,4 +168,43 @@ const widgetCSS = `
   background-color: alpha(@accent_bg_color, 0.25);
   border-radius: 8px;
 }
+
+/* Status (stories) page */
+.status-ring {
+  border-radius: 9999px;
+}
+.status-ring-unseen {
+  border: 2px solid @accent_bg_color;
+  padding: 2px;
+}
+.own-status-badge {
+  background: @accent_bg_color;
+  color: @accent_fg_color;
+  border-radius: 9999px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+}
+.status-viewer {
+  background: @window_bg_color;
+}
+.status-seg {
+  background: alpha(@window_fg_color, 0.18);
+  border-radius: 999px;
+  min-height: 3px;
+}
+.status-seg-done {
+  background: @accent_bg_color;
+  border-radius: 999px;
+  min-height: 3px;
+}
+.status-text-bg {
+  background: #075e54;
+  border-radius: 12px;
+}
+.status-text {
+  color: white;
+  font-size: 22px;
+  font-weight: 500;
+}
 `

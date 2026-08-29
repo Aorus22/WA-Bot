@@ -46,13 +46,13 @@ type CallWindow struct {
 	client *api.Client
 	store  *store.Store
 
-	win    *gtk.Window
-	pill   *gtk.Label
-	avatar *adw.Avatar
-	name   *gtk.Label
-	sub    *gtk.Label
-	status *gtk.Label
-	action *gtk.Button
+	win       *gtk.Window
+	pill      *gtk.Label
+	avatar    *adw.Avatar
+	name      *gtk.Label
+	sub       *gtk.Label
+	status    *gtk.Label
+	action    *gtk.Button
 	actionImg *gtk.Image
 	actionLbl *gtk.Label
 

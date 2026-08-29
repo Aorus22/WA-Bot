@@ -215,7 +215,16 @@ func (cv *Conversation) buildAttachPopover() gtk.Widgetter {
 		btn.AddCSSClass("flat")
 		btn.ConnectClicked(func() {
 			pop.Popdown()
-			cv.pickAndSend(category)
+			switch category {
+			case "poll":
+				cv.openPollDialog()
+			case "location":
+				cv.openLocationDialog()
+			case "contact":
+				cv.openContactDialog()
+			default:
+				cv.pickAndSend(category)
+			}
 		})
 		box.Append(btn)
 	}
@@ -223,6 +232,10 @@ func (cv *Conversation) buildAttachPopover() gtk.Widgetter {
 	addItem("image-x-generic-symbolic", "Foto/Gambar", "image")
 	addItem("video-x-generic-symbolic", "Video", "video")
 	addItem("text-x-generic-symbolic", "Dokumen", "document")
+	addItem("emblem-videos-symbolic", "GIF", "gif")
+	addItem("preferences-system-symbolic", "Polling", "poll")
+	addItem("mark-location-symbolic", "Lokasi", "location")
+	addItem("contact-new-symbolic", "Kontak", "contact")
 
 	pop.SetChild(box)
 	return pop
@@ -244,6 +257,12 @@ func (cv *Conversation) pickAndSend(category string) {
 		ff := gtk.NewFileFilter()
 		ff.SetName("Video")
 		ff.AddMIMEType("video/*")
+		fd.SetDefaultFilter(ff)
+	case "gif":
+		ff := gtk.NewFileFilter()
+		ff.SetName("GIF")
+		ff.AddMIMEType("image/gif")
+		ff.AddMIMEType("video/mp4")
 		fd.SetDefaultFilter(ff)
 	}
 
@@ -315,6 +334,7 @@ func (cv *Conversation) onComposerChanged() {
 		return false
 	})
 }
+
 // onSend sends composer text: an edit of an own message when edit mode is
 // active, otherwise a plain text or quoted-reply message (optimistic).
 func (cv *Conversation) onSend() {

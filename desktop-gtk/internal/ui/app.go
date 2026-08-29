@@ -41,15 +41,17 @@ type App struct {
 	adwApp *adw.Application
 	window *Window
 
-	client  *api.Client
-	store   *store.Store
-	cache   *media.Cache
-	wsSock  *ws.Client
-	login   *views.Login
-	pane    *views.ChatsPane
-	calls   *views.Calls
-	callWin *views.CallWindow
-	setting *views.Settings
+	client   *api.Client
+	store    *store.Store
+	cache    *media.Cache
+	wsSock   *ws.Client
+	login    *views.Login
+	pane     *views.ChatsPane
+	calls    *views.Calls
+	status   *views.Status
+	channels *views.Channels
+	callWin  *views.CallWindow
+	setting  *views.Settings
 
 	sessionUp bool // WhatsApp session believed connected
 	config    config.Config
@@ -96,10 +98,14 @@ func (a *App) onActivate() {
 	a.store = store.New()
 	a.pane = views.NewChatsPane()
 	a.calls = views.NewCalls()
+	a.status = views.NewStatus()
+	a.channels = views.NewChannels()
 	a.setting = views.NewSettings(a.cfg.UserDataDir, a.cfg.Manager)
 
 	w.AddChats(a.pane)
 	w.AddCalls(a.calls)
+	w.AddStatus(a.status)
+	w.AddChannels(a.channels)
 	w.AddSettings(a.setting)
 
 	a.login = views.NewLogin()
@@ -166,6 +172,8 @@ func (a *App) bootstrapViews(port int) {
 	a.pane.SetDeps(a.client, a.store, a.cache)
 	a.calls.SetDeps(a.client, a.store, a.pane.ShowToast)
 	a.calls.SetOpenChatCallback(a.openChatByID)
+	a.status.SetDeps(a.client, a.cache, a.pane.ShowToast)
+	a.channels.SetDeps(a.client, a.cache, a.pane.ShowToast)
 	a.callWin = views.NewCallWindow(a.client, a.store)
 	a.setting.SetBackendPort(port)
 	a.setting.SetDeps(a.client, a.pane.ShowToast, func() {
@@ -251,12 +259,68 @@ func (a *App) startWebSocket(port int) {
 		a.store.EditMessage(e.ChatID, e.ID, e.Content)
 	})
 
+	a.wsSock.On(ws.EventMessageReaction, func(payload json.RawMessage) {
+		var r ws.MessageReaction
+		if err := ws.Decode(payload, &r); err != nil || r.ID == "" {
+			return
+		}
+		a.store.ApplyReaction(r.ChatID, r.ID, r.Reactions)
+	})
+
+	a.wsSock.On(ws.EventPollUpdate, func(payload json.RawMessage) {
+		var p ws.PollUpdate
+		if err := ws.Decode(payload, &p); err != nil || p.ID == "" {
+			return
+		}
+		a.store.ApplyExtra(p.ChatID, p.ID, p.Extra)
+	})
+
 	a.wsSock.On(ws.EventChatNameUpdate, func(payload json.RawMessage) {
 		var n ws.ChatNameUpdate
 		if err := ws.Decode(payload, &n); err != nil {
 			return
 		}
 		a.store.RenameChat(n.ChatID, n.Name, n.Avatar)
+	})
+
+	a.wsSock.On(ws.EventStatusNew, func(_ json.RawMessage) {
+		glib.IdleAdd(func() bool {
+			a.status.Refresh()
+			return false
+		})
+	})
+
+	a.wsSock.On(ws.EventChannelsChanged, func(_ json.RawMessage) {
+		glib.IdleAdd(func() bool {
+			a.channels.Refresh()
+			return false
+		})
+	})
+
+	a.wsSock.On(ws.EventChatPresence, func(payload json.RawMessage) {
+		var cp ws.ChatPresenceUpdate
+		if err := ws.Decode(payload, &cp); err != nil || cp.ChatID == "" {
+			return
+		}
+		a.store.SetTyping(cp.ChatID, cp.Sender, cp.State, cp.Media)
+	})
+
+	a.wsSock.On(ws.EventPresence, func(payload json.RawMessage) {
+		var pr ws.PresenceUpdate
+		if err := ws.Decode(payload, &pr); err != nil || pr.JID == "" {
+			return
+		}
+		a.store.SetPresence(pr.JID, pr.Available, pr.LastSeen)
+	})
+
+	a.wsSock.On(ws.EventGroupUpdated, func(payload json.RawMessage) {
+		var g ws.GroupUpdated
+		if err := ws.Decode(payload, &g); err != nil || g.Group == nil {
+			return
+		}
+		if g.Group.Name != "" {
+			a.store.RenameChat(g.ChatID, g.Group.Name, "")
+		}
 	})
 
 	a.wsSock.On(ws.EventChatState, func(payload json.RawMessage) {

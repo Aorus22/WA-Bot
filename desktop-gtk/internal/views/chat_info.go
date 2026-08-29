@@ -41,9 +41,11 @@ type ChatInfo struct {
 	stack    *gtk.Stack
 	switcher *gtk.StackSwitcher
 
-	mediaTab *infoMediaTab
-	docsTab  *infoListTab
-	linksTab *infoListTab
+	mediaTab  *infoMediaTab
+	docsTab   *infoListTab
+	linksTab  *infoListTab
+	groupTab  *groupTab
+	groupPage *gtk.StackPage
 
 	current api.Chat
 	hasChat bool
@@ -102,6 +104,7 @@ func NewChatInfo(client *api.Client, cache *media.Cache, toast func(string)) *Ch
 	ci.mediaTab = newInfoMediaTab(ci)
 	ci.docsTab = newInfoListTab(ci, "docs")
 	ci.linksTab = newInfoListTab(ci, "links")
+	ci.groupTab = newGroupTab(ci)
 
 	ci.switcher = gtk.NewStackSwitcher()
 	ci.switcher.SetHAlign(gtk.AlignCenter)
@@ -115,6 +118,8 @@ func NewChatInfo(client *api.Client, cache *media.Cache, toast func(string)) *Ch
 	ci.stack.AddTitled(ci.mediaTab.wrap(), "media", "Media")
 	ci.stack.AddTitled(ci.docsTab.wrap(), "docs", "Docs")
 	ci.stack.AddTitled(ci.linksTab.wrap(), "links", "Links")
+	ci.groupPage = ci.stack.AddTitled(ci.groupTab.wrap(), "members", "Anggota")
+	ci.groupPage.SetVisible(false)
 	// Without this link the switcher renders completely empty.
 	ci.switcher.SetStack(ci.stack)
 	ci.root.Append(ci.stack)
@@ -156,6 +161,7 @@ func (ci *ChatInfo) SetChat(c api.Chat, fetch bool) {
 		})
 	}
 
+	ci.groupPage.SetVisible(c.IsGroup)
 	if !fetch {
 		return
 	}
@@ -165,6 +171,11 @@ func (ci *ChatInfo) SetChat(c api.Chat, fetch bool) {
 	ci.loadMore(ci.mediaTab, "media")
 	ci.loadMore(ci.docsTab, "docs")
 	ci.loadMore(ci.linksTab, "links")
+	if c.IsGroup {
+		ci.groupTab.refresh(c.ID)
+	} else {
+		ci.groupTab.reset()
+	}
 }
 
 // Reset clears everything (chat closed / logout).
@@ -174,6 +185,8 @@ func (ci *ChatInfo) Reset() {
 	ci.mediaTab.reset()
 	ci.docsTab.reset()
 	ci.linksTab.reset()
+	ci.groupTab.reset()
+	ci.groupPage.SetVisible(false)
 }
 
 func (ci *ChatInfo) reportError(msg string) {

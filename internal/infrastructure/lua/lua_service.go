@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	lua "github.com/yuin/gopher-lua"
 	"github.com/aorus22/instagramdl"
+	lua "github.com/yuin/gopher-lua"
 	waTypes "go.mau.fi/whatsmeow/types"
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"

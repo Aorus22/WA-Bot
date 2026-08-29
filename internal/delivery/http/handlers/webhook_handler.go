@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
@@ -137,7 +137,7 @@ func (h *WebhookHandler) Test(w http.ResponseWriter, r *http.Request) {
 	mockReq.Header.Set("Content-Type", "application/json")
 
 	webhook := &entity.Webhook{
-		Path:  req.Path,
+		Path:   req.Path,
 		Script: req.Script,
 	}
 

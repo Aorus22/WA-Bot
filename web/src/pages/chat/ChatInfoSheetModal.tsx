@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FileText, Image as ImageIcon, Link as LinkIcon, Video, File, Loader2 } from "lucide-react"
+import { GroupMembersTab } from "./GroupPanels"
 
 interface ChatInfoSheetModalProps {
 	open: boolean
@@ -172,14 +173,23 @@ export function ChatInfoSheetModal({
 				</div>
 
 				<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-					<Tabs defaultValue="media" className="flex-1 flex flex-col h-full">
+					<Tabs defaultValue={chat.isGroup ? "members" : "media"} className="flex-1 flex flex-col h-full">
 						<div className="px-4 pt-4 shrink-0">
-							<TabsList className="w-full grid grid-cols-3 bg-muted/50 p-1">
+							<TabsList className={`w-full ${chat.isGroup ? "grid-cols-4" : "grid-cols-3"} grid bg-muted/50 p-1`}>
+								{chat.isGroup && <TabsTrigger value="members" className="text-xs">Members</TabsTrigger>}
 								<TabsTrigger value="media" className="text-xs">Media</TabsTrigger>
 								<TabsTrigger value="docs" className="text-xs">Docs</TabsTrigger>
 								<TabsTrigger value="links" className="text-xs">Links</TabsTrigger>
 							</TabsList>
 						</div>
+
+						{chat.isGroup && (
+							<TabsContent value="members" className="flex-1 min-h-0 mt-0 outline-none overflow-hidden">
+								<div className="h-full">
+									<GroupMembersTab chat={chat} getAvatarUrl={(jid: string) => api.mediaURL(`/avatar/${encodeURIComponent(jid)}`)} />
+								</div>
+							</TabsContent>
+						)}
 
 						<TabsContent value="media" className="flex-1 min-h-0 mt-0 outline-none overflow-hidden">
 							<div 

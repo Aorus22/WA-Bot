@@ -26,7 +26,7 @@ func NewLocalStorage(basePath string) repository.StorageRepository {
 
 func (l *LocalStorage) Save(ctx context.Context, path string, reader io.Reader) (string, error) {
 	fullPath := l.GetPath(path)
-	
+
 	// Ensure directory exists
 	dir := filepath.Dir(fullPath)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -70,7 +70,7 @@ func (l *LocalStorage) Delete(ctx context.Context, path string) error {
 func (l *LocalStorage) GetPath(path string) string {
 	// 1. Get absolute paths for comparison
 	absBase, _ := filepath.Abs(l.basePath)
-	
+
 	// Try to see if the path is already absolute or relative to the current working directory
 	var absTarget string
 	if filepath.IsAbs(path) {

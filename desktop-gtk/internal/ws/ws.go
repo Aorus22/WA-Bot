@@ -21,20 +21,31 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"wa-bot-desktop/internal/api"
 )
 
 // Event names broadcast by the backend hub.
 const (
-	EventPong           = "pong"
-	EventAuthSuccess    = "auth_success"
-	EventQRCode         = "qr_code"
-	EventNewMessage     = "new_message"
-	EventMessageStatus  = "message_status"
-	EventMessageDeleted = "message_deleted"
-	EventMessageEdited  = "message_edited"
-	EventChatNameUpdate = "chat_name_update"
-	EventChatState      = "chat_state"
-	EventChatsChanged   = "chats_changed"
+	EventPong            = "pong"
+	EventAuthSuccess     = "auth_success"
+	EventQRCode          = "qr_code"
+	EventNewMessage      = "new_message"
+	EventMessageStatus   = "message_status"
+	EventMessageDeleted  = "message_deleted"
+	EventMessageEdited   = "message_edited"
+	EventMessageReaction = "message_reaction"
+	EventPollUpdate      = "poll_update"
+	EventChatNameUpdate  = "chat_name_update"
+	EventGroupUpdated    = "group_updated"
+	EventStatusNew       = "status_new"
+	EventChannelsChanged = "channels_changed"
+	EventChatPresence    = "chat_presence"
+	EventPresence        = "presence"
+	EventChannelMessage  = "channel_message"
+	EventChannelUpdate   = "channel_update"
+	EventChatState       = "chat_state"
+	EventChatsChanged    = "chats_changed"
 
 	EventCallIncoming = "call.incoming"
 	EventCallState    = "call.state"
@@ -76,6 +87,41 @@ type ChatNameUpdate struct {
 	ChatID string `json:"chatId"`
 	Name   string `json:"name"`
 	Avatar string `json:"avatar"`
+}
+
+// MessageReaction is the payload of "message_reaction" events.
+type MessageReaction struct {
+	ChatID    string              `json:"chatId"`
+	ID        string              `json:"id"`
+	Reactions []api.ReactionEntry `json:"reactions"`
+}
+
+// PollUpdate is the payload of "poll_update" events (the full updated extra).
+type PollUpdate struct {
+	ChatID string            `json:"chatId"`
+	ID     string            `json:"id"`
+	Extra  *api.MessageExtra `json:"extra"`
+}
+
+// ChatPresenceUpdate is the payload of "chat_presence" (typing) events.
+type ChatPresenceUpdate struct {
+	ChatID string `json:"chatId"`
+	Sender string `json:"sender"`
+	State  string `json:"state"` // composing | paused
+	Media  string `json:"media"` // text | audio
+}
+
+// PresenceUpdate is the payload of "presence" (availability) events.
+type PresenceUpdate struct {
+	JID       string `json:"jid"`
+	Available bool   `json:"available"`
+	LastSeen  int64  `json:"lastSeen"`
+}
+
+// GroupUpdated is the payload of "group_updated" events.
+type GroupUpdated struct {
+	ChatID string          `json:"chatId"`
+	Group  *api.GroupCache `json:"group"`
 }
 
 // Handler receives the raw JSON payload of an event. Called synchronously

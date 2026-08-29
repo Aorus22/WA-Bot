@@ -38,7 +38,23 @@ const (
 	// MessagesChanged means messages within ChatID changed incrementally
 	// (append/prepend/patch/delete/edit).
 	MessagesChanged
+	// MetaChanged means ephemeral chat metadata (typing indicator,
+	// availability) changed for ChatID.
+	MetaChanged
 )
+
+// TypingState tracks one chat's incoming typing indicator with expiry.
+type TypingState struct {
+	Media   string // "text" | "audio" | ""
+	Sender  string
+	Expires time.Time
+}
+
+// PresenceInfo is a contact's last known availability.
+type PresenceInfo struct {
+	Available bool
+	LastSeen  int64
+}
 
 // Change is emitted to subscribers after each mutation.
 type Change struct {
@@ -51,6 +67,7 @@ type Page struct {
 	Items   []api.Message // ascending by Timestamp
 	HasMore bool          // older history exists on the server
 	HasNext bool          // newer history exists (true after a context teleport)
+	Rev     int           // revision; changes whenever Items content mutated
 }
 
 // Store is the state container.
@@ -60,19 +77,29 @@ type Store struct {
 	messages map[string]*chatState // chatID -> state
 	subs     map[int]func(Change)
 	nextSub  int
+	rev      int // global revision counter feeding chatState.rev
 
 	activeChat string // chat currently open in the conversation pane
+
+	typing   map[string]*TypingState  // chatID -> typing indicator
+	presence map[string]*PresenceInfo // jid -> availability
 }
 
 type chatState struct {
 	items   []api.Message // ascending by Timestamp
 	hasMore bool          // older history exists
 	hasNext bool          // newer history exists (set after a context teleport)
+	rev     int           // bumped on every mutation of items
 }
 
 // New returns an empty Store.
 func New() *Store {
-	return &Store{messages: make(map[string]*chatState), subs: make(map[int]func(Change))}
+	return &Store{
+		messages: make(map[string]*chatState),
+		subs:     make(map[int]func(Change)),
+		typing:   make(map[string]*TypingState),
+		presence: make(map[string]*PresenceInfo),
+	}
 }
 
 // Subscribe registers fn for change notifications. The returned func
@@ -162,7 +189,8 @@ func (s *Store) ResetMessages(chatID string, newestFirst []api.Message, hasMore 
 		asc[len(newestFirst)-1-i] = m
 	}
 	s.mu.Lock()
-	s.messages[chatID] = &chatState{items: asc, hasMore: hasMore}
+	s.rev++
+	s.messages[chatID] = &chatState{items: asc, hasMore: hasMore, rev: s.rev}
 	s.mu.Unlock()
 	s.emit(Change{Kind: MessagesReset, ChatID: chatID})
 }
@@ -174,7 +202,8 @@ func (s *Store) ResetContext(chatID string, msgsAsc []api.Message, hasPrev, hasN
 	cp := make([]api.Message, len(msgsAsc))
 	copy(cp, msgsAsc)
 	s.mu.Lock()
-	s.messages[chatID] = &chatState{items: cp, hasMore: hasPrev, hasNext: hasNext}
+	s.rev++
+	s.messages[chatID] = &chatState{items: cp, hasMore: hasPrev, hasNext: hasNext, rev: s.rev}
 	s.mu.Unlock()
 	s.emit(Change{Kind: MessagesReset, ChatID: chatID})
 }
@@ -212,6 +241,7 @@ func (s *Store) PrependOlder(chatID string, olderDesc []api.Message, hasMore boo
 	}
 	cs.items = append(asc, cs.items...)
 	cs.hasMore = hasMore
+	s.touchLocked(cs)
 	s.mu.Unlock()
 	s.emit(Change{Kind: MessagesChanged, ChatID: chatID})
 }
@@ -269,6 +299,7 @@ func (s *Store) ApplyIncoming(m api.Message) {
 				cs.hasNext = false
 			}
 		}
+		s.touchLocked(cs)
 	}
 
 	bumped := false
@@ -319,6 +350,7 @@ func (s *Store) AddOutgoingTemp(chatID, content, msgType string) api.Message {
 	s.mu.Lock()
 	if cs := s.ensureLocked(chatID); cs != nil {
 		cs.items = appendSortedMessage(cs.items, temp)
+		s.touchLocked(cs)
 	}
 	for i := range s.chats {
 		if s.chats[i].ID == chatID {
@@ -357,6 +389,7 @@ func (s *Store) PatchStatus(chatID, msgID, status string) {
 		for i := range cs.items {
 			if cs.items[i].ID == msgID {
 				cs.items[i].Status = status
+				s.touchLocked(cs)
 				break
 			}
 		}
@@ -388,12 +421,59 @@ func (s *Store) EditMessage(chatID, msgID, content string) {
 		for i := range cs.items {
 			if cs.items[i].ID == msgID {
 				cs.items[i].Content = content
+				s.touchLocked(cs)
 				break
 			}
 		}
 	}
 	s.mu.Unlock()
 	s.emit(Change{Kind: MessagesChanged, ChatID: chatID})
+}
+
+// ApplyReaction applies a message_reaction event.
+func (s *Store) ApplyReaction(chatID, msgID string, reactions []api.ReactionEntry) {
+	s.mu.Lock()
+	if cs := s.messages[chatID]; cs != nil {
+		for i := range cs.items {
+			if cs.items[i].ID == msgID {
+				cs.items[i].Reactions = reactions
+				s.touchLocked(cs)
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	s.emit(Change{Kind: MessagesChanged, ChatID: chatID})
+}
+
+// ApplyExtra applies a poll_update event (full extra replacement).
+func (s *Store) ApplyExtra(chatID, msgID string, extra *api.MessageExtra) {
+	s.mu.Lock()
+	if cs := s.messages[chatID]; cs != nil {
+		for i := range cs.items {
+			if cs.items[i].ID == msgID {
+				cs.items[i].Extra = extra
+				s.touchLocked(cs)
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	s.emit(Change{Kind: MessagesChanged, ChatID: chatID})
+}
+
+// SetViewOnceViewed flips the local viewed flag of a view-once message.
+func (s *Store) SetViewOnceViewed(chatID, msgID string) {
+	s.mu.Lock()
+	if cs := s.messages[chatID]; cs != nil {
+		for i := range cs.items {
+			if cs.items[i].ID == msgID && cs.items[i].Extra != nil && cs.items[i].Extra.ViewOnce != nil {
+				cs.items[i].Extra.ViewOnce.Viewed = true
+				s.touchLocked(cs)
+			}
+		}
+	}
+	s.mu.Unlock()
 }
 
 // RenameChat applies a chat_name_update event.
@@ -454,7 +534,7 @@ func (s *Store) Messages(chatID string) (Page, bool) {
 	}
 	items := make([]api.Message, len(cs.items))
 	copy(items, cs.items)
-	return Page{Items: items, HasMore: cs.hasMore, HasNext: cs.hasNext}, true
+	return Page{Items: items, HasMore: cs.hasMore, HasNext: cs.hasNext, Rev: cs.rev}, true
 }
 
 // PatchStatusByID applies a message_status event without knowing the chat ID
@@ -497,6 +577,56 @@ func (s *Store) Message(chatID, msgID string) (api.Message, bool) {
 	return api.Message{}, false
 }
 
+// SetTyping records an incoming typing indicator; expired/paused indicators
+// clear the state.
+func (s *Store) SetTyping(chatID, sender, state, media string) {
+	s.mu.Lock()
+	if state == "composing" {
+		s.typing[chatID] = &TypingState{
+			Media:   media,
+			Sender:  sender,
+			Expires: time.Now().Add(typingTTL),
+		}
+	} else if t, ok := s.typing[chatID]; !ok || (sender == "" || t.Sender == sender) {
+		delete(s.typing, chatID)
+	}
+	s.mu.Unlock()
+	s.emit(Change{Kind: MetaChanged, ChatID: chatID})
+}
+
+// TypingIn reports whether the chat has an active typing indicator and its
+// media kind ("text"/"audio"/"").
+func (s *Store) TypingIn(chatID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.typing[chatID]
+	if !ok || time.Now().After(t.Expires) {
+		return ""
+	}
+	return t.Media
+}
+
+// SetPresence records a contact's availability snapshot.
+func (s *Store) SetPresence(jid string, available bool, lastSeen int64) {
+	s.mu.Lock()
+	s.presence[jid] = &PresenceInfo{Available: available, LastSeen: lastSeen}
+	s.mu.Unlock()
+	s.emit(Change{Kind: MetaChanged, ChatID: jid})
+}
+
+// PresenceOf returns the stored presence of a contact (nil when unknown).
+func (s *Store) PresenceOf(jid string) (bool, int64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if p, ok := s.presence[jid]; ok {
+		return p.Available, p.LastSeen
+	}
+	return false, 0
+}
+
+// typingTTL is how long a composing indicator stays visible without renewal.
+const typingTTL = 6 * time.Second
+
 // --- helpers ---
 
 func (s *Store) ensureLocked(chatID string) *chatState {
@@ -506,6 +636,13 @@ func (s *Store) ensureLocked(chatID string) *chatState {
 		s.messages[chatID] = cs
 	}
 	return cs
+}
+
+// touchLocked bumps the per-chat revision after an in-place mutation so
+// renderers detect content changes even when the message ID set is unchanged.
+func (s *Store) touchLocked(cs *chatState) {
+	s.rev++
+	cs.rev = s.rev
 }
 
 func (s *Store) emit(c Change) {
@@ -582,13 +719,38 @@ func OneLine(s string, maxRunes int) string {
 }
 
 func previewOf(m api.Message) string {
+	switch m.Type {
+	case "poll":
+		if m.Extra != nil && m.Extra.Poll != nil && m.Extra.Poll.Question != "" {
+			return OneLine("📊 "+m.Extra.Poll.Question, 80)
+		}
+	case "location":
+		if m.Extra != nil && m.Extra.Location != nil {
+			if m.Extra.Location.Live {
+				return "📍 Lokasi langsung"
+			}
+			return "📍 Lokasi"
+		}
+	case "contact":
+		if m.Extra != nil && m.Extra.Contact != nil && m.Extra.Contact.DisplayName != "" {
+			return "👤 " + OneLine(m.Extra.Contact.DisplayName, 80)
+		}
+	case "gif":
+		return "🎬 GIF"
+	}
 	if s := strings.TrimSpace(m.Content); s != "" {
 		return OneLine(s, 80)
 	}
 	switch m.Type {
 	case "image":
+		if m.Extra != nil && m.Extra.ViewOnce != nil {
+			return "📷 Foto (sekali lihat)"
+		}
 		return "📷 Photo"
 	case "video":
+		if m.Extra != nil && m.Extra.ViewOnce != nil {
+			return "🎥 Video (sekali lihat)"
+		}
 		return "🎬 Video"
 	case "audio", "ptt", "voice":
 		return "🎤 Voice message"

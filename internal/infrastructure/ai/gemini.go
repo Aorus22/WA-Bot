@@ -32,20 +32,20 @@ func NewGeminiService(apiKey string, storage repository.StorageRepository) (*Gem
 	}, nil
 }
 
-func (g *GeminiService) GenerateAnswer(ctx context.Context, modelName, filepath, mapel string) (string, error) {     
-        if g.apiKey == "" {
-                fmt.Println("GEMINI_API_KEY tidak ditemukan di .env")
-                return "", fmt.Errorf("GEMINI_API_KEY tidak ditemukan di .env")
-        }
+func (g *GeminiService) GenerateAnswer(ctx context.Context, modelName, filepath, mapel string) (string, error) {
+	if g.apiKey == "" {
+		fmt.Println("GEMINI_API_KEY tidak ditemukan di .env")
+		return "", fmt.Errorf("GEMINI_API_KEY tidak ditemukan di .env")
+	}
 
-        file, err := g.storage.Get(ctx, filepath)
-        if err != nil {
-                fmt.Printf("Gagal membuka file dari storage: %v\n", err)
-                return "", err
-        }
-        defer file.Close()
+	file, err := g.storage.Get(ctx, filepath)
+	if err != nil {
+		fmt.Printf("Gagal membuka file dari storage: %v\n", err)
+		return "", err
+	}
+	defer file.Close()
 
-        model := g.client.GenerativeModel(modelName)
+	model := g.client.GenerativeModel(modelName)
 	re := regexp.MustCompile(`[^a-z0-9]+`)
 	fileName := re.ReplaceAllString(mapel, "")
 

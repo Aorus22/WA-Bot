@@ -22,6 +22,8 @@ import { WebhookLogPage } from "@/pages/bot/WebhookLogPage"
 import { DocumentationPage } from "@/pages/documentation/DocumentationPage"
 import { SettingsPage } from "@/pages/settings/SettingsPage"
 import { CallHistoryPage } from "@/pages/calls/CallHistoryPage"
+import StatusPage from "@/pages/status/StatusPage"
+import ChannelsPage from "@/pages/channels/ChannelsPage"
 import { isDesktop, getWindowState, onWindowStateChange } from "@/lib/desktop-ipc"
 import { cn } from "@/lib/utils"
 
@@ -41,6 +43,8 @@ function AppRoutes() {
 			<Route element={<AppLayout />}>
 				<Route path="/chat" element={<ChatPage />} />
 				<Route path="/chat/:id" element={<ChatPage />} />
+				<Route path="/status" element={<StatusPage />} />
+				<Route path="/channels" element={<ChannelsPage />} />
 				<Route path="/calls" element={<CallHistoryPage />} />
 				<Route path="/cron" element={<CronManagementPage />} />
 				<Route path="/cron/new" element={<CronEditorPage />} />

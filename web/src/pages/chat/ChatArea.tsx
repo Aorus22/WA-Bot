@@ -16,7 +16,10 @@ import { ChatEmojiPickerPopover } from "./ChatEmojiPickerPopover"
 import { ChatStickerPickerPopover } from "./ChatStickerPickerPopover"
 import { ChatSearchSheet } from "./ChatSearchSheet"
 import { ChatMessageItem } from "./ChatMessageItem"
+import { PollDialog, LocationDialog, ContactDialog, ForwardDialog } from "./ChatComposeDialogs"
 import { useChatStore } from "@/stores/chatStore"
+import { subscribeWS } from "@/lib/ws-bus"
+import { MapPin, User, BarChart3, ImagePlay } from "lucide-react"
 
 interface ChatAreaProps {
     chat: Chat | null
@@ -115,6 +118,60 @@ const formatRecordingTime = (seconds: number) => {
     const [editingMessage, setEditingMessage] = useState<Message | null>(null)
 	const [isMdMode, setIsMdMode] = useState(false)
 	const [plusOpen, setPlusOpen] = useState(false)
+	const [pollOpen, setPollOpen] = useState(false)
+	const [locationOpen, setLocationOpen] = useState(false)
+	const [contactOpen, setContactOpen] = useState(false)
+	const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null)
+	const gifInputRef = useRef<HTMLInputElement>(null)
+	const [headerStatus, setHeaderStatus] = useState("")
+
+	// Typing indicator + availability for the open 1:1 chat. The typing line
+	// auto-clears if no renewal arrives (WhatsApp repeats composing ~every 2.5s).
+	useEffect(() => {
+		if (!chat) return
+		setHeaderStatus("")
+		if (!chat.isGroup) {
+			api.subscribeChatPresence(chat.id).catch(() => {})
+		}
+		let clearTimer: ReturnType<typeof setTimeout> | undefined
+		const armClear = (ms: number) => {
+			if (clearTimer) clearTimeout(clearTimer)
+			clearTimer = setTimeout(() => setHeaderStatus(""), ms)
+		}
+		const unsubPresence = subscribeWS((msg) => {
+			if (!chat) return
+			if (msg.type === "chat_presence" && msg.payload?.chatId === chat.id) {
+				if (msg.payload.state === "composing") {
+					setHeaderStatus(msg.payload.media === "audio" ? "merekam suara…" : "mengetik…")
+					armClear(6000)
+				} else {
+					setHeaderStatus("")
+					if (clearTimer) clearTimeout(clearTimer)
+				}
+				return
+			}
+			if (msg.type === "presence" && msg.payload?.jid === chat.id) {
+				if (msg.payload.available) {
+					setHeaderStatus("online")
+					if (clearTimer) clearTimeout(clearTimer)
+				} else {
+					const ls = Number(msg.payload.lastSeen)
+					if (ls > 0) {
+						const d = new Date(ls)
+						const today = new Date().toDateString() === d.toDateString()
+						const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+						setHeaderStatus(today ? `terakhir dilihat ${time}` : `terakhir dilihat ${d.toLocaleDateString()} ${time}`)
+					} else {
+						setHeaderStatus("")
+					}
+				}
+			}
+		})
+		return () => {
+			unsubPresence()
+			if (clearTimer) clearTimeout(clearTimer)
+		}
+	}, [chat?.id])
 	const [emojiOpen, setEmojiOpen] = useState(false)
 	const [stickerOpen, setStickerOpen] = useState(false)
     const [isMediaSheetOpen, setIsMediaSheetOpen] = useState(false)
@@ -589,7 +646,52 @@ const formatRecordingTime = (seconds: number) => {
         setReplyTo(null)
     }
 
-    const handleReplyMessage = (message: Message) => {
+    const applyReactionLocal = (existing: any[] | undefined, emoji: string): any[] => {
+	const out: any[] = []
+	for (const r of existing || []) {
+		const kept = (r.senders || []).filter((s: string) => s !== "me")
+		if (r.emoji === emoji && emoji) kept.push("me")
+		if (kept.length > 0) out.push({ emoji: r.emoji, senders: kept })
+	}
+	if (emoji && !out.some((r) => r.emoji === emoji)) out.push({ emoji, senders: ["me"] })
+	return out
+}
+
+const handleReact = (message: Message, emoji: string) => {
+	if (!chat) return
+	const reactions = applyReactionLocal(message.reactions, emoji)
+	useChatStore.getState().patchMessage(chat.id, message.id, { reactions })
+	api.reactToMessage(chat.id, message.id, emoji, message.from === "me" ? "" : message.from).catch((err: any) => {
+		toast.error("Failed to react: " + err.message)
+	})
+}
+
+const handleVote = (message: Message, options: string[]) => {
+	if (!chat) return
+	const extra = message.extra ? { ...message.extra } : {}
+	if (!extra.poll) return
+	const votes = { ...(extra.poll.votes || {}) }
+	if (options.length === 0) delete votes["me"]
+	else votes["me"] = options
+	extra.poll = { ...extra.poll, votes }
+	useChatStore.getState().patchMessage(chat.id, message.id, { extra })
+	api.sendPollVote(chat.id, message.id, options).catch((err: any) => {
+		toast.error("Failed to vote: " + err.message)
+	})
+}
+
+const handleGifSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+	const file = e.target.files?.[0]
+	e.target.value = ""
+	if (!file || !chat) return
+	try {
+		await api.sendMedia(chat.id, file, "gif", "")
+	} catch (err: any) {
+		toast.error("Failed to send GIF: " + err.message)
+	}
+}
+
+const handleReplyMessage = (message: Message) => {
         setReplyTo(message)
         setEditingMessage(null)
     }
@@ -641,8 +743,8 @@ const formatRecordingTime = (seconds: number) => {
                     </div>
                     <div className="flex flex-col">
                         <h3 className="font-bold text-base leading-tight tracking-tight group-hover:text-primary transition-colors">{chat.name || chat.id}</h3>
-                        <p className="text-[11px] font-medium text-muted-foreground truncate max-w-[180px] md:max-w-[250px]">
-                            {chat.id}
+                        <p className={cn("text-[11px] font-medium truncate max-w-[180px] md:max-w-[250px]", headerStatus && chat.isGroup === false ? "text-primary" : "text-muted-foreground")}>
+                            {headerStatus || chat.id}
                         </p>
                     </div>
                 </div>
@@ -763,6 +865,9 @@ const formatRecordingTime = (seconds: number) => {
                                                 showFavoriteBtn={showFavoriteBtn}
                                                 setShowFavoriteBtn={setShowFavoriteBtn}
                                                 isHighlighted={highlightedMessageId === message.id}
+                                                onReact={(emoji: string) => handleReact(message, emoji)}
+                                                onForward={() => setForwardingMessage(message)}
+                                                onVote={(options: string[]) => handleVote(message, options)}
                                             />
                                         </div>
                                     )
@@ -841,6 +946,22 @@ const formatRecordingTime = (seconds: number) => {
                                     <button onClick={() => { audioInputRef.current?.click(); setPlusOpen(false) }} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full">
                                         <Mic className="h-4 w-4 text-red-500" />
                                         <span>Audio</span>
+                                    </button>
+                                    <button onClick={() => { gifInputRef.current?.click(); setPlusOpen(false) }} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full">
+                                        <ImagePlay className="h-4 w-4 text-pink-500" />
+                                        <span>GIF</span>
+                                    </button>
+                                    <button onClick={() => { setPollOpen(true); setPlusOpen(false) }} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full">
+                                        <BarChart3 className="h-4 w-4 text-cyan-500" />
+                                        <span>Poll</span>
+                                    </button>
+                                    <button onClick={() => { setLocationOpen(true); setPlusOpen(false) }} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full">
+                                        <MapPin className="h-4 w-4 text-emerald-500" />
+                                        <span>Location</span>
+                                    </button>
+                                    <button onClick={() => { setContactOpen(true); setPlusOpen(false) }} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full">
+                                        <User className="h-4 w-4 text-indigo-500" />
+                                        <span>Contact</span>
                                     </button>
                                     <button onClick={() => { setIsMdMode(v => !v); setPlusOpen(false) }} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-muted transition-colors text-left w-full", isMdMode && "text-primary")}>
                                         <FileText className="h-4 w-4" />
@@ -968,6 +1089,27 @@ const formatRecordingTime = (seconds: number) => {
                 accept="audio/*,.mp3,.ogg,.m4a,.wav,.opus,.webm"
                 className="hidden"
             />
+            <input
+                type="file"
+                ref={gifInputRef}
+                onChange={handleGifSelected}
+                accept="image/gif,video/mp4"
+                className="hidden"
+            />
+            {chat && (
+                <>
+                    <PollDialog open={pollOpen} onOpenChange={setPollOpen} chatId={chat.id} />
+                    <LocationDialog open={locationOpen} onOpenChange={setLocationOpen} chatId={chat.id} />
+                    <ContactDialog open={contactOpen} onOpenChange={setContactOpen} chatId={chat.id} />
+                    <ForwardDialog
+                        open={forwardingMessage !== null}
+                        onOpenChange={(v) => { if (!v) setForwardingMessage(null) }}
+                        message={forwardingMessage}
+                        chats={useChatStore.getState().chats}
+                        currentChatId={chat.id}
+                    />
+                </>
+            )}
 
             <ChatInfoSheetModal
                 open={isMediaSheetOpen}

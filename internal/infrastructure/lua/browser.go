@@ -171,7 +171,7 @@ func (s *LuaService) browserRun(L *lua.LState) int {
 		case "screenshot":
 			filename := getString(tbl, "filename")
 			sel := getString(tbl, "selector")
-			
+
 			actions = append(actions, chromedp.ActionFunc(func(c context.Context) error {
 				var buf []byte
 				var err error
@@ -180,19 +180,19 @@ func (s *LuaService) browserRun(L *lua.LState) int {
 				} else {
 					err = chromedp.CaptureScreenshot(&buf).Do(c)
 				}
-				
+
 				if err != nil {
 					results[filename] = "Screenshot failed: " + err.Error()
-					return nil 
+					return nil
 				}
-				
+
 				_, err = s.storage.Save(context.Background(), filename, bytes.NewReader(buf))
 				if err == nil {
 					results[filename] = s.storage.GetPath(filename)
 				}
 				return nil
 			}))
-			
+
 		case "sleep":
 			ms := getInt(tbl, "ms")
 			actions = append(actions, chromedp.Sleep(time.Duration(ms)*time.Millisecond))
