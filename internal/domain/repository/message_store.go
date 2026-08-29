@@ -525,13 +525,13 @@ func (s *MessageStore) GetMessages(chatID string, limit int, before int64, after
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)`
 
 	if before > 0 {
-		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, before, limit}
 	} else if after > 0 {
-		query = baseQuery + ` AND timestamp > ? ORDER BY timestamp ASC LIMIT ?`
+		query = baseQuery + ` AND timestamp > ? ORDER BY timestamp ASC, rowid ASC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, after, limit}
 	} else {
-		query = baseQuery + ` ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, limit}
 	}
 
@@ -1142,10 +1142,10 @@ func (s *MessageStore) GetChatMedia(chatID string, limit int, before int64) ([]M
 		AND media_url != ''`
 
 	if before > 0 {
-		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, before, limit}
 	} else {
-		query = baseQuery + ` ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, limit}
 	}
 
@@ -1179,10 +1179,10 @@ func (s *MessageStore) GetChatDocs(chatID string, limit int, before int64) ([]Me
 		AND media_url != ''`
 
 	if before > 0 {
-		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, before, limit}
 	} else {
-		query = baseQuery + ` ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, limit}
 	}
 
@@ -1215,10 +1215,10 @@ func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]M
 		AND content LIKE '%http%://%'
 	`
 	if before > 0 {
-		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, before, limit}
 	} else {
-		query = baseQuery + ` ORDER BY timestamp DESC LIMIT ?`
+		query = baseQuery + ` ORDER BY timestamp DESC, rowid DESC LIMIT ?`
 		args = []interface{}{chatID, chatID, chatID, limit}
 	}
 

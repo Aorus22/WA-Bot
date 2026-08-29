@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,10 +18,18 @@ import (
 	"wa-bot-desktop/internal/media"
 )
 
+// sortPostsAscending orders channel posts oldest -> newest by server ID.
+func sortPostsAscending(posts []api.ChannelMessage) []api.ChannelMessage {
+	sort.SliceStable(posts, func(i, j int) bool {
+		return posts[i].ServerID < posts[j].ServerID
+	})
+	return posts
+}
+
 // Channels is the top-level Channels page: a channel list on the left and a
 // chat-like post feed on the right (mirrors the Chats pane layout).
 type Channels struct {
-	root   *gtk.Box
+	root   *adw.OverlaySplitView
 	list   *gtk.ListBox
 	status *gtk.Label
 
@@ -33,8 +42,11 @@ type Channels struct {
 	muteBtn     *gtk.Button
 	unfollowBtn *gtk.Button
 	posts       *gtk.ListBox
+	feedScroll  *gtk.ScrolledWindow
+	feedAdj     *gtk.Adjustment
 	feedSpin    *gtk.Spinner
-	moreBtn     *gtk.Button
+	scrollTop   float64 // viewport state captured when an older-page load starts
+	scrollUpper float64
 
 	client *api.Client
 	cache  *media.Cache
@@ -51,8 +63,6 @@ type Channels struct {
 // NewChannels constructs the Channels page widgets.
 func NewChannels() *Channels {
 	c := &Channels{}
-
-	c.root = gtk.NewBox(gtk.OrientationHorizontal, 0)
 
 	// ─── Left: channel list ───
 	left := gtk.NewBox(gtk.OrientationVertical, 0)
@@ -92,9 +102,6 @@ func NewChannels() *Channels {
 	scroller.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
 	scroller.SetChild(c.list)
 	left.Append(scroller)
-
-	c.root.Append(left)
-	c.root.Append(gtk.NewSeparator(gtk.OrientationVertical))
 
 	// ─── Right: conversation pane ───
 	right := gtk.NewBox(gtk.OrientationVertical, 0)
@@ -153,33 +160,37 @@ func NewChannels() *Channels {
 	c.detail.Append(chHeader)
 	c.detail.Append(gtk.NewSeparator(gtk.OrientationHorizontal))
 
+	topBar := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	topBar.SetHAlign(gtk.AlignCenter)
+	topBar.SetMarginTop(4)
+	topBar.SetMarginBottom(4)
+	c.feedSpin = gtk.NewSpinner()
+	c.feedSpin.SetVisible(false)
+	topBar.Append(c.feedSpin)
+	c.detail.Append(topBar)
+
 	c.posts = gtk.NewListBox()
 	c.posts.SetSelectionMode(gtk.SelectionNone)
 	c.posts.SetShowSeparators(false)
 	c.posts.SetMarginTop(6)
 
-	feedScroll := gtk.NewScrolledWindow()
-	feedScroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
-	feedScroll.SetChild(c.posts)
-	feedScroll.SetVExpand(true)
-	c.detail.Append(feedScroll)
-
-	footer := gtk.NewBox(gtk.OrientationHorizontal, 8)
-	footer.SetHAlign(gtk.AlignCenter)
-	footer.SetMarginTop(4)
-	footer.SetMarginBottom(8)
-	c.moreBtn = gtk.NewButtonWithLabel("Muat postingan lama")
-	c.moreBtn.AddCSSClass("flat")
-	c.moreBtn.SetVisible(false)
-	c.moreBtn.ConnectClicked(func() { c.loadPosts(false) })
-	footer.Append(c.moreBtn)
-	c.feedSpin = gtk.NewSpinner()
-	c.feedSpin.SetVisible(false)
-	footer.Append(c.feedSpin)
-	c.detail.Append(footer)
+	c.feedScroll = gtk.NewScrolledWindow()
+	c.feedScroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
+	c.feedScroll.SetChild(c.posts)
+	c.feedScroll.SetVExpand(true)
+	c.feedAdj = c.feedScroll.VAdjustment()
+	c.feedAdj.ConnectValueChanged(func() { c.onFeedScroll() })
+	c.detail.Append(c.feedScroll)
 
 	right.Append(c.detail)
-	c.root.Append(right)
+
+	// Same sidebar geometry as the Chats pane (never 50:50).
+	split := adw.NewOverlaySplitView()
+	split.SetSidebar(left)
+	split.SetContent(right)
+	split.SetMinSidebarWidth(260)
+	split.SetMaxSidebarWidth(360)
+	c.root = split
 
 	c.list.ConnectRowSelected(func(row *gtk.ListBoxRow) {
 		if row == nil {
@@ -335,13 +346,29 @@ func (c *Channels) clearPosts() {
 	}
 }
 
+// onFeedScroll reacts to scrollbar movement: near the top edge it fetches
+// the next older page (chat-conversation parity), keeping the viewport
+// anchored to the same content.
+func (c *Channels) onFeedScroll() {
+	if c.selected == nil || c.loadingOp || !c.hasMore {
+		return
+	}
+	if c.feedAdj.Value() > loadOlderAt {
+		return
+	}
+	c.scrollTop = c.feedAdj.Value()
+	c.scrollUpper = c.feedAdj.Upper()
+	c.loadPosts(false)
+}
+
 // loadPosts fetches the first page (reset) or the next older page.
 func (c *Channels) loadPosts(reset bool) {
 	if c.selected == nil || c.loadingOp {
 		return
 	}
 	c.loadingOp = true
-	c.moreBtn.SetSensitive(false)
+	c.feedSpin.SetVisible(true)
+	c.feedSpin.Start()
 
 	var before int64
 	if !reset && len(c.postsData) > 0 {
@@ -356,7 +383,6 @@ func (c *Channels) loadPosts(reset bool) {
 			c.loadingOp = false
 			c.feedSpin.SetVisible(false)
 			c.feedSpin.Stop()
-			c.moreBtn.SetSensitive(true)
 			if err != nil {
 				log.Printf("channels: posts: %v", err)
 				if c.toast != nil {
@@ -367,20 +393,51 @@ func (c *Channels) loadPosts(reset bool) {
 			if c.selected == nil || c.selected.JID != channelID {
 				return false
 			}
+			// Ordering guard: server pages may arrive newest-first or with
+			// ties; the feed always renders oldest -> newest.
+			sortPostsAscending(msgs)
 			if reset {
 				c.postsData = msgs
 				c.clearPosts()
 			} else {
-				c.postsData = append(c.postsData, msgs...)
+				c.postsData = sortPostsAscending(append(c.postsData, msgs...))
 			}
 			c.hasMore = len(msgs) == 30
-			c.moreBtn.SetVisible(c.hasMore && len(c.postsData) > 0)
 			for _, m := range msgs {
 				c.posts.Append(c.postRow(m))
+			}
+			if reset {
+				c.scrollToFeedBottom()
+			} else if len(msgs) > 0 {
+				// Keep the viewport anchored: rows were added above, so shift
+				// the scroll offset by the grown height (double-pass for
+				// pending allocations).
+				added := c.feedAdj.Upper() - c.scrollUpper
+				glib.IdleAdd(func() bool {
+					c.feedAdj.SetValue(c.scrollTop + added)
+					glib.IdleAdd(func() bool {
+						c.feedAdj.SetValue(c.scrollTop + (c.feedAdj.Upper() - c.scrollUpper))
+						return false
+					})
+					return false
+				})
 			}
 			return false
 		})
 	}()
+}
+
+// scrollToFeedBottom pins the feed to the newest post. A second pass runs
+// after row allocations settle, mirroring Conversation.scrollToBottom.
+func (c *Channels) scrollToFeedBottom() {
+	glib.IdleAdd(func() bool {
+		c.feedAdj.SetValue(c.feedAdj.Upper())
+		glib.IdleAdd(func() bool {
+			c.feedAdj.SetValue(c.feedAdj.Upper())
+			return false
+		})
+		return false
+	})
 }
 
 // postRow renders one channel post as an incoming chat bubble with a meta
