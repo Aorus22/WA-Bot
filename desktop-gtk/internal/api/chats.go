@@ -33,19 +33,22 @@ type Chat struct {
 // Message is one entry in GET /api/chats/{id}/messages.
 // Fields match the backend's repository.Message JSON shape.
 type Message struct {
-	ID          string `json:"id"`
-	ChatID      string `json:"chatId"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Content     string `json:"content"`
-	Timestamp   int64  `json:"timestamp"`
-	Status      string `json:"status"`
-	Type        string `json:"type"`
-	MediaURL    string `json:"mediaUrl,omitempty"`
-	IsAutomatic bool   `json:"isAutomatic"`
-	SenderName  string `json:"senderName,omitempty"`
-	ChatName    string `json:"chatName,omitempty"`
-	ReplyToID   string `json:"replyToId,omitempty"`
+	ID          string          `json:"id"`
+	ChatID      string          `json:"chatId"`
+	From        string          `json:"from"`
+	To          string          `json:"to"`
+	Content     string          `json:"content"`
+	Timestamp   int64           `json:"timestamp"`
+	Status      string          `json:"status"`
+	Type        string          `json:"type"`
+	MediaURL    string          `json:"mediaUrl,omitempty"`
+	IsAutomatic bool            `json:"isAutomatic"`
+	SenderName  string          `json:"senderName,omitempty"`
+	ChatName    string          `json:"chatName,omitempty"`
+	ReplyToID   string          `json:"replyToId,omitempty"`
+	Forwarded   bool            `json:"forwarded,omitempty"`
+	Reactions   []ReactionEntry `json:"reactions,omitempty"`
+	Extra       *MessageExtra   `json:"extra,omitempty"`
 }
 
 // ListChats fetches chats from GET /api/chats, optionally paginated.
@@ -235,9 +238,20 @@ func (c *Client) DeleteMessage(ctx context.Context, chatID, msgID string) error 
 }
 
 // SendMedia sends a media file (image/document) to the given chat.
-// mediaType must be one of "image", "video", "document" (per backend validation).
+// mediaType must be one of "image", "video", "document", "gif" (per backend validation).
 // filePath is a local file path; the file is uploaded as multipart/form-data.
 func (c *Client) SendMedia(ctx context.Context, target, filePath, mediaType, caption string) error {
+	return c.SendMediaAdvanced(ctx, target, filePath, mediaType, MediaOptions{Caption: caption})
+}
+
+// MediaOptions tweaks a SendMediaAdvanced upload.
+type MediaOptions struct {
+	Caption  string
+	ViewOnce bool // wrap image/video as view-once
+}
+
+// SendMediaAdvanced is SendMedia with extra options (view-once wrapping).
+func (c *Client) SendMediaAdvanced(ctx context.Context, target, filePath, mediaType string, opts MediaOptions) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
@@ -251,8 +265,11 @@ func (c *Client) SendMedia(ctx context.Context, target, filePath, mediaType, cap
 	if mediaType != "" {
 		_ = mw.WriteField("type", mediaType)
 	}
-	if caption != "" {
-		_ = mw.WriteField("message", caption)
+	if opts.Caption != "" {
+		_ = mw.WriteField("message", opts.Caption)
+	}
+	if opts.ViewOnce {
+		_ = mw.WriteField("viewOnce", "true")
 	}
 	fw, err := mw.CreateFormFile("file", filepath.Base(filePath))
 	if err != nil {
@@ -286,4 +303,11 @@ func (c *Client) SendMedia(ctx context.Context, target, filePath, mediaType, cap
 		return &APIError{Status: resp.StatusCode, Body: string(body), Path: "/api/send-media"}
 	}
 	return nil
+}
+
+// SubscribeUserPresence subscribes to a contact's availability updates
+// (POST /api/chats/{id}/presence-subscribe). Presence events only flow after
+// this call.
+func (c *Client) SubscribeUserPresence(ctx context.Context, chatID string) error {
+	return c.doJSON(ctx, "POST", "/api/chats/"+url.PathEscape(chatID)+"/presence-subscribe", map[string]any{}, nil)
 }

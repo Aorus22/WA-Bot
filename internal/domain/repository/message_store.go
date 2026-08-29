@@ -2,12 +2,15 @@ package repository
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
+	"google.golang.org/protobuf/proto"
 )
 
 type MessageStore struct {
@@ -15,20 +18,86 @@ type MessageStore struct {
 	mu sync.RWMutex
 }
 
+// ReactionEntry aggregates everyone who reacted with one emoji.
+type ReactionEntry struct {
+	Emoji   string   `json:"emoji"`
+	Senders []string `json:"senders"`
+}
+
+type PollOption struct {
+	Name string `json:"name"`
+}
+
+type PollMeta struct {
+	Question    string       `json:"question"`
+	Options     []PollOption `json:"options"`
+	MultiSelect bool         `json:"multiSelect"`
+	// Votes maps sender JID -> option names they voted for.
+	Votes map[string][]string `json:"votes,omitempty"`
+}
+
+type LocationMeta struct {
+	Latitude     float64 `json:"latitude"`
+	Longitude    float64 `json:"longitude"`
+	Name         string  `json:"name,omitempty"`
+	Address      string  `json:"address,omitempty"`
+	Live         bool    `json:"live,omitempty"`
+	ThumbnailURL string  `json:"thumbnailUrl,omitempty"`
+}
+
+type ContactEntry struct {
+	DisplayName string `json:"displayName"`
+	VCard       string `json:"vcard,omitempty"`
+}
+
+type ContactMeta struct {
+	DisplayName string         `json:"displayName,omitempty"`
+	Contacts    []ContactEntry `json:"contacts,omitempty"`
+}
+
+type ViewOnceMeta struct {
+	MediaType string `json:"mediaType"`
+	Viewed    bool   `json:"viewed"`
+}
+
+type LinkPreviewMeta struct {
+	URL          string `json:"url"`
+	Title        string `json:"title,omitempty"`
+	Description  string `json:"description,omitempty"`
+	ThumbnailURL string `json:"thumbnailUrl,omitempty"`
+}
+
+// MessageExtra carries type-specific metadata for poll/location/contact/
+// view-once/gif/link-preview messages.
+type MessageExtra struct {
+	Poll        *PollMeta        `json:"poll,omitempty"`
+	Location    *LocationMeta    `json:"location,omitempty"`
+	Contact     *ContactMeta     `json:"contact,omitempty"`
+	ViewOnce    *ViewOnceMeta    `json:"viewOnce,omitempty"`
+	GIF         bool             `json:"gif,omitempty"`
+	LinkPreview *LinkPreviewMeta `json:"linkPreview,omitempty"`
+}
+
 type Message struct {
-	ID          string `json:"id"`
-	ChatID      string `json:"chatId"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Content     string `json:"content"`
-	Timestamp   int64  `json:"timestamp"`
-	Status      string `json:"status"`
-	Type        string `json:"type"`
-	MediaURL    string `json:"mediaUrl,omitempty"`
-	IsAutomatic bool   `json:"isAutomatic"`
-	SenderName  string `json:"senderName,omitempty"`
-	ChatName    string `json:"chatName,omitempty"`
-	ReplyToID   string `json:"replyToId,omitempty"`
+	ID          string          `json:"id"`
+	ChatID      string          `json:"chatId"`
+	From        string          `json:"from"`
+	To          string          `json:"to"`
+	Content     string          `json:"content"`
+	Timestamp   int64           `json:"timestamp"`
+	Status      string          `json:"status"`
+	Type        string          `json:"type"`
+	MediaURL    string          `json:"mediaUrl,omitempty"`
+	IsAutomatic bool            `json:"isAutomatic"`
+	SenderName  string          `json:"senderName,omitempty"`
+	ChatName    string          `json:"chatName,omitempty"`
+	ReplyToID   string          `json:"replyToId,omitempty"`
+	Forwarded   bool            `json:"forwarded,omitempty"`
+	Reactions   []ReactionEntry `json:"reactions,omitempty"`
+	Extra       *MessageExtra   `json:"extra,omitempty"`
+	// RawProto is the serialized waE2E.Message of incoming messages; kept for
+	// lossless forwarding. Not exposed over JSON.
+	RawProto []byte `json:"-"`
 }
 
 type Chat struct {
@@ -110,6 +179,10 @@ func (s *MessageStore) init() error {
                         is_automatic INTEGER DEFAULT 0,
                         metadata TEXT,
 			raw_message BLOB,
+                        forwarded INTEGER DEFAULT 0,
+                        reactions TEXT,
+                        extra_meta TEXT,
+                        fwd_proto BLOB,
                         created_at INTEGER DEFAULT (strftime('%s', 'now')),
                         FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
                 )`,
@@ -183,6 +256,10 @@ func (s *MessageStore) init() error {
 	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN mute_mode TEXT DEFAULT 'off'")
 	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN muted_until INTEGER")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN raw_message BLOB")
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN forwarded INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN reactions TEXT")
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN extra_meta TEXT")
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN fwd_proto BLOB")
 	_, _ = s.db.Exec("UPDATE chats SET unread = 0 WHERE unread IS NULL")
 	_, _ = s.db.Exec("UPDATE chats SET archived = 0 WHERE archived IS NULL")
 	_, _ = s.db.Exec("UPDATE chats SET mute_mode = 'off' WHERE mute_mode IS NULL OR mute_mode = ''")
@@ -268,6 +345,66 @@ func (s *MessageStore) ResolveChatID(chatID string) string {
 	return chatID
 }
 
+// messageColumns is the shared SELECT list for the messages table. Every
+// query that returns message rows must use it so scans stay in sync.
+const messageColumns = `id, chat_id,
+	CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id,
+	receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url,
+	is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id,
+	ifnull(forwarded, 0) as forwarded, ifnull(reactions, '') as reactions, ifnull(extra_meta, '') as extra_meta`
+
+func decodeMessageMeta(msg *Message, forwarded int, reactionsJSON, extraJSON string) {
+	msg.Forwarded = forwarded == 1
+	if reactionsJSON != "" {
+		var reactions []ReactionEntry
+		if json.Unmarshal([]byte(reactionsJSON), &reactions) == nil {
+			msg.Reactions = reactions
+		}
+	}
+	if extraJSON != "" {
+		var extra MessageExtra
+		if json.Unmarshal([]byte(extraJSON), &extra) == nil && extra != (MessageExtra{}) {
+			msg.Extra = &extra
+		}
+	}
+}
+
+// scanMessages reads rows produced by a messageColumns query.
+func scanMessages(rows *sql.Rows) ([]Message, error) {
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		var isAuto, forwarded int
+		var reactionsJSON, extraJSON string
+		err := rows.Scan(
+			&msg.ID,
+			&msg.ChatID,
+			&msg.From,
+			&msg.To,
+			&msg.Content,
+			&msg.Timestamp,
+			&msg.Status,
+			&msg.Type,
+			&msg.MediaURL,
+			&isAuto,
+			&msg.SenderName,
+			&msg.ReplyToID,
+			&forwarded,
+			&reactionsJSON,
+			&extraJSON,
+		)
+		if err != nil {
+			return nil, err
+		}
+		msg.IsAutomatic = isAuto == 1
+		decodeMessageMeta(&msg, forwarded, reactionsJSON, extraJSON)
+		messages = append(messages, msg)
+	}
+	return messages, rows.Err()
+}
+
 func (s *MessageStore) SaveMessage(msg *Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -338,15 +475,30 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 	}
 
 	// Insert message
+	var reactionsJSON any
+	if msg.Reactions != nil {
+		b, _ := json.Marshal(msg.Reactions)
+		reactionsJSON = string(b)
+	}
+	var extraJSON any
+	if msg.Extra != nil {
+		b, _ := json.Marshal(msg.Extra)
+		extraJSON = string(b)
+	}
 	_, err = tx.Exec(`
-                INSERT OR REPLACE INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name, metadata, forwarded, reactions, extra_meta, fwd_proto)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
 		if msg.IsAutomatic {
 			return 1
 		}
 		return 0
-	}(), msg.SenderName, msg.ReplyToID)
+	}(), msg.SenderName, msg.ReplyToID, func() int {
+		if msg.Forwarded {
+			return 1
+		}
+		return 0
+	}(), reactionsJSON, extraJSON, msg.RawProto)
 	if err != nil {
 		return err
 	}
@@ -368,7 +520,7 @@ func (s *MessageStore) GetMessages(chatID string, limit int, before int64, after
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)`
 
@@ -387,31 +539,10 @@ func (s *MessageStore) GetMessages(chatID string, limit int, before int64, after
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		var isAuto int
-		err := rows.Scan(
-			&msg.ID,
-			&msg.ChatID,
-			&msg.From,
-			&msg.To,
-			&msg.Content,
-			&msg.Timestamp,
-			&msg.Status,
-			&msg.Type,
-			&msg.MediaURL,
-			&isAuto,
-			&msg.SenderName,
-			&msg.ReplyToID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		msg.IsAutomatic = isAuto == 1
-		messages = append(messages, msg)
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	// Reverse to get chronological order if we were fetching "before" or the latest
@@ -436,7 +567,7 @@ func (s *MessageStore) SearchMessages(chatID string, query string, limit int) ([
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND content LIKE ?
@@ -449,34 +580,7 @@ func (s *MessageStore) SearchMessages(chatID string, query string, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		var isAuto int
-		err := rows.Scan(
-			&msg.ID,
-			&msg.ChatID,
-			&msg.From,
-			&msg.To,
-			&msg.Content,
-			&msg.Timestamp,
-			&msg.Status,
-			&msg.Type,
-			&msg.MediaURL,
-			&isAuto,
-			&msg.SenderName,
-			&msg.ReplyToID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		msg.IsAutomatic = isAuto == 1
-		messages = append(messages, msg)
-	}
-
-	return messages, nil
+	return scanMessages(rows)
 }
 
 func (s *MessageStore) GetMessageContext(chatID string, messageID string, limit int) ([]Message, error) {
@@ -499,9 +603,10 @@ func (s *MessageStore) GetMessageContext(chatID string, messageID string, limit 
 
 	// Get target message
 	var targetMsg Message
-	var isAuto int
+	var isAuto, fwd int
+	var reactionsJSON, extraJSON string
 	err = s.db.QueryRow(`
-		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT `+messageColumns+`
 		FROM messages WHERE id = ?
 	`, messageID).Scan(
 		&targetMsg.ID,
@@ -516,11 +621,15 @@ func (s *MessageStore) GetMessageContext(chatID string, messageID string, limit 
 		&isAuto,
 		&targetMsg.SenderName,
 		&targetMsg.ReplyToID,
+		&fwd,
+		&reactionsJSON,
+		&extraJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
 	targetMsg.IsAutomatic = isAuto == 1
+	decodeMessageMeta(&targetMsg, fwd, reactionsJSON, extraJSON)
 
 	// Get messages after
 	after, err := s.GetMessages(chatID, half, 0, targetTimestamp)
@@ -820,6 +929,180 @@ func (s *MessageStore) DeleteMessage(msgID string) error {
 	return err
 }
 
+// ApplyReaction returns the new reaction list after sender sets (or removes,
+// when emoji is empty) their reaction.
+func ApplyReaction(existing []ReactionEntry, sender, emoji string) []ReactionEntry {
+	out := make([]ReactionEntry, 0, len(existing)+1)
+	for _, r := range existing {
+		kept := make([]string, 0, len(r.Senders))
+		for _, s := range r.Senders {
+			if s != sender {
+				kept = append(kept, s)
+			}
+		}
+		if r.Emoji == emoji {
+			if emoji != "" {
+				kept = append(kept, sender)
+			}
+		}
+		if len(kept) > 0 {
+			out = append(out, ReactionEntry{Emoji: r.Emoji, Senders: kept})
+		}
+	}
+	if emoji != "" {
+		for i := range out {
+			if out[i].Emoji == emoji {
+				return out
+			}
+		}
+		out = append(out, ReactionEntry{Emoji: emoji, Senders: []string{sender}})
+	}
+	return out
+}
+
+// GetMessageByID fetches a single message row (with reactions/extra decoded).
+func (s *MessageStore) GetMessageByID(msgID string) (*Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var msg Message
+	var isAuto, fwd int
+	var reactionsJSON, extraJSON string
+	err := s.db.QueryRow(`
+		SELECT `+messageColumns+`
+		FROM messages WHERE id = ?
+	`, msgID).Scan(
+		&msg.ID, &msg.ChatID, &msg.From, &msg.To, &msg.Content, &msg.Timestamp,
+		&msg.Status, &msg.Type, &msg.MediaURL, &isAuto, &msg.SenderName,
+		&msg.ReplyToID, &fwd, &reactionsJSON, &extraJSON,
+	)
+	if err != nil {
+		return nil, err
+	}
+	msg.IsAutomatic = isAuto == 1
+	decodeMessageMeta(&msg, fwd, reactionsJSON, extraJSON)
+	return &msg, nil
+}
+
+// UpdateMessageReactions replaces the stored reaction list of a message.
+func (s *MessageStore) UpdateMessageReactions(msgID string, reactions []ReactionEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var reactionsJSON any
+	if reactions != nil {
+		b, err := json.Marshal(reactions)
+		if err != nil {
+			return err
+		}
+		reactionsJSON = string(b)
+	}
+	_, err := s.db.Exec(`UPDATE messages SET reactions = ? WHERE id = ?`, reactionsJSON, msgID)
+	return err
+}
+
+// UpdateMessageExtra replaces the stored extra metadata of a message.
+func (s *MessageStore) UpdateMessageExtra(msgID string, extra *MessageExtra) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var extraJSON any
+	if extra != nil {
+		b, err := json.Marshal(extra)
+		if err != nil {
+			return err
+		}
+		extraJSON = string(b)
+	}
+	_, err := s.db.Exec(`UPDATE messages SET extra_meta = ? WHERE id = ?`, extraJSON, msgID)
+	return err
+}
+
+// IncomingRef pairs a received message's ID with its sender.
+type IncomingRef struct {
+	ID     string
+	Sender string
+}
+
+// GetRecentIncoming returns the most recent incoming (not own) messages of a
+// chat, newest first, for read-receipt purposes.
+func (s *MessageStore) GetRecentIncoming(chatID string, limit int) ([]IncomingRef, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`
+		WITH linked_chats AS (
+			SELECT ? as id
+			UNION
+			SELECT lid FROM lid_mapping WHERE pn_jid = ?
+			UNION
+			SELECT pn_jid FROM lid_mapping WHERE lid = ?
+		)
+		SELECT id, sender_id FROM messages
+		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND sender_id != 'me'
+		AND sender_id != ''
+		ORDER BY timestamp DESC LIMIT ?
+	`, chatID, chatID, chatID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]IncomingRef, 0, limit)
+	for rows.Next() {
+		var ref IncomingRef
+		if err := rows.Scan(&ref.ID, &ref.Sender); err != nil {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out, rows.Err()
+}
+
+// GetMessageRawProto returns the serialized waE2E.Message of a message (used
+// for forwarding). Live-received messages keep it in fwd_proto; messages
+// imported from history sync only have a WebMessageInfo blob in raw_message,
+// so the inner message is extracted from that as a fallback.
+func (s *MessageStore) GetMessageRawProto(msgID string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var fwd []byte
+	err := s.db.QueryRow(`SELECT fwd_proto FROM messages WHERE id = ?`, msgID).Scan(&fwd)
+	if err == nil && len(fwd) > 0 {
+		return fwd, nil
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	var web []byte
+	err = s.db.QueryRow(`SELECT raw_message FROM messages WHERE id = ?`, msgID).Scan(&web)
+	if err != nil {
+		return nil, err
+	}
+	var webMsg waWeb.WebMessageInfo
+	if proto.Unmarshal(web, &webMsg) != nil || webMsg.GetMessage() == nil {
+		return nil, fmt.Errorf("no raw proto available for message %s", msgID)
+	}
+	return proto.Marshal(webMsg.GetMessage())
+}
+
+// GetMessageSender returns the stored sender_id for a message without
+// loading the full row.
+func (s *MessageStore) GetMessageSender(msgID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var sender string
+	err := s.db.QueryRow(`SELECT sender_id FROM messages WHERE id = ?`, msgID).Scan(&sender)
+	return sender, err
+}
+
 func (s *MessageStore) Close() error {
 	return s.db.Close()
 }
@@ -851,10 +1134,10 @@ func (s *MessageStore) GetChatMedia(chatID string, limit int, before int64) ([]M
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
-		AND msg_type IN ('image', 'video')
+		AND msg_type IN ('image', 'video', 'gif')
 		AND media_url IS NOT NULL
 		AND media_url != ''`
 
@@ -870,34 +1153,7 @@ func (s *MessageStore) GetChatMedia(chatID string, limit int, before int64) ([]M
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		var isAuto int
-		err := rows.Scan(
-			&msg.ID,
-			&msg.ChatID,
-			&msg.From,
-			&msg.To,
-			&msg.Content,
-			&msg.Timestamp,
-			&msg.Status,
-			&msg.Type,
-			&msg.MediaURL,
-			&isAuto,
-			&msg.SenderName,
-			&msg.ReplyToID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		msg.IsAutomatic = isAuto == 1
-		messages = append(messages, msg)
-	}
-
-	return messages, nil
+	return scanMessages(rows)
 }
 
 func (s *MessageStore) GetChatDocs(chatID string, limit int, before int64) ([]Message, error) {
@@ -915,7 +1171,7 @@ func (s *MessageStore) GetChatDocs(chatID string, limit int, before int64) ([]Me
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND msg_type = 'document'
@@ -934,34 +1190,7 @@ func (s *MessageStore) GetChatDocs(chatID string, limit int, before int64) ([]Me
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		var isAuto int
-		err := rows.Scan(
-			&msg.ID,
-			&msg.ChatID,
-			&msg.From,
-			&msg.To,
-			&msg.Content,
-			&msg.Timestamp,
-			&msg.Status,
-			&msg.Type,
-			&msg.MediaURL,
-			&isAuto,
-			&msg.SenderName,
-			&msg.ReplyToID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		msg.IsAutomatic = isAuto == 1
-		messages = append(messages, msg)
-	}
-
-	return messages, nil
+	return scanMessages(rows)
 }
 
 func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]Message, error) {
@@ -979,7 +1208,7 @@ func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]M
 			UNION
 			SELECT pn_jid FROM lid_mapping WHERE lid = ?
 		)
-		SELECT id, chat_id, CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id, receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url, is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id
+		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
 		AND msg_type = 'text'
@@ -997,32 +1226,5 @@ func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]M
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		var isAuto int
-		err := rows.Scan(
-			&msg.ID,
-			&msg.ChatID,
-			&msg.From,
-			&msg.To,
-			&msg.Content,
-			&msg.Timestamp,
-			&msg.Status,
-			&msg.Type,
-			&msg.MediaURL,
-			&isAuto,
-			&msg.SenderName,
-			&msg.ReplyToID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		msg.IsAutomatic = isAuto == 1
-		messages = append(messages, msg)
-	}
-
-	return messages, nil
+	return scanMessages(rows)
 }

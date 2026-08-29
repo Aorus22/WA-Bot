@@ -232,6 +232,29 @@ type multipartFileHeader struct {
 	Size     int64
 }
 
+// ReadReceiptsEnabled reports whether outgoing read receipts are enabled.
+// Defaults to true (WhatsApp default) when unset or unparsable.
+func (h *Handler) ReadReceiptsEnabled(ctx context.Context) bool {
+	if h.settingsRepo == nil {
+		return true
+	}
+	val, err := h.settingsRepo.Get(ctx, "read_receipts")
+	if err != nil || val == "" {
+		return true
+	}
+	return val == "true" || val == "1"
+}
+
+// validateSecretValue checks the API secret; when API_SECRET is unset the
+// default matches the frontends' fallback.
+func (h *Handler) validateSecretValue(secret string) bool {
+	apiSecret := os.Getenv("API_SECRET")
+	if apiSecret == "" {
+		apiSecret = "default-secret"
+	}
+	return secret == apiSecret
+}
+
 func (h *Handler) saveMediaFile(ctx context.Context, data []byte, target, filename string) (string, error) {
 	os.MkdirAll("media", 0755)
 
@@ -301,6 +324,15 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 			}
 			if msg.ReplyToID != "" {
 				payload["replyToId"] = msg.ReplyToID
+			}
+			if msg.Forwarded {
+				payload["forwarded"] = true
+			}
+			if msg.Reactions != nil {
+				payload["reactions"] = msg.Reactions
+			}
+			if msg.Extra != nil {
+				payload["extra"] = msg.Extra
 			}
 			fmt.Printf("[WS] Broadcasted message via WebSocket (chatId=%s, resolved=%s, id=%s)\n", msg.ChatID, resolvedChatID, msg.ID)
 			hub.BroadcastMessage("new_message", payload)

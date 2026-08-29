@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/diamondburned/gotk4-adwaita/pkg/adw"
@@ -74,6 +73,7 @@ type Conversation struct {
 	pendingKeepAnchor int  // next append must preserve the viewport anchor
 
 	renderedIDs []string
+	renderedRev int                        // last store revision rendered; detects in-place mutations
 	ticks       map[string]*gtk.Label      // msgID -> status glyph label (outgoing)
 	rows        map[string]*gtk.ListBoxRow // msgID -> rendered row (teleport/highlight)
 
@@ -246,6 +246,8 @@ func (cv *Conversation) SetDeps(client *api.Client, st *store.Store, cache *medi
 				cv.fullRebuild()
 			case store.MessagesChanged:
 				cv.syncMessages()
+			case store.MetaChanged:
+				cv.updateHeaderSub()
 			}
 			return false
 		})
@@ -282,11 +284,14 @@ func (cv *Conversation) OpenChat(c api.Chat) {
 	name := displayName(c)
 	cv.headerAvatar.SetText(initialsOf(name))
 	cv.headerName.SetText(name)
-	jid := c.ID
-	if i := strings.IndexByte(jid, '@'); i > 0 && jid != name {
-		cv.headerSub.SetText(jid)
-	} else {
-		cv.headerSub.SetText("")
+	cv.updateHeaderSub()
+
+	if !c.IsGroup && c.ID != "" {
+		go func(chatID string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_ = cv.client.SubscribeUserPresence(ctx, chatID)
+		}(c.ID)
 	}
 
 	cv.empty.SetVisible(false)
@@ -478,7 +483,12 @@ func (cv *Conversation) syncMessages() {
 	}
 
 	if equalStrings(cv.renderedIDs, newIDs) {
-		cv.updateTicks(page)
+		if cv.renderedRev == page.Rev {
+			cv.updateTicks(page)
+			return
+		}
+		// Same message set but content mutated (edit/reaction/vote): rebuild.
+		cv.fullRebuild()
 		return
 	}
 
@@ -512,6 +522,7 @@ func (cv *Conversation) syncMessages() {
 			prevTS = m.Timestamp
 		}
 		cv.renderedIDs = newIDs
+		cv.renderedRev = page.Rev
 		if atBottom {
 			cv.scrollToBottom()
 		} else if gapBefore > 0 {
@@ -563,6 +574,7 @@ func (cv *Conversation) fullRebuild() {
 		}
 	}
 	cv.renderedIDs = newIDs
+	cv.renderedRev = page.Rev
 
 	if pinBottom {
 		cv.scrollToBottom()

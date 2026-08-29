@@ -36,8 +36,9 @@ type Settings struct {
 	historyButton      *gtk.Button
 
 	// App group widgets
-	userDataRow *adw.ActionRow
-	themeRow    *adw.ActionRow
+	userDataRow        *adw.ActionRow
+	readReceiptsSwitch *gtk.Switch
+	themeRow           *adw.ActionRow
 
 	// About group widgets
 	versionRow *adw.ActionRow
@@ -144,6 +145,20 @@ func NewSettings(userDataDir string, mgr *backend.Manager) *Settings {
 	s.userDataRow.SetActivatableWidget(openUserDataBtn)
 	appGroup.Add(s.userDataRow)
 
+	// Read receipts toggle (syncs to WhatsApp servers when on).
+	s.readReceiptsSwitch = gtk.NewSwitch()
+	s.readReceiptsSwitch.SetVAlign(gtk.AlignCenter)
+	s.readReceiptsSwitch.ConnectStateSet(func(state bool) bool {
+		s.saveReadReceipts(state)
+		return false
+	})
+	receiptsRow := adw.NewActionRow()
+	receiptsRow.SetTitle("Konfirmasi baca")
+	receiptsRow.SetSubtitle("Kirim tanda centang biru ke WhatsApp saat chat dibuka")
+	receiptsRow.AddSuffix(s.readReceiptsSwitch)
+	receiptsRow.SetActivatableWidget(s.readReceiptsSwitch)
+	appGroup.Add(receiptsRow)
+
 	// Theme picker row; options are wired later via SetThemeOptions.
 	s.themeRow = adw.NewActionRow()
 	s.themeRow.SetTitle("Tema")
@@ -193,12 +208,54 @@ func (s *Settings) SetDeps(client *api.Client, toast func(string), onComplete fu
 	s.toast = toast
 	s.onHistoryComplete = onComplete
 	s.historyButton.SetSensitive(client != nil && s.whatsAppConnected)
+	s.loadReadReceipts()
 	s.refreshHistoryStatus()
 }
 
 func (s *Settings) SetWhatsAppConnected(connected bool) {
 	s.whatsAppConnected = connected
 	s.historyButton.SetSensitive(connected && s.client != nil && s.lastHistoryState != "running")
+}
+
+// loadReadReceipts fetches the current read_receipts setting into the switch.
+func (s *Settings) loadReadReceipts() {
+	if s.client == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		st, err := s.client.GetAppSettings(ctx)
+		glib.IdleAdd(func() bool {
+			if err == nil && st != nil {
+				s.readReceiptsSwitch.SetActive(st.ReadReceipts)
+			}
+			return false
+		})
+	}()
+}
+
+// saveReadReceipts persists the read_receipts setting.
+func (s *Settings) saveReadReceipts(enabled bool) {
+	if s.client == nil {
+		return
+	}
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := s.client.UpdateAppSettings(ctx, map[string]string{"read_receipts": value}); err != nil {
+			glib.IdleAdd(func() bool {
+				if s.toast != nil {
+					s.toast("Gagal menyimpan pengaturan: " + err.Error())
+				}
+				return false
+			})
+		}
+	}()
 }
 
 func (s *Settings) startHistorySync() {

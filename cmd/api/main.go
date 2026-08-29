@@ -167,6 +167,9 @@ func InitializeApp() (*App, error) {
 		"call_tts_fish_audio_key":      os.Getenv("CALL_TTS_FISH_AUDIO_KEY"),
 		"call_tts_fish_audio_model":    os.Getenv("CALL_TTS_FISH_AUDIO_MODEL"),
 		"call_tts_fish_audio_voice_id": os.Getenv("CALL_TTS_FISH_AUDIO_VOICE_ID"),
+		// Read receipts default to on (WhatsApp default); "false" keeps the
+		// legacy local-only behavior.
+		"read_receipts": "true",
 	}); err != nil {
 		seedCancel()
 		return nil, fmt.Errorf("failed to seed settings: %w", err)
@@ -235,6 +238,43 @@ func InitializeApp() (*App, error) {
 	waClient.SetLogger(httpServer)
 	eventHandler.SetMessageStore(msgStore)
 	eventHandler.SetHTTPServer(httpServer)
+
+	// Purge expired statuses (stories) hourly; they live for 24h.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		msgStore.ExpireStatuses()
+		for range ticker.C {
+			msgStore.ExpireStatuses()
+		}
+	}()
+
+	// Renew channel (newsletter) live-update subscriptions every 15 minutes;
+	// WhatsApp expires them server-side after the duration whatsmeow reports.
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		renew := func() {
+			if !waClient.IsConnected() || !waClient.IsLoggedIn() {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			channels, err := waClient.ListChannels(ctx)
+			if err != nil {
+				return
+			}
+			for _, ch := range channels {
+				subCtx, subCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_, _ = waClient.SubscribeChannelLive(subCtx, ch.JID)
+				subCancel()
+			}
+		}
+		renew()
+		for range ticker.C {
+			renew()
+		}
+	}()
 
 	// Wire up AI companion client (disabled if ai_server_url setting is empty)
 	aiServerURL, _ := settingsRepo.Get(context.Background(), "ai_server_url")

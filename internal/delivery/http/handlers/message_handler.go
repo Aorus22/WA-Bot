@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"wa-bot/internal/delivery/http/dto"
+	"wa-bot/internal/domain/repository"
 )
 
 type MessageHandler struct {
@@ -49,7 +50,7 @@ func (mh *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("[SEND] Sending message to: %s | Content: %s\n", req.Target, req.Message)
 
-	id, err := mh.handler.client.SendMessage(context.Background(), req.Target, req.Message, false)
+	id, err := mh.handler.client.SendMessageWithPreview(context.Background(), req.Target, req.Message, false)
 	if err != nil {
 		fmt.Printf("[ERR] Failed to send WhatsApp message: %v\n", err)
 		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())
@@ -213,12 +214,50 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 	var id string
 	var sendErr error
 
-	switch mediaType {
-	case "image":
+	// View-once wrapping applies to image/video sends; WhatsApp does not
+	// allow captions on view-once media.
+	viewOnce := false
+	if voStr := r.FormValue("viewOnce"); voStr != "" {
+		if b, err := strconv.ParseBool(voStr); err == nil {
+			viewOnce = b
+		}
+	}
+
+	switch {
+	case viewOnce && (mediaType == "image" || mediaType == "video"):
+		id, sendErr = mh.handler.client.SendViewOnceMedia(ctx, target, mediaType, data, mediaURL)
+		if sendErr == nil {
+			mh.handler.SaveAndBroadcastMessage(&repository.Message{
+				ID:        id,
+				ChatID:    target,
+				From:      "me",
+				To:        target,
+				Content:   "[Sekali Lihat]",
+				Timestamp: time.Now().UnixMilli(),
+				Status:    "sent",
+				Type:      mediaType,
+				MediaURL:  mediaURL,
+				Extra:     &repository.MessageExtra{ViewOnce: &repository.ViewOnceMeta{MediaType: mediaType}},
+			})
+		}
+	case mediaType == "image":
 		id, sendErr = mh.handler.client.SendImage(ctx, target, data, message, mediaURL, false)
-	case "video":
+	case mediaType == "video":
 		id, sendErr = mh.handler.client.SendVideo(ctx, target, data, message, mediaURL, false)
-	case "audio", "ptt", "voice", "audio-ptt":
+	case mediaType == "gif":
+		// WhatsApp renders GIFs as silent MP4 videos with the gifPlayback
+		// flag; transcode when the source is still an animated GIF.
+		if detected := http.DetectContentType(data); detected == "image/gif" {
+			mp4Data, terr := transcodeToSilentMp4(data)
+			if terr != nil {
+				fmt.Printf("[WARN] GIF transcode failed (%v), sending as document\n", terr)
+				id, sendErr = mh.handler.client.SendDocument(ctx, target, data, header.Filename, mediaURL, false)
+				break
+			}
+			data = mp4Data
+		}
+		id, sendErr = mh.handler.client.SendGIF(ctx, target, data, message, mediaURL)
+	case mediaType == "audio" || mediaType == "ptt" || mediaType == "voice" || mediaType == "audio-ptt":
 		ptt := pttEarly
 		var seconds uint32
 		if secStr := r.FormValue("seconds"); secStr != "" {
@@ -375,11 +414,7 @@ func (mh *MessageHandler) BulkSendDifferent(w http.ResponseWriter, r *http.Reque
 }
 
 func (mh *MessageHandler) validateSecret(secret string) bool {
-	SECRET := os.Getenv("API_SECRET")
-	if SECRET == "" {
-		SECRET = "default-secret"
-	}
-	return secret == SECRET
+	return mh.handler.validateSecretValue(secret)
 }
 
 // transcodeToOpusOgg converts arbitrary audio bytes to OGG/Opus via ffmpeg.
@@ -412,6 +447,37 @@ func transcodeToOpusOgg(in []byte) ([]byte, error) {
 	return os.ReadFile(outPath)
 }
 
+// transcodeToSilentMp4 converts animated GIF bytes to the silent MP4 that
+// WhatsApp uses to represent GIFs. Requires ffmpeg in PATH.
+func transcodeToSilentMp4(in []byte) ([]byte, error) {
+	inFile, err := os.CreateTemp("", "wa-gif-in-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(inFile.Name())
+	if _, err := inFile.Write(in); err != nil {
+		inFile.Close()
+		return nil, err
+	}
+	inFile.Close()
+
+	outFile, err := os.CreateTemp("", "wa-gif-out-*.mp4")
+	if err != nil {
+		return nil, err
+	}
+	outPath := outFile.Name()
+	outFile.Close()
+	defer os.Remove(outPath)
+
+	// H.264 MP4, no audio, even dimensions (yuv420p requirement), faststart
+	// so recipients can start rendering before the file fully downloads.
+	cmd := exec.Command("ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", inFile.Name(), "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", outPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("ffmpeg: %v: %s", err, string(out))
+	}
+	return os.ReadFile(outPath)
+}
+
 func (mh *MessageHandler) SendReaction(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == "OPTIONS" {
@@ -430,10 +496,24 @@ func (mh *MessageHandler) SendReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Printf("[REACT] Reacting %s to msg %s in chat %s\n", req.Emoji, msgID, chatID)
-	if err := mh.handler.client.SendReaction(chatID, msgID, req.Emoji); err != nil {
+	if err := mh.handler.client.SendReaction(r.Context(), chatID, msgID, req.Emoji, req.From); err != nil {
 		fmt.Printf("[ERR] Failed to send reaction: %v\n", err)
 		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Apply locally: the reaction echo never comes back to the sending device.
+	if mh.handler.msgRepo != nil {
+		if stored, err := mh.handler.msgRepo.GetMessageByID(msgID); err == nil {
+			reactions := repository.ApplyReaction(stored.Reactions, "me", req.Emoji)
+			if err := mh.handler.msgRepo.UpdateMessageReactions(msgID, reactions); err == nil {
+				mh.handler.BroadcastMessage("message_reaction", map[string]interface{}{
+					"chatId":    chatID,
+					"id":        msgID,
+					"reactions": reactions,
+				})
+			}
+		}
 	}
 
 	mh.handler.sendJSONWithStatus(w, http.StatusOK, map[string]interface{}{

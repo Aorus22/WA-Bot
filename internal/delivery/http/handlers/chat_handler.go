@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 
 	"wa-bot/internal/domain/repository"
+	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
 type ChatHandler struct {
@@ -152,6 +155,44 @@ func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// When the read-receipts toggle is on, tell WhatsApp we read the chat.
+	if ch.handler.ReadReceiptsEnabled(r.Context()) {
+		if targets, terr := ch.handler.msgRepo.GetRecentIncoming(chatID, 100); terr == nil && len(targets) > 0 {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				readTargets := make([]whatsappInfra.ReadTarget, len(targets))
+				for i, t := range targets {
+					readTargets[i] = whatsappInfra.ReadTarget{ID: t.ID, Sender: t.Sender}
+				}
+				if serr := ch.handler.client.SendReadReceipts(ctx, chatID, readTargets); serr != nil {
+					fmt.Printf("[READ_RECEIPT] %s: %v\n", chatID, serr)
+				}
+			}()
+		}
+	}
+
+	ch.handler.sendSuccess(w, nil)
+}
+
+// SubscribePresence subscribes to a 1:1 contact's availability updates so
+// presence events start flowing for that chat.
+func (ch *ChatHandler) SubscribePresence(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["id"]
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	if err := ch.handler.client.SubscribeUserPresence(ctx, chatID); err != nil {
+		ch.handler.sendError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 	ch.handler.sendSuccess(w, nil)
 }
 

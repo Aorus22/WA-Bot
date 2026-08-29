@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom"
-import { MessageSquare, Phone, Bot, FileText, Clock, Globe, Settings } from "lucide-react"
+import { MessageSquare, Phone, Bot, FileText, Clock, Globe, Settings, CircleDashed, Megaphone } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -17,6 +17,18 @@ export function NavigationSidebar() {
 					label="Chats"
 					isActive={isActive("/chat")}
 					onClick={() => navigate("/chat")}
+				/>
+				<NavButton
+					icon={<CircleDashed className="h-5 w-5" />}
+					label="Status"
+					isActive={isActive("/status")}
+					onClick={() => navigate("/status")}
+				/>
+				<NavButton
+					icon={<Megaphone className="h-5 w-5" />}
+					label="Channels"
+					isActive={isActive("/channels")}
+					onClick={() => navigate("/channels")}
 				/>
 				<NavButton
 					icon={<Phone className="h-5 w-5" />}

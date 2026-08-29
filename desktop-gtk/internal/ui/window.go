@@ -141,6 +141,18 @@ func (w *Window) AddCalls(c *views.Calls) {
 	w.registerPage("calls")
 }
 
+// AddChannels registers a Channels view as the "channels" page.
+func (w *Window) AddChannels(c *views.Channels) {
+	w.stack.AddTitledWithIcon(c.Widget(), "channels", "Channels", "emblem-presentation-symbolic")
+	w.registerPage("channels")
+}
+
+// AddStatus registers a Status view as the "status" page.
+func (w *Window) AddStatus(s *views.Status) {
+	w.stack.AddTitledWithIcon(s.Widget(), "status", "Status", "user-available-symbolic")
+	w.registerPage("status")
+}
+
 // AddSettings registers a Settings view as the "settings" page.
 func (w *Window) AddSettings(s *views.Settings) {
 	w.stack.AddTitledWithIcon(s.Widget(), "settings", "Settings", "preferences-system-symbolic")
@@ -174,6 +186,10 @@ func (w *Window) registerPage(name string) {
 		icon, label = "chat-bubble-symbolic", "Chats"
 	case "calls":
 		icon, label = "call-start-symbolic", "Calls"
+	case "status":
+		icon, label = "user-available-symbolic", "Status"
+	case "channels":
+		icon, label = "emblem-presentation-symbolic", "Channels"
 	case "settings":
 		icon, label = "preferences-system-symbolic", "Settings"
 	default:

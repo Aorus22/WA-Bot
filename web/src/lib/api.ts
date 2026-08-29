@@ -26,6 +26,53 @@ export function setBackendPort(port: number) {
 	}
 }
 
+export type ReactionEntry = {
+	emoji: string
+	senders: string[]
+}
+
+export type PollMeta = {
+	question: string
+	options: Array<{ name: string }>
+	multiSelect: boolean
+	votes?: Record<string, string[]>
+}
+
+export type LocationMeta = {
+	latitude: number
+	longitude: number
+	name?: string
+	address?: string
+	live?: boolean
+	thumbnailUrl?: string
+}
+
+export type ContactMeta = {
+	displayName?: string
+	contacts: Array<{ displayName: string; vcard?: string }>
+}
+
+export type ViewOnceMeta = {
+	mediaType: string
+	viewed: boolean
+}
+
+export type LinkPreviewMeta = {
+	url: string
+	title?: string
+	description?: string
+	thumbnailUrl?: string
+}
+
+export type MessageExtra = {
+	poll?: PollMeta
+	location?: LocationMeta
+	contact?: ContactMeta
+	viewOnce?: ViewOnceMeta
+	gif?: boolean
+	linkPreview?: LinkPreviewMeta
+}
+
 export type Message = {
 	id: string
 	chatId: string
@@ -39,6 +86,9 @@ export type Message = {
 	isAutomatic?: boolean
 	senderName?: string
 	replyToId?: string
+	forwarded?: boolean
+	reactions?: ReactionEntry[]
+	extra?: MessageExtra
 }
 
 export type Chat = {
@@ -135,6 +185,65 @@ export type Contact = {
 	name: string
 	jid: string
 	avatar: string
+}
+
+export type GroupParticipantInfo = {
+	jid: string
+	name?: string
+	isAdmin: boolean
+	isSuperAdmin?: boolean
+}
+
+export type GroupCache = {
+	jid: string
+	name: string
+	description?: string
+	owner?: string
+	locked: boolean
+	announce: boolean
+	joinApproval: boolean
+	memberAddMode?: string
+	ownRole: string
+	participantCount: number
+	participants: GroupParticipantInfo[]
+	updatedAt: number
+}
+
+export type GroupPreview = {
+	jid: string
+	name: string
+	participantCount: number
+	description?: string
+}
+
+export type StatusEntry = {
+	id: string
+	sender: string
+	senderName?: string
+	content?: string
+	mediaUrl?: string
+	type: string
+	timestamp: number
+	expiresAt: number
+	viewed: boolean
+}
+
+export type StatusGroup = {
+	sender: string
+	name?: string
+	avatar?: string
+	allViewed: boolean
+	statuses: StatusEntry[]
+	latestTime: number
+}
+
+export type UpdateGroupChanges = {
+	name?: string
+	description?: string
+	locked?: boolean
+	announce?: boolean
+	joinApproval?: boolean
+	memberAddMode?: string
 }
 
 export type Trigger = {
@@ -422,6 +531,258 @@ class ApiClient {	private baseUrl: string
 		})
 	}
 
+	/** Subscribe to a 1:1 contact's availability updates. */
+	async subscribeChatPresence(chatId: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/chats/${chatId}/presence-subscribe`, { method: "POST" })
+	}
+
+	/** React to a message; an empty emoji removes the reaction. */
+	async reactToMessage(chatId: string, id: string, emoji: string, from?: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/chats/${chatId}/messages/${id}/react`, {
+			method: "POST",
+			body: JSON.stringify({ emoji, from: from || "" }),
+		})
+	}
+
+	/** Forward a message to other chats. */
+	async forwardMessage(chatId: string, id: string, targets: string[]): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/chats/${chatId}/messages/${id}/forward`, {
+			method: "POST",
+			body: JSON.stringify({ targets }),
+		})
+	}
+
+	/** Create a poll in a chat. */
+	async sendPoll(chatId: string, question: string, options: string[], multiSelect = false): Promise<{ status: string; id?: string }> {
+		return this.request<{ status: string; id?: string }>(`/chats/${chatId}/poll`, {
+			method: "POST",
+			body: JSON.stringify({
+				secret: import.meta.env.VITE_API_SECRET || "default-secret",
+				question,
+				options,
+				multiSelect,
+			}),
+		})
+	}
+
+	/** Vote on a poll; an empty options array retracts the vote. */
+	async sendPollVote(chatId: string, messageId: string, options: string[]): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/chats/${chatId}/messages/${messageId}/vote`, {
+			method: "POST",
+			body: JSON.stringify({ options }),
+		})
+	}
+
+	/** Share a static or live location. */
+	async sendLocation(
+		chatId: string,
+		latitude: number,
+		longitude: number,
+		name = "",
+		address = "",
+		live = false,
+		caption = ""
+	): Promise<{ status: string; id?: string }> {
+		return this.request<{ status: string; id?: string }>(`/chats/${chatId}/location`, {
+			method: "POST",
+			body: JSON.stringify({
+				secret: import.meta.env.VITE_API_SECRET || "default-secret",
+				latitude,
+				longitude,
+				name,
+				address,
+				live,
+				caption,
+			}),
+		})
+	}
+
+	/** Share a contact card. */
+	async sendContact(chatId: string, displayName: string, phone: string, vcard = ""): Promise<{ status: string; id?: string }> {
+		return this.request<{ status: string; id?: string }>(`/chats/${chatId}/contact`, {
+			method: "POST",
+			body: JSON.stringify({
+				secret: import.meta.env.VITE_API_SECRET || "default-secret",
+				displayName,
+				phone,
+				vcard,
+			}),
+		})
+	}
+
+	// --- Group management ---
+
+	/** Fetch the cached group snapshot (server-refreshed on miss). */
+	async getGroup(groupId: string): Promise<GroupCache> {
+		return this.request<GroupCache>(`/groups/${groupId}`)
+	}
+
+	/** Patch group name/description/settings; returns the refreshed snapshot. */
+	async updateGroup(groupId: string, changes: UpdateGroupChanges): Promise<GroupCache> {
+		return this.request<GroupCache>(`/groups/${groupId}`, {
+			method: "PATCH",
+			body: JSON.stringify(changes),
+		})
+	}
+
+	/** add | remove | promote | demote participants. */
+	async updateGroupParticipants(groupId: string, action: string, jids: string[]): Promise<GroupCache> {
+		return this.request<GroupCache>(`/groups/${groupId}/participants`, {
+			method: "POST",
+			body: JSON.stringify({ action, jids }),
+		})
+	}
+
+	/** Fetch the invite link, optionally revoking the previous one. */
+	async getGroupInviteLink(groupId: string, reset = false): Promise<{ status: string; link: string }> {
+		return this.request<{ status: string; link: string }>(`/groups/${groupId}/invite-link${reset ? "?reset=true" : ""}`)
+	}
+
+	/** Peek at a group via invite link without joining. */
+	async previewGroupLink(url: string): Promise<GroupPreview> {
+		return this.request<GroupPreview>(`/groups/preview?url=${encodeURIComponent(url)}`)
+	}
+
+	/** Join a group via invite link; returns the group JID. */
+	async joinGroupWithLink(url: string): Promise<{ status: string; jid: string }> {
+		return this.request<{ status: string; jid: string }>("/groups/join", {
+			method: "POST",
+			body: JSON.stringify({ url }),
+		})
+	}
+
+	/** Create a group and return its snapshot. */
+	async createGroup(name: string, participants: string[]): Promise<{ status: string; group: GroupCache }> {
+		return this.request<{ status: string; group: GroupCache }>("/groups/create", {
+			method: "POST",
+			body: JSON.stringify({ name, participants }),
+		})
+	}
+
+	/** Leave a group. */
+	async leaveGroup(groupId: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/groups/${groupId}/leave`, { method: "POST" })
+	}
+
+	// --- Status (stories) ---
+
+	/** List active statuses grouped per sender. */
+	async listStatuses(): Promise<StatusGroup[]> {
+		return this.request<StatusGroup[]>("/statuses")
+	}
+
+	/** Post a text status with a background color (ARGB). */
+	async postStatusText(text: string, background = 0xff075e54): Promise<{ status: string; id: string }> {
+		return this.request<{ status: string; id: string }>("/statuses/text", {
+			method: "POST",
+			body: JSON.stringify({ text, background }),
+		})
+	}
+
+	/** Post an image/video status. */
+	async postStatusMedia(file: File, type: "image" | "video", caption = ""): Promise<{ status: string; id: string }> {
+		const formData = new FormData()
+		formData.append("type", type)
+		formData.append("caption", caption)
+		formData.append("file", file)
+		const response = await fetch(`${this.baseUrl}/statuses/media`, { method: "POST", body: formData })
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ error: response.statusText }))
+			throw new Error(error.error || "Request failed")
+		}
+		return response.json()
+	}
+
+	/** Mark a status viewed (sends the read receipt). */
+	async markStatusViewed(id: string): Promise<{ status: string }> {
+		return this.request<{ status: string }>(`/statuses/${id}/viewed`, { method: "POST" })
+	}
+
+	/** On-demand status media endpoint. */
+	statusMediaURL(id: string): string {
+		return `${this.baseUrl}/statuses/${encodeURIComponent(id)}/media`
+	}
+
+	// --- Channels (newsletters) ---
+
+	/** List followed channels. */
+	async listChannels(): Promise<Array<{
+		jid: string
+		name: string
+		description?: string
+		subscribers: number
+		inviteCode?: string
+		avatar?: string
+		muted: boolean
+		verified: boolean
+	}>> {
+		return this.request("/channels")
+	}
+
+	/** Peek at a channel via invite link without following. */
+	async previewChannel(url: string): Promise<{
+		jid: string
+		name: string
+		subscribers: number
+		description?: string
+	}> {
+		return this.request(`/channels/preview?url=${encodeURIComponent(url)}`)
+	}
+
+	/** Follow a channel via invite link. */
+	async followChannel(url: string): Promise<{ status: string }> {
+		return this.request("/channels", { method: "POST", body: JSON.stringify({ url }) })
+	}
+
+	/** Unfollow a channel. */
+	async unfollowChannel(jid: string): Promise<{ status: string }> {
+		return this.request(`/channels/${jid}`, { method: "DELETE" })
+	}
+
+	/** Toggle channel notifications. */
+	async setChannelMute(jid: string, muted: boolean): Promise<{ status: string }> {
+		return this.request(`/channels/${jid}/mute`, { method: "POST", body: JSON.stringify({ muted }) })
+	}
+
+	/** Fetch the channel post feed. */
+	async getChannelMessages(jid: string, count = 30, before?: number): Promise<Array<{
+		id: string
+		serverId: number
+		type: string
+		timestamp: number
+		viewsCount: number
+		reactions?: Record<string, number>
+		content?: string
+		mediaType?: string
+	}>> {
+		let url = `/channels/${jid}/messages?count=${count}`
+		if (before) url += `&before=${before}`
+		return this.request(url)
+	}
+
+	/** React to a channel post (empty emoji removes the reaction). */
+	async reactChannelMessage(jid: string, serverId: number, messageId: string, emoji: string): Promise<{ status: string }> {
+		return this.request(`/channels/${jid}/messages/${serverId}/react`, {
+			method: "POST",
+			body: JSON.stringify({ emoji, messageId }),
+		})
+	}
+
+	/** Upload a new group photo (multipart "file"). */
+	async setGroupPhoto(groupId: string, file: File): Promise<GroupCache> {
+		const formData = new FormData()
+		formData.append("file", file)
+		const response = await fetch(`${this.baseUrl}/groups/${groupId}/photo`, {
+			method: "POST",
+			body: formData,
+		})
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ error: response.statusText }))
+			throw new Error(error.error || "Request failed")
+		}
+		return response.json()
+	}
+
 	async getStatus(): Promise<{ isLoggedIn: boolean }> {
 		return this.request<{ isLoggedIn: boolean }>("/status")
 	}
@@ -616,9 +977,9 @@ class ApiClient {	private baseUrl: string
 	async sendMedia(
 		target: string,
 		file: File,
-		type: "image" | "video" | "document" | "audio" | "ptt" | "voice",
+		type: "image" | "video" | "document" | "audio" | "ptt" | "voice" | "gif",
 		message: string = "",
-		options?: { ptt?: boolean; seconds?: number; waveform?: string }
+		options?: { ptt?: boolean; seconds?: number; waveform?: string; viewOnce?: boolean }
 	): Promise<{ status: string; id: string }> {
 		const formData = new FormData()
 		formData.append("secret", import.meta.env.VITE_API_SECRET || "default-secret")
@@ -637,6 +998,9 @@ class ApiClient {	private baseUrl: string
 		}
 		if (options?.waveform) {
 			formData.append("waveform", options.waveform)
+		}
+		if (options?.viewOnce) {
+			formData.append("viewOnce", "true")
 		}
 
 		const response = await fetch(`${this.baseUrl}/send-media`, {

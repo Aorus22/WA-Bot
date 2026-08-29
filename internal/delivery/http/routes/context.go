@@ -10,9 +10,9 @@ import (
 type ContextKey string
 
 const (
-	ContextKeyUserID     ContextKey = "userID"
-	ContextKeyRequestID  ContextKey = "requestID"
-	ContextKeyStartTime  ContextKey = "startTime"
+	ContextKeyUserID    ContextKey = "userID"
+	ContextKeyRequestID ContextKey = "requestID"
+	ContextKeyStartTime ContextKey = "startTime"
 )
 
 func GetUserID(r *http.Request) string {

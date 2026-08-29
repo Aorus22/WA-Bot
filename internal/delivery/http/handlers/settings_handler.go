@@ -22,6 +22,7 @@ var managedSettingsKeys = []string{
 	"call_tts_fish_audio_key",
 	"call_tts_fish_audio_model",
 	"call_tts_fish_audio_voice_id",
+	"read_receipts",
 }
 
 // secretSettingsKeys are masked in API responses so raw secrets never leak.
