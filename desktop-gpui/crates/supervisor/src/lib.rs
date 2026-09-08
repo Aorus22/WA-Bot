@@ -42,6 +42,10 @@ pub enum BackendStatus {
     Starting,
     /// Handshake received and readiness probe passing; backend serving.
     Ready,
+    /// Backend stopped cleanly via [`Supervisor::stop`]. `info()` is `None`
+    /// in this state; Phase 3 boot logic must treat `Stopped` (or
+    /// `info().is_none()`) as "no backend", never as running.
+    Stopped,
     /// Startup failed before readiness (invalid path, early exit, probe timeout).
     /// `stderr_tail` is the newest-wins tail of child stderr, capped at 2000 chars.
     Failed {
@@ -627,6 +631,7 @@ impl Supervisor {
             }
         }
         self.info = None;
+        let _ = self.status_tx.send(BackendStatus::Stopped);
         Ok(())
     }
 
