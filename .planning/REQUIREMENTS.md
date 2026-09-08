@@ -18,10 +18,10 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 
 ### Auth & Session
 
-- [ ] **AUTH-01**: User login via QR dengan auto-refresh (~30s) dan update live via WS push
-- [ ] **AUTH-02**: User login via tab phone-link berdampingan dengan QR
-- [ ] **AUTH-03**: Aplikasi menampilkan auth gate yang benar (spinner saat cek, app saat login, halaman login saat logout)
-- [ ] **AUTH-04**: User logout via dialog konfirmasi (sidebar + settings)
+- [x] **AUTH-01**: User login via QR dengan auto-refresh (~30s) dan update live via WS push
+- [x] **AUTH-02**: User login via tab phone-link berdampingan dengan QR
+- [x] **AUTH-03**: Aplikasi menampilkan auth gate yang benar (spinner saat cek, app saat login, halaman login saat logout)
+- [x] **AUTH-04**: User logout via dialog konfirmasi (sidebar + settings)
 - [x] **AUTH-05**: Client melakukan WS authenticate handshake saat koneksi terbuka
 
 ### Chat List (Sidebar)
@@ -105,13 +105,13 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 
 ### Settings / Theming / Docs
 
-- [ ] **SET-01**: Tema 1:1 web (mode system/light/dark + swatch `themes.ts`) teraplikasi ke seluruh komponen
+- [x] **SET-01**: Tema 1:1 web (mode system/light/dark + swatch `themes.ts`) teraplikasi ke seluruh komponen
 - [ ] **SET-02**: User mengatur AI (Gemini key, AI server URL) dan TTS (provider, voice, FishAudio key/model/voice) dengan flag masked
 - [ ] **SET-03**: User toggle read-receipts
-- [ ] **SET-04**: User melihat indikator koneksi (WS online/offline)
+- [x] **SET-04**: User melihat indikator koneksi (WS online/offline)
 - [ ] **SET-05**: User mengontrol history-sync + melihat progres (state, counts, errors)
 - [ ] **SET-06**: User membaca halaman dokumentasi (markdown dari backend `/docs`)
-- [ ] **SET-07**: Setiap mutasi melaporkan hasil via sistem toast
+- [x] **SET-07**: Setiap mutasi melaporkan hasil via sistem toast
 - [ ] **SET-08**: Window desktop rapi per OS (rounded corners saat restored, shadow, kontrol window)
 
 ## v2 Requirements
@@ -150,10 +150,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-04 | Phase 2 | Complete |
 | CORE-05 | Phase 1 | Complete |
 | CORE-06 | Phase 7 | Pending |
-| AUTH-01 | Phase 3 | Pending |
-| AUTH-02 | Phase 3 | Pending |
-| AUTH-03 | Phase 3 | Pending |
-| AUTH-04 | Phase 3 | Pending |
+| AUTH-01 | Phase 3 | Complete |
+| AUTH-02 | Phase 3 | Complete |
+| AUTH-03 | Phase 3 | Complete |
+| AUTH-04 | Phase 3 | Complete |
 | AUTH-05 | Phase 2 | Complete |
 | CHAT-01 | Phase 4 | Pending |
 | CHAT-02 | Phase 4 | Pending |
@@ -213,13 +213,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BOT-03 | Phase 7 | Pending |
 | BOT-04 | Phase 7 | Pending |
 | BOT-05 | Phase 7 | Pending |
-| SET-01 | Phase 3 | Pending |
+| SET-01 | Phase 3 | Complete |
 | SET-02 | Phase 7 | Pending |
 | SET-03 | Phase 7 | Pending |
-| SET-04 | Phase 3 | Pending |
+| SET-04 | Phase 3 | Complete |
 | SET-05 | Phase 7 | Pending |
 | SET-06 | Phase 7 | Pending |
-| SET-07 | Phase 3 | Pending |
+| SET-07 | Phase 3 | Complete |
 | SET-08 | Phase 7 | Pending |
 
 **Coverage:**

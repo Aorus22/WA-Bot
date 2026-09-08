@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Fondasi Workspace & Supervisor** - Workspace Cargo ter-pin, supervisor sidecar, settings crate, CI Linux+Windows (completed 2026-09-09)
 - [x] **Phase 2: Backend-client Rust** - DTO + REST ~70 endpoint + WS pump reconnect + multipart builders (completed 2026-09-09)
-- [ ] **Phase 3: Shell + Theming + Auth** - App shell, router, tema 1:1, QR login, toast, banner koneksi
+- [x] **Phase 3: Shell + Theming + Auth** - App shell, router, tema 1:1, QR login, toast, banner koneksi (completed 2026-09-09)
 - [ ] **Phase 4: Chat Sidebar + Percakapan Inti** - Daftar chat live, store semantics, kirim/aksi pesan inti
 - [ ] **Phase 5: Media + Rich Types + Group Admin** - Voice note, media pipeline, sticker/poll/lokasi/kontak, panel grup
 - [ ] **Phase 6: Calls + Status + Channels** - Riwayat + overlay panggilan, audio/video native, stories, channel feed
@@ -151,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Fondasi Workspace & Supervisor | 3/3 | Complete    | 2026-09-09 |
 | 2. Backend-client Rust | 3/3 | Complete    | 2026-09-09 |
-| 3. Shell + Theming + Auth | 0/TBD | Not started | - |
+| 3. Shell + Theming + Auth | 3/3 | Complete    | 2026-09-09 |
 | 4. Chat Sidebar + Percakapan Inti | 0/TBD | Not started | - |
 | 5. Media + Rich Types + Group Admin | 0/TBD | Not started | - |
 | 6. Calls + Status + Channels | 0/TBD | Not started | - |
