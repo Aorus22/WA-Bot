@@ -426,6 +426,17 @@ impl Supervisor {
 
     /// Spawn the backend process, perform port handshake and readiness polling.
     pub async fn spawn(&mut self, opts: SpawnOptions) -> Result<BackendInfo, SupervisorError> {
+        // Refuse a second spawn while a child is held: replacing `self.child`
+        // would drop (SIGKILL) the first child unreaped and silent. Callers
+        // must `stop()` first. Checked before the Starting send so a rejected
+        // spawn leaves the current Ready status untouched.
+        if self.child.lock().is_some() {
+            return Err(SupervisorError::Failed {
+                reason: "spawn called while a backend is already running; stop() first"
+                    .to_string(),
+                stderr_tail: self.stderr_tail(),
+            });
+        }
         let _ = self.status_tx.send(BackendStatus::Starting);
         self.stderr_tail.lock().clear();
 
