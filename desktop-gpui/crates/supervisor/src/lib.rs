@@ -605,9 +605,14 @@ impl Supervisor {
         if let Some(mut child) = child_opt {
             #[cfg(unix)]
             {
-                if let Some(pid) = child.id() {
-                    unsafe {
-                        libc::kill(pid as i32, libc::SIGTERM);
+                // Only signal a child that is still alive: the exit-monitor
+                // reaps via try_wait(), freeing the PID for kernel reuse, so
+                // signalling an already-exited child could hit a recycled PID.
+                if child.try_wait()?.is_none() {
+                    if let Some(pid) = child.id() {
+                        unsafe {
+                            libc::kill(pid as i32, libc::SIGTERM);
+                        }
                     }
                 }
             }
