@@ -144,12 +144,88 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (unmapped — filled by roadmap) | — | Pending |
+| CORE-01 | Phase 1 | Pending |
+| CORE-02 | Phase 1 | Pending |
+| CORE-03 | Phase 1 | Pending |
+| CORE-04 | Phase 2 | Pending |
+| CORE-05 | Phase 1 | Pending |
+| CORE-06 | Phase 7 | Pending |
+| AUTH-01 | Phase 3 | Pending |
+| AUTH-02 | Phase 3 | Pending |
+| AUTH-03 | Phase 3 | Pending |
+| AUTH-04 | Phase 3 | Pending |
+| AUTH-05 | Phase 2 | Pending |
+| CHAT-01 | Phase 4 | Pending |
+| CHAT-02 | Phase 4 | Pending |
+| CHAT-03 | Phase 4 | Pending |
+| CHAT-04 | Phase 4 | Pending |
+| CHAT-05 | Phase 4 | Pending |
+| CHAT-06 | Phase 4 | Pending |
+| CHAT-07 | Phase 4 | Pending |
+| CHAT-08 | Phase 4 | Pending |
+| CONV-01 | Phase 4 | Pending |
+| CONV-02 | Phase 4 | Pending |
+| CONV-03 | Phase 4 | Pending |
+| CONV-04 | Phase 4 | Pending |
+| CONV-05 | Phase 4 | Pending |
+| CONV-06 | Phase 4 | Pending |
+| CONV-07 | Phase 4 | Pending |
+| CONV-08 | Phase 4 | Pending |
+| CONV-09 | Phase 4 | Pending |
+| CONV-10 | Phase 4 | Pending |
+| CONV-11 | Phase 4 | Pending |
+| CONV-12 | Phase 5 | Pending |
+| CONV-13 | Phase 5 | Pending |
+| CONV-14 | Phase 5 | Pending |
+| CONV-15 | Phase 5 | Pending |
+| CONV-16 | Phase 5 | Pending |
+| CONV-17 | Phase 5 | Pending |
+| CONV-18 | Phase 5 | Pending |
+| CONV-19 | Phase 5 | Pending |
+| CONV-20 | Phase 5 | Pending |
+| CONV-21 | Phase 5 | Pending |
+| MSGT-01 | Phase 5 | Pending |
+| MSGT-02 | Phase 5 | Pending |
+| MSGT-03 | Phase 5 | Pending |
+| MSGT-04 | Phase 5 | Pending |
+| MSGT-05 | Phase 5 | Pending |
+| MSGT-06 | Phase 5 | Pending |
+| MSGT-07 | Phase 5 | Pending |
+| MSGT-08 | Phase 5 | Pending |
+| MSGT-09 | Phase 5 | Pending |
+| MSGT-10 | Phase 5 | Pending |
+| CALL-01 | Phase 6 | Pending |
+| CALL-02 | Phase 6 | Pending |
+| CALL-03 | Phase 6 | Pending |
+| CALL-04 | Phase 6 | Pending |
+| CALL-05 | Phase 6 | Pending |
+| CALL-06 | Phase 6 | Pending |
+| CALL-07 | Phase 6 | Pending |
+| STAT-01 | Phase 6 | Pending |
+| STAT-02 | Phase 6 | Pending |
+| STAT-03 | Phase 6 | Pending |
+| STAT-04 | Phase 6 | Pending |
+| CHAN-01 | Phase 6 | Pending |
+| CHAN-02 | Phase 6 | Pending |
+| CHAN-03 | Phase 6 | Pending |
+| BOT-01 | Phase 7 | Pending |
+| BOT-02 | Phase 7 | Pending |
+| BOT-03 | Phase 7 | Pending |
+| BOT-04 | Phase 7 | Pending |
+| BOT-05 | Phase 7 | Pending |
+| SET-01 | Phase 3 | Pending |
+| SET-02 | Phase 7 | Pending |
+| SET-03 | Phase 7 | Pending |
+| SET-04 | Phase 3 | Pending |
+| SET-05 | Phase 7 | Pending |
+| SET-06 | Phase 7 | Pending |
+| SET-07 | Phase 3 | Pending |
+| SET-08 | Phase 7 | Pending |
 
 **Coverage:**
-- v1 requirements: 62 total
-- Mapped to phases: 0
-- Unmapped: 62 ⚠️
+- v1 requirements: 77 total
+- Mapped to phases: 77
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-08*
