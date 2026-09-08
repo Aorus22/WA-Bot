@@ -31,7 +31,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Aplikasi men-spawn Go backend sebagai sidecar, handshake port berhasil, dan tidak meninggalkan proses orphan saat ditutup atau crash-restart
   3. Preferensi UI (termasuk kunci tema `wa-bot-theme*`) tersimpan di OS config dir dan bertahan antar restart, termasuk file korup
   4. Semua dependensi inti ter-pin eksak dengan Cargo.lock ter-commit (gpui-pre 0.3.3 + gpui-component 0.6.0 tetap berpasangan)
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Toolchain + workspace ter-pin + Cargo.lock + stub member ter-build hijau
+- [ ] 01-02-PLAN.md — Crate supervisor: spawn/handshake/kill sidecar tanpa orphan + --no-backend
+- [ ] 01-03-PLAN.md — Crate settings (UI prefs + tema keys + corrupt recovery) + CI Linux/Windows
 **Risks (PITFALLS.md)**: #1 gpui churn (pin+lockfile+CI), #2 sidecar orphans/port races, #10 platform gaps (awal)
 
 ### Phase 2: Backend-client Rust
