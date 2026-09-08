@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Shell + Theming + Auth** - App shell, router, tema 1:1, QR login, toast, banner koneksi (completed 2026-09-09)
 - [x] **Phase 4: Chat Sidebar + Percakapan Inti** - Daftar chat live, store semantics, kirim/aksi pesan inti (completed 2026-09-09)
 - [x] **Phase 5: Media + Rich Types + Group Admin** - Voice note, media pipeline, sticker/poll/lokasi/kontak, panel grup (completed 2026-09-09)
-- [ ] **Phase 6: Calls + Status + Channels** - Riwayat + overlay panggilan, audio/video native, stories, channel feed
+- [x] **Phase 6: Calls + Status + Channels** - Riwayat + overlay panggilan, audio/video native, stories, channel feed (completed 2026-09-09)
 - [ ] **Phase 7: Bot + Settings + Docs + Packaging + Audit** - Editor bot + AI sheet, settings, dokumentasi, installer, parity audit
 
 ## Phase Details
@@ -154,5 +154,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Shell + Theming + Auth | 3/3 | Complete    | 2026-09-09 |
 | 4. Chat Sidebar + Percakapan Inti | 3/3 | Complete    | 2026-09-09 |
 | 5. Media + Rich Types + Group Admin | 3/3 | Complete    | 2026-09-09 |
-| 6. Calls + Status + Channels | 0/TBD | Not started | - |
+| 6. Calls + Status + Channels | 3/3 | Complete    | 2026-09-09 |
 | 7. Bot + Settings + Docs + Packaging + Audit | 0/TBD | Not started | - |

@@ -74,26 +74,26 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 
 ### Calls
 
-- [ ] **CALL-01**: User melihat riwayat panggilan dengan filter (direction/type/status/target)
-- [ ] **CALL-02**: User membuat panggilan suara/video 1:1 (ringing → connected → hangup)
-- [ ] **CALL-03**: User membuat group call dan menambah/me-ring peserta
-- [ ] **CALL-04**: Overlay incoming-call dan active-call muncul global di atas route mana pun
-- [ ] **CALL-05**: User melakukan video upgrade flow (request/accept/reject/stop) dengan render video native
-- [ ] **CALL-06**: Panggilan memiliki jalur audio native (mic/speaker) per OS
-- [ ] **CALL-07**: Riwayat ter-refresh otomatis saat panggilan berakhir
+- [x] **CALL-01**: User melihat riwayat panggilan dengan filter (direction/type/status/target)
+- [x] **CALL-02**: User membuat panggilan suara/video 1:1 (ringing → connected → hangup)
+- [x] **CALL-03**: User membuat group call dan menambah/me-ring peserta
+- [x] **CALL-04**: Overlay incoming-call dan active-call muncul global di atas route mana pun
+- [x] **CALL-05**: User melakukan video upgrade flow (request/accept/reject/stop) dengan render video native
+- [x] **CALL-06**: Panggilan memiliki jalur audio native (mic/speaker) per OS
+- [x] **CALL-07**: Riwayat ter-refresh otomatis saat panggilan berakhir
 
 ### Status
 
-- [ ] **STAT-01**: User melihat story tray yang dikelompokkan per pengirim (viewed/unviewed + expiry)
-- [ ] **STAT-02**: User mem-post status teks (teks + background ARGB)
-- [ ] **STAT-03**: User mem-post status image/video dengan caption
-- [ ] **STAT-04**: Status yang dilihat terkirim read receipt dan media ter-fetch on-demand
+- [x] **STAT-01**: User melihat story tray yang dikelompokkan per pengirim (viewed/unviewed + expiry)
+- [x] **STAT-02**: User mem-post status teks (teks + background ARGB)
+- [x] **STAT-03**: User mem-post status image/video dengan caption
+- [x] **STAT-04**: Status yang dilihat terkirim read receipt dan media ter-fetch on-demand
 
 ### Channels
 
-- [ ] **CHAN-01**: User melihat daftar channel yang di-follow (nama, deskripsi, subscriber, avatar, mute, verified)
-- [ ] **CHAN-02**: User preview via invite link lalu follow/unfollow/mute
-- [ ] **CHAN-03**: User membaca feed post channel ter-paginasi dan memberi/menghapus reaction
+- [x] **CHAN-01**: User melihat daftar channel yang di-follow (nama, deskripsi, subscriber, avatar, mute, verified)
+- [x] **CHAN-02**: User preview via invite link lalu follow/unfollow/mute
+- [x] **CHAN-03**: User membaca feed post channel ter-paginasi dan memberi/menghapus reaction
 
 ### Bot Management
 
@@ -194,20 +194,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MSGT-08 | Phase 5 | Complete |
 | MSGT-09 | Phase 5 | Complete |
 | MSGT-10 | Phase 5 | Complete |
-| CALL-01 | Phase 6 | Pending |
-| CALL-02 | Phase 6 | Pending |
-| CALL-03 | Phase 6 | Pending |
-| CALL-04 | Phase 6 | Pending |
-| CALL-05 | Phase 6 | Pending |
-| CALL-06 | Phase 6 | Pending |
-| CALL-07 | Phase 6 | Pending |
-| STAT-01 | Phase 6 | Pending |
-| STAT-02 | Phase 6 | Pending |
-| STAT-03 | Phase 6 | Pending |
-| STAT-04 | Phase 6 | Pending |
-| CHAN-01 | Phase 6 | Pending |
-| CHAN-02 | Phase 6 | Pending |
-| CHAN-03 | Phase 6 | Pending |
+| CALL-01 | Phase 6 | Complete |
+| CALL-02 | Phase 6 | Complete |
+| CALL-03 | Phase 6 | Complete |
+| CALL-04 | Phase 6 | Complete |
+| CALL-05 | Phase 6 | Complete |
+| CALL-06 | Phase 6 | Complete |
+| CALL-07 | Phase 6 | Complete |
+| STAT-01 | Phase 6 | Complete |
+| STAT-02 | Phase 6 | Complete |
+| STAT-03 | Phase 6 | Complete |
+| STAT-04 | Phase 6 | Complete |
+| CHAN-01 | Phase 6 | Complete |
+| CHAN-02 | Phase 6 | Complete |
+| CHAN-03 | Phase 6 | Complete |
 | BOT-01 | Phase 7 | Pending |
 | BOT-02 | Phase 7 | Pending |
 | BOT-03 | Phase 7 | Pending |
