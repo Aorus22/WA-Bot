@@ -48,29 +48,29 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 - [x] **CONV-09**: User melihat read receipt / status ticks yang live via WS
 - [x] **CONV-10**: User membaca pesan markdown yang ter-render dan menulis dengan mode compose markdown
 - [x] **CONV-11**: User memilih emoji via picker popover
-- [ ] **CONV-12**: User merekam dan mengirim voice note (PTT + durasi + waveform) serta memutarnya via audio player
-- [ ] **CONV-13**: User mengirim lampiran media (image/video/document/audio/gif) dengan caption dan flag view-once
-- [ ] **CONV-14**: User melihat media di viewer modal dan mengunduh ke disk via dialog native
-- [ ] **CONV-15**: User melihat link-preview cards pada URL di bubble
-- [ ] **CONV-16**: User memilih, mengirim, dan memfavoritkan sticker (termasuk animasi)
-- [ ] **CONV-17**: User membuat poll, vote/retract, dan melihat tally live
-- [ ] **CONV-18**: User berbagi lokasi (statis + live + caption) dan melihat bubble lokasi
-- [ ] **CONV-19**: User berbagi kontak (displayName, phone, vcard) dan melihat bubble kontak
-- [ ] **CONV-20**: User membuka chat info sheet (tab media/docs/links ter-paginasi + tab anggota & pengaturan grup)
-- [ ] **CONV-21**: Admin grup mengelola anggota (add/remove/promote/demote), info grup (nama/deskripsi/locked/announce/join-approval/memberAddMode), invite link (copy/revoke), foto grup, dan leave
+- [x] **CONV-12**: User merekam dan mengirim voice note (PTT + durasi + waveform) serta memutarnya via audio player
+- [x] **CONV-13**: User mengirim lampiran media (image/video/document/audio/gif) dengan caption dan flag view-once
+- [x] **CONV-14**: User melihat media di viewer modal dan mengunduh ke disk via dialog native
+- [x] **CONV-15**: User melihat link-preview cards pada URL di bubble
+- [x] **CONV-16**: User memilih, mengirim, dan memfavoritkan sticker (termasuk animasi)
+- [x] **CONV-17**: User membuat poll, vote/retract, dan melihat tally live
+- [x] **CONV-18**: User berbagi lokasi (statis + live + caption) dan melihat bubble lokasi
+- [x] **CONV-19**: User berbagi kontak (displayName, phone, vcard) dan melihat bubble kontak
+- [x] **CONV-20**: User membuka chat info sheet (tab media/docs/links ter-paginasi + tab anggota & pengaturan grup)
+- [x] **CONV-21**: Admin grup mengelola anggota (add/remove/promote/demote), info grup (nama/deskripsi/locked/announce/join-approval/memberAddMode), invite link (copy/revoke), foto grup, dan leave
 
 ### Message Types Matrix
 
-- [ ] **MSGT-01**: Bubble text (+markdown, link preview) ter-render 1:1 web
-- [ ] **MSGT-02**: Bubble image/video/document/audio/ptt dengan lazy load + player + download
-- [ ] **MSGT-03**: Bubble sticker (statis + animasi) dengan shortcut favorit
-- [ ] **MSGT-04**: Bubble poll dengan tally bar dan vote toggle
-- [ ] **MSGT-05**: Bubble lokasi (pin card + thumbnail + buka di browser/maps)
-- [ ] **MSGT-06**: Bubble kontak (kartu kontak + vcard)
-- [ ] **MSGT-07**: Tile view-once (gated, buka-sekali)
-- [ ] **MSGT-08**: Bubble gif (looping)
-- [ ] **MSGT-09**: Bubble reply/quote dan label forwarded
-- [ ] **MSGT-10**: Marker deleted dan edited
+- [x] **MSGT-01**: Bubble text (+markdown, link preview) ter-render 1:1 web
+- [x] **MSGT-02**: Bubble image/video/document/audio/ptt dengan lazy load + player + download
+- [x] **MSGT-03**: Bubble sticker (statis + animasi) dengan shortcut favorit
+- [x] **MSGT-04**: Bubble poll dengan tally bar dan vote toggle
+- [x] **MSGT-05**: Bubble lokasi (pin card + thumbnail + buka di browser/maps)
+- [x] **MSGT-06**: Bubble kontak (kartu kontak + vcard)
+- [x] **MSGT-07**: Tile view-once (gated, buka-sekali)
+- [x] **MSGT-08**: Bubble gif (looping)
+- [x] **MSGT-09**: Bubble reply/quote dan label forwarded
+- [x] **MSGT-10**: Marker deleted dan edited
 
 ### Calls
 
@@ -174,26 +174,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONV-09 | Phase 4 | Complete |
 | CONV-10 | Phase 4 | Complete |
 | CONV-11 | Phase 4 | Complete |
-| CONV-12 | Phase 5 | Pending |
-| CONV-13 | Phase 5 | Pending |
-| CONV-14 | Phase 5 | Pending |
-| CONV-15 | Phase 5 | Pending |
-| CONV-16 | Phase 5 | Pending |
-| CONV-17 | Phase 5 | Pending |
-| CONV-18 | Phase 5 | Pending |
-| CONV-19 | Phase 5 | Pending |
-| CONV-20 | Phase 5 | Pending |
-| CONV-21 | Phase 5 | Pending |
-| MSGT-01 | Phase 5 | Pending |
-| MSGT-02 | Phase 5 | Pending |
-| MSGT-03 | Phase 5 | Pending |
-| MSGT-04 | Phase 5 | Pending |
-| MSGT-05 | Phase 5 | Pending |
-| MSGT-06 | Phase 5 | Pending |
-| MSGT-07 | Phase 5 | Pending |
-| MSGT-08 | Phase 5 | Pending |
-| MSGT-09 | Phase 5 | Pending |
-| MSGT-10 | Phase 5 | Pending |
+| CONV-12 | Phase 5 | Complete |
+| CONV-13 | Phase 5 | Complete |
+| CONV-14 | Phase 5 | Complete |
+| CONV-15 | Phase 5 | Complete |
+| CONV-16 | Phase 5 | Complete |
+| CONV-17 | Phase 5 | Complete |
+| CONV-18 | Phase 5 | Complete |
+| CONV-19 | Phase 5 | Complete |
+| CONV-20 | Phase 5 | Complete |
+| CONV-21 | Phase 5 | Complete |
+| MSGT-01 | Phase 5 | Complete |
+| MSGT-02 | Phase 5 | Complete |
+| MSGT-03 | Phase 5 | Complete |
+| MSGT-04 | Phase 5 | Complete |
+| MSGT-05 | Phase 5 | Complete |
+| MSGT-06 | Phase 5 | Complete |
+| MSGT-07 | Phase 5 | Complete |
+| MSGT-08 | Phase 5 | Complete |
+| MSGT-09 | Phase 5 | Complete |
+| MSGT-10 | Phase 5 | Complete |
 | CALL-01 | Phase 6 | Pending |
 | CALL-02 | Phase 6 | Pending |
 | CALL-03 | Phase 6 | Pending |

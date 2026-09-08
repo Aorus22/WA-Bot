@@ -1,16 +1,22 @@
+pub mod chat_info_sheet;
 pub mod chat_sidebar;
 pub mod connection_banner;
 pub mod dialogs;
 pub mod emoji_picker;
+pub mod media_player;
 pub mod message_bubble;
 pub mod nav_sidebar;
+pub mod rich_bubbles;
 pub mod titlebar;
 pub mod toast;
 
+pub use chat_info_sheet::*;
 pub use chat_sidebar::*;
 pub use connection_banner::*;
 pub use emoji_picker::*;
+pub use media_player::*;
 pub use message_bubble::*;
 pub use nav_sidebar::*;
+pub use rich_bubbles::*;
 pub use titlebar::*;
 pub use toast::*;
