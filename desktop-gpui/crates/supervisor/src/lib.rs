@@ -640,14 +640,16 @@ impl Supervisor {
             .ok()?;
 
         if let Ok(resp) = client.get(&probe_url).send().await {
-            if resp.status().is_success() {
+            // Same readiness predicate as spawn/wait_ready (any 2xx-4xx):
+            // the adopted backend answers the probe, so it is serving.
+            if resp.status().as_u16() < 500 {
                 let port = probe_url
                     .split(':')
                     .next_back()?
                     .split('/')
                     .next()?
                     .parse::<u16>()
-                    .unwrap_or(0);
+                    .ok()?;
                 return Some(BackendInfo {
                     base_url,
                     pid: 0,
