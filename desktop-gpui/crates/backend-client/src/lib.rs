@@ -1,6 +1,11 @@
-//! WA Bot backend client — Phase 1 stub (filled in Phase 2).
-//!
-//! NOTE: No DTO/REST/WS types live here yet on purpose; Phase 2 owns them.
+pub mod client;
+pub mod dto;
+pub mod error;
+pub mod multipart;
+pub mod ws;
 
-/// Placeholder item so the crate is non-empty until Phase 2 lands.
-pub fn placeholder() {}
+pub use client::HttpClient;
+pub use dto::*;
+pub use error::{ClientError, Result};
+pub use multipart::{SendMediaBuilder, SendMediaOptions};
+pub use ws::{WsClient, WsEvent, WsMessage};

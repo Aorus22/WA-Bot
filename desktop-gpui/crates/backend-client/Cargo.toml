@@ -1,6 +1,6 @@
 [package]
 name = "wabot-backend-client"
-description = "Typed HTTP/WS client for the local WA Bot backend (filled in Phase 2)"
+description = "Typed HTTP/WS client for the local WA Bot backend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,3 +18,4 @@ flume = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+wabot-supervisor = { workspace = true }
