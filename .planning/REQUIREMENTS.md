@@ -9,11 +9,11 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 
 ### Foundation
 
-- [ ] **CORE-01**: Workspace `desktop-gpui/` Cargo ter-build dengan pin versi eksak + Cargo.lock ter-commit (gpui-pre 0.3.3, gpui-component 0.6.0, tokio, reqwest rustls, tungstenite)
-- [ ] **CORE-02**: Crate `supervisor` men-spawn Go backend sebagai sidecar, handshake port, dan kill bersih tanpa orphan
-- [ ] **CORE-03**: Crate `settings` menyimpan preferensi UI di OS config dir (termasuk kunci tema `wa-bot-theme*`)
+- [x] **CORE-01**: Workspace `desktop-gpui/` Cargo ter-build dengan pin versi eksak + Cargo.lock ter-commit (gpui-pre 0.3.3, gpui-component 0.6.0, tokio, reqwest rustls, tungstenite)
+- [x] **CORE-02**: Crate `supervisor` men-spawn Go backend sebagai sidecar, handshake port, dan kill bersih tanpa orphan
+- [x] **CORE-03**: Crate `settings` menyimpan preferensi UI di OS config dir (termasuk kunci tema `wa-bot-theme*`)
 - [ ] **CORE-04**: Crate `backend-client` menutupi seluruh permukaan `api.ts` (~70 endpoint: session, chats, messages, rich types, groups, status, channels, contacts, calls, bots, settings) + WS pump dengan reconnect dan tabel dispatch penuh
-- [ ] **CORE-05**: CI matrix Linux + Windows build dari fondasi (mencegah packaging gap telat)
+- [x] **CORE-05**: CI matrix Linux + Windows build dari fondasi (mencegah packaging gap telat)
 - [ ] **CORE-06**: Packaging Linux (cargo-deb) + Windows (cargo-wix) dengan backend dibundel
 
 ### Auth & Session
@@ -144,11 +144,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CORE-01 | Phase 1 | Pending |
-| CORE-02 | Phase 1 | Pending |
-| CORE-03 | Phase 1 | Pending |
+| CORE-01 | Phase 1 | Complete |
+| CORE-02 | Phase 1 | Complete |
+| CORE-03 | Phase 1 | Complete |
 | CORE-04 | Phase 2 | Pending |
-| CORE-05 | Phase 1 | Pending |
+| CORE-05 | Phase 1 | Complete |
 | CORE-06 | Phase 7 | Pending |
 | AUTH-01 | Phase 3 | Pending |
 | AUTH-02 | Phase 3 | Pending |
@@ -223,6 +223,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SET-08 | Phase 7 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 77 total
 - Mapped to phases: 77
 - Unmapped: 0 ✓
