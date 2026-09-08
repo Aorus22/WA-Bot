@@ -31,3 +31,21 @@ qrcode = { workspace = true }
 anyhow = { workspace = true }
 flume = { workspace = true }
 parking_lot = { workspace = true }
+
+[package.metadata.deb]
+name = "wa-bot"
+maintainer = "WA Bot Contributors <info@wabot.local>"
+copyright = "2026, WA Bot Contributors"
+extended-description = "WA Bot Desktop Native Shell (GPUI)"
+depends = "$auto, libasound2, libxkbcommon0, libxkbcommon-x11-0"
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/wabot", "usr/bin/wabot", "755"],
+]
+
+[package.metadata.wix]
+upgrade-guid = "8F6B7670-3882-4DA1-8B39-44F4E46467B9"
+path-guid = "543D7B05-648C-4FD2-9864-777E69E819AC"
+license = false
+eula = false
