@@ -477,7 +477,7 @@ impl Supervisor {
                     port_found = Some(port);
                     tokio::spawn(async move {
                         let mut reader = reader;
-                        while reader.next_line().await.is_ok() {}
+                        while let Ok(Some(_)) = reader.next_line().await {}
                     });
                 }
                 Ok(Err(err_msg)) => {
