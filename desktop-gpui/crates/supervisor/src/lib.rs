@@ -482,10 +482,12 @@ impl Supervisor {
                 }
                 Ok(Err(err_msg)) => {
                     let _ = child.kill().await;
+                    let _ = child.wait().await;
                     return Err(self.fail(format!("Backend handshake missing: {err_msg}")));
                 }
                 Err(_) => {
                     let _ = child.kill().await;
+                    let _ = child.wait().await;
                     return Err(self.fail(format!(
                         "Backend handshake timed out after {:?}",
                         opts.handshake_timeout
@@ -498,6 +500,7 @@ impl Supervisor {
             Some(p) => p,
             None => {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 return Err(self.fail("No stdout available to read handshake".to_string()));
             }
         };
@@ -519,6 +522,7 @@ impl Supervisor {
         loop {
             if let Ok(Some(exit_status)) = child.try_wait() {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 return Err(self.fail(format!(
                     "Backend child exited before readiness with status: {exit_status}"
                 )));
@@ -530,6 +534,7 @@ impl Supervisor {
             }
             if start.elapsed() > opts.readiness_timeout {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 return Err(self.fail(format!(
                     "Readiness probe timed out after {:?}",
                     opts.readiness_timeout
@@ -612,6 +617,7 @@ impl Supervisor {
                 Ok(Ok(_)) => {}
                 _ => {
                     let _ = child.kill().await;
+                    let _ = child.wait().await;
                 }
             }
         }
