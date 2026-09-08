@@ -12,6 +12,7 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
 reqwest = { workspace = true }
+wabot-settings = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

@@ -316,12 +316,12 @@ pub fn resolve_backend_path(resources_dir: &Path, repo_root: &Path) -> PathBuf {
 /// Create `database/` and `media/` under `base` (paritas main.js userData
 /// layout). Idempotent: succeeds when the directories already exist.
 /// Returns `(db_dir, media_dir)`.
+///
+/// Canonical implementation lives in [`wabot_settings::paths`]; this is a
+/// thin delegate kept so existing callers (`spawn` setups, lifecycle tests)
+/// keep compiling against one layout definition.
 pub fn ensure_data_dirs(base: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
-    let db_dir = base.join("database");
-    let media_dir = base.join("media");
-    std::fs::create_dir_all(&db_dir)?;
-    std::fs::create_dir_all(&media_dir)?;
-    Ok((db_dir, media_dir))
+    wabot_settings::paths::ensure_data_dirs(base)
 }
 
 // ---------------------------------------------------------------------------
