@@ -198,10 +198,13 @@ impl DesktopSettings {
 }
 
 /// Backup path for a corrupt settings file, timestamped when possible.
+/// The pid suffix keeps two corruptions within the same second from
+/// overwriting each other's evidence.
 fn corrupt_backup_path(file_path: &Path) -> PathBuf {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    file_path.with_extension(format!("json.corrupt-{ts}"))
+    let pid = std::process::id();
+    file_path.with_extension(format!("json.corrupt-{ts}-{pid}"))
 }
