@@ -26,28 +26,28 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 
 ### Chat List (Sidebar)
 
-- [ ] **CHAT-01**: User melihat daftar chat (avatar, nama, pesan terakhir, waktu, badge unread)
-- [ ] **CHAT-02**: Daftar chat ter-update live di tempat tanpa flicker (reorder, dedupe, patch state)
-- [ ] **CHAT-03**: User memfilter chat via pencarian client-side
-- [ ] **CHAT-04**: User menyembunyikan/menampilkan chat arsip (toggle mode)
-- [ ] **CHAT-05**: User pin / archive / mute (off/8h/1w/forever) chat via context menu
-- [ ] **CHAT-06**: Chat yang dibuka otomatis mark-as-read (badge ter-clear)
-- [ ] **CHAT-07**: User membuat grup baru dan join grup via link dari sidebar
-- [ ] **CHAT-08**: User melihat status dan memulai history-sync (state machine idle/running/completed/partial/failed)
+- [x] **CHAT-01**: User melihat daftar chat (avatar, nama, pesan terakhir, waktu, badge unread)
+- [x] **CHAT-02**: Daftar chat ter-update live di tempat tanpa flicker (reorder, dedupe, patch state)
+- [x] **CHAT-03**: User memfilter chat via pencarian client-side
+- [x] **CHAT-04**: User menyembunyikan/menampilkan chat arsip (toggle mode)
+- [x] **CHAT-05**: User pin / archive / mute (off/8h/1w/forever) chat via context menu
+- [x] **CHAT-06**: Chat yang dibuka otomatis mark-as-read (badge ter-clear)
+- [x] **CHAT-07**: User membuat grup baru dan join grup via link dari sidebar
+- [x] **CHAT-08**: User melihat status dan memulai history-sync (state machine idle/running/completed/partial/failed)
 
 ### Conversation
 
-- [ ] **CONV-01**: User membuka percakapan dengan pesan ter-paginasi (100 awal, scroll atas/bawah)
-- [ ] **CONV-02**: User melihat date divider dan timestamp yang terformat
-- [ ] **CONV-03**: User mengirim teks dengan optimistic `temp-` message yang terganti saat echo tiba
-- [ ] **CONV-04**: User reply, edit, dan delete pesan
-- [ ] **CONV-05**: User mengirim/menghapus reaction dengan chips jumlah pengirim
-- [ ] **CONV-06**: User meneruskan pesan ke N chat via dialog (dengan label Forwarded)
-- [ ] **CONV-07**: User mencari dalam chat dan lompat ke pesan dengan context load
-- [ ] **CONV-08**: User melihat presence lawan chat di header
-- [ ] **CONV-09**: User melihat read receipt / status ticks yang live via WS
-- [ ] **CONV-10**: User membaca pesan markdown yang ter-render dan menulis dengan mode compose markdown
-- [ ] **CONV-11**: User memilih emoji via picker popover
+- [x] **CONV-01**: User membuka percakapan dengan pesan ter-paginasi (100 awal, scroll atas/bawah)
+- [x] **CONV-02**: User melihat date divider dan timestamp yang terformat
+- [x] **CONV-03**: User mengirim teks dengan optimistic `temp-` message yang terganti saat echo tiba
+- [x] **CONV-04**: User reply, edit, dan delete pesan
+- [x] **CONV-05**: User mengirim/menghapus reaction dengan chips jumlah pengirim
+- [x] **CONV-06**: User meneruskan pesan ke N chat via dialog (dengan label Forwarded)
+- [x] **CONV-07**: User mencari dalam chat dan lompat ke pesan dengan context load
+- [x] **CONV-08**: User melihat presence lawan chat di header
+- [x] **CONV-09**: User melihat read receipt / status ticks yang live via WS
+- [x] **CONV-10**: User membaca pesan markdown yang ter-render dan menulis dengan mode compose markdown
+- [x] **CONV-11**: User memilih emoji via picker popover
 - [ ] **CONV-12**: User merekam dan mengirim voice note (PTT + durasi + waveform) serta memutarnya via audio player
 - [ ] **CONV-13**: User mengirim lampiran media (image/video/document/audio/gif) dengan caption dan flag view-once
 - [ ] **CONV-14**: User melihat media di viewer modal dan mengunduh ke disk via dialog native
@@ -155,25 +155,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUTH-03 | Phase 3 | Complete |
 | AUTH-04 | Phase 3 | Complete |
 | AUTH-05 | Phase 2 | Complete |
-| CHAT-01 | Phase 4 | Pending |
-| CHAT-02 | Phase 4 | Pending |
-| CHAT-03 | Phase 4 | Pending |
-| CHAT-04 | Phase 4 | Pending |
-| CHAT-05 | Phase 4 | Pending |
-| CHAT-06 | Phase 4 | Pending |
-| CHAT-07 | Phase 4 | Pending |
-| CHAT-08 | Phase 4 | Pending |
-| CONV-01 | Phase 4 | Pending |
-| CONV-02 | Phase 4 | Pending |
-| CONV-03 | Phase 4 | Pending |
-| CONV-04 | Phase 4 | Pending |
-| CONV-05 | Phase 4 | Pending |
-| CONV-06 | Phase 4 | Pending |
-| CONV-07 | Phase 4 | Pending |
-| CONV-08 | Phase 4 | Pending |
-| CONV-09 | Phase 4 | Pending |
-| CONV-10 | Phase 4 | Pending |
-| CONV-11 | Phase 4 | Pending |
+| CHAT-01 | Phase 4 | Complete |
+| CHAT-02 | Phase 4 | Complete |
+| CHAT-03 | Phase 4 | Complete |
+| CHAT-04 | Phase 4 | Complete |
+| CHAT-05 | Phase 4 | Complete |
+| CHAT-06 | Phase 4 | Complete |
+| CHAT-07 | Phase 4 | Complete |
+| CHAT-08 | Phase 4 | Complete |
+| CONV-01 | Phase 4 | Complete |
+| CONV-02 | Phase 4 | Complete |
+| CONV-03 | Phase 4 | Complete |
+| CONV-04 | Phase 4 | Complete |
+| CONV-05 | Phase 4 | Complete |
+| CONV-06 | Phase 4 | Complete |
+| CONV-07 | Phase 4 | Complete |
+| CONV-08 | Phase 4 | Complete |
+| CONV-09 | Phase 4 | Complete |
+| CONV-10 | Phase 4 | Complete |
+| CONV-11 | Phase 4 | Complete |
 | CONV-12 | Phase 5 | Pending |
 | CONV-13 | Phase 5 | Pending |
 | CONV-14 | Phase 5 | Pending |

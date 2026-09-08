@@ -84,6 +84,7 @@ pub enum WsEvent {
     },
     QrCode(String),
     AuthSuccess,
+    HistorySync(crate::dto::HistorySyncStatus),
     Raw(WsMessage),
 }
 
@@ -291,6 +292,13 @@ impl WsMessage {
                     .unwrap_or_default()
                     .to_string(),
             },
+            "history_sync" => {
+                if let Ok(status) = serde_json::from_value::<crate::dto::HistorySyncStatus>(self.payload.clone()) {
+                    WsEvent::HistorySync(status)
+                } else {
+                    WsEvent::Raw(self.clone())
+                }
+            }
             s if s.starts_with("call.") => WsEvent::CallEvent {
                 event_type: s.to_string(),
                 payload: self.payload.clone(),

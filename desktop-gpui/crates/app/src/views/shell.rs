@@ -63,22 +63,71 @@ impl AppShellView {
 
         match route {
             AppRoute::Chat | AppRoute::ChatDetail(_) => {
-                v_flex()
+                h_flex()
                     .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
+                    .overflow_hidden()
                     .child(
-                        div()
-                            .text_lg()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child("Chats"),
+                        v_flex()
+                            .w(gpui::px(340.0))
+                            .h_full()
+                            .border_r_1()
+                            .border_color(theme.border)
+                            .bg(theme.card)
+                            .child(
+                                v_flex()
+                                    .p_3()
+                                    .gap_2()
+                                    .border_b_1()
+                                    .border_color(theme.border)
+                                    .child(
+                                        h_flex()
+                                            .justify_between()
+                                            .items_center()
+                                            .child(div().text_base().font_weight(gpui::FontWeight::BOLD).child("Chats"))
+                                            .child(
+                                                h_flex()
+                                                    .gap_2()
+                                                    .child(div().text_xs().text_color(theme.primary).child("+ New Group"))
+                                                    .child(div().text_xs().text_color(theme.muted_foreground).child("Join via Link"))
+                                            )
+                                    )
+                                    .child(
+                                        div()
+                                            .px_3()
+                                            .py_1()
+                                            .bg(theme.background)
+                                            .rounded_md()
+                                            .border_1()
+                                            .border_color(theme.border)
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("Search or start new chat...")
+                                    )
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .p_2()
+                                    .child(
+                                        div()
+                                            .p_3()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("Conversations ready. Click to open.")
+                                    )
+                            )
                     )
                     .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child("Select a conversation from the list to start chatting"),
+                        v_flex()
+                            .flex_1()
+                            .h_full()
+                            .bg(theme.background)
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .child(div().text_base().font_weight(gpui::FontWeight::SEMIBOLD).child("WA Bot Desktop"))
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("Send and receive messages with 1:1 web parity."))
                     )
             }
             AppRoute::Status => {
