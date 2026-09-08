@@ -211,7 +211,13 @@ pub fn parse_handshake_line(line: &str) -> Option<u16> {
     if digits.is_empty() {
         return None;
     }
-    digits.parse::<u16>().ok()
+    let port: u16 = digits.parse().ok()?;
+    // Port 0 is never a connectable backend; reject immediately instead of
+    // burning the full readiness timeout against http://127.0.0.1:0.
+    if port == 0 {
+        return None;
+    }
+    Some(port)
 }
 
 // ---------------------------------------------------------------------------
@@ -677,7 +683,7 @@ mod tests {
             parse_handshake_line("2026/09/08 Starting... BACKEND_PORT:8080 (ready)"),
             Some(8080)
         );
-        assert_eq!(parse_handshake_line("BACKEND_PORT:0"), Some(0));
+        assert_eq!(parse_handshake_line("BACKEND_PORT:0"), None);
         assert_eq!(parse_handshake_line("BACKEND_PORT:notaport"), None);
         assert_eq!(parse_handshake_line("BACKEND_PORT:"), None);
         assert_eq!(parse_handshake_line("just a regular log line"), None);
