@@ -6,6 +6,10 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[lib]
+name = "wabot_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "wabot"
 path = "src/main.rs"
@@ -17,4 +21,13 @@ path = "src/main.rs"
 gpui = { workspace = true }
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.3" }
 gpui-component = { workspace = true }
+wabot-supervisor = { workspace = true }
+wabot-settings = { workspace = true }
+wabot-backend-client = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+qrcode = { workspace = true }
 anyhow = { workspace = true }
+flume = { workspace = true }
+parking_lot = { workspace = true }
