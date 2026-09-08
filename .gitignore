@@ -17,3 +17,5 @@ compiled/
 # deepwork session state (local only)
 .slim/deepwork/
 Wa-Bot-FE/
+# Rust build output (GPUI workspace)
+desktop-gpui/target/
