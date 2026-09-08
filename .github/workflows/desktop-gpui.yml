@@ -1,0 +1,76 @@
+name: Desktop GPUI
+
+# Foundation CI for the Rust GPUI workspace. Scoped by paths filter so it never
+# interferes with docker-build.yml (which has no paths filter and owns main).
+on:
+  push:
+    paths:
+      - 'desktop-gpui/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/desktop-gpui.yml'
+  pull_request:
+    paths:
+      - 'desktop-gpui/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/desktop-gpui.yml'
+
+jobs:
+  build-test:
+    name: Build + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-gnu
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-gpui
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libx11-xcb-dev libssl-dev libxkbcommon-x11-dev libxkbcommon-dev mingw-w64
+
+      # --locked everywhere: any Cargo.lock drift fails CI (exact-pin enforcement).
+      - name: Build workspace
+        run: cargo build --workspace --locked --manifest-path desktop-gpui/Cargo.toml
+
+      - name: Test workspace
+        run: cargo test --workspace --locked --manifest-path desktop-gpui/Cargo.toml
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --locked --manifest-path desktop-gpui/Cargo.toml --all-targets -- -D warnings
+
+      # Cross-target safety net on ubuntu (no linker needed for check).
+      - name: Check Windows target
+        if: runner.os == 'Linux'
+        run: cargo check --locked --manifest-path desktop-gpui/Cargo.toml --target x86_64-pc-windows-gnu -p wabot-supervisor -p wabot-settings -p wabot-backend-client
+
+  pin-audit:
+    name: Exact-pin audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Every `version = "..."` in [workspace.dependencies] must use `=x.y.z`.
+      - name: Reject loose pins
+        run: |
+          if grep -E 'version\s*=\s*"' desktop-gpui/Cargo.toml | grep -v '='; then
+            echo "ERROR: loose version pin found (must use =x.y.z exact syntax)"
+            exit 1
+          fi
+          echo "PINS_OK"
