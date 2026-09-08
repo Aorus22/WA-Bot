@@ -14,7 +14,7 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 - [x] **CORE-03**: Crate `settings` menyimpan preferensi UI di OS config dir (termasuk kunci tema `wa-bot-theme*`)
 - [x] **CORE-04**: Crate `backend-client` menutupi seluruh permukaan `api.ts` (~70 endpoint: session, chats, messages, rich types, groups, status, channels, contacts, calls, bots, settings) + WS pump dengan reconnect dan tabel dispatch penuh
 - [x] **CORE-05**: CI matrix Linux + Windows build dari fondasi (mencegah packaging gap telat)
-- [ ] **CORE-06**: Packaging Linux (cargo-deb) + Windows (cargo-wix) dengan backend dibundel
+- [x] **CORE-06**: Packaging Linux (cargo-deb) + Windows (cargo-wix) dengan backend dibundel
 
 ### Auth & Session
 
@@ -97,22 +97,22 @@ Parity 1:1 penuh dengan web. Setiap requirement dipetakan ke tepat satu phase ro
 
 ### Bot Management
 
-- [ ] **BOT-01**: User mengelola trigger (list + editor: nama, regex, script, prioritas, aktif, deskripsi + test console + delete + delete-all)
-- [ ] **BOT-02**: User mengelola cron job (list + editor: nama, ekspresi jadwal, script, aktif + test + delete-all)
-- [ ] **BOT-03**: User mengelola webhook (list + editor: nama, path, script, secret, aktif + test + delete-all)
-- [ ] **BOT-04**: User melihat log webhook (filter per webhook, paginasi, total, clear-all)
-- [ ] **BOT-05**: User memakai AI assistant sheet di dalam editor bot (chat, pilih model, render markdown+code, apply-code ke editor)
+- [x] **BOT-01**: User mengelola trigger (list + editor: nama, regex, script, prioritas, aktif, deskripsi + test console + delete + delete-all)
+- [x] **BOT-02**: User mengelola cron job (list + editor: nama, ekspresi jadwal, script, aktif + test + delete-all)
+- [x] **BOT-03**: User mengelola webhook (list + editor: nama, path, script, secret, aktif + test + delete-all)
+- [x] **BOT-04**: User melihat log webhook (filter per webhook, paginasi, total, clear-all)
+- [x] **BOT-05**: User memakai AI assistant sheet di dalam editor bot (chat, pilih model, render markdown+code, apply-code ke editor)
 
 ### Settings / Theming / Docs
 
 - [x] **SET-01**: Tema 1:1 web (mode system/light/dark + swatch `themes.ts`) teraplikasi ke seluruh komponen
-- [ ] **SET-02**: User mengatur AI (Gemini key, AI server URL) dan TTS (provider, voice, FishAudio key/model/voice) dengan flag masked
-- [ ] **SET-03**: User toggle read-receipts
+- [x] **SET-02**: User mengatur AI (Gemini key, AI server URL) dan TTS (provider, voice, FishAudio key/model/voice) dengan flag masked
+- [x] **SET-03**: User toggle read-receipts
 - [x] **SET-04**: User melihat indikator koneksi (WS online/offline)
-- [ ] **SET-05**: User mengontrol history-sync + melihat progres (state, counts, errors)
-- [ ] **SET-06**: User membaca halaman dokumentasi (markdown dari backend `/docs`)
+- [x] **SET-05**: User mengontrol history-sync + melihat progres (state, counts, errors)
+- [x] **SET-06**: User membaca halaman dokumentasi (markdown dari backend `/docs`)
 - [x] **SET-07**: Setiap mutasi melaporkan hasil via sistem toast
-- [ ] **SET-08**: Window desktop rapi per OS (rounded corners saat restored, shadow, kontrol window)
+- [x] **SET-08**: Window desktop rapi per OS (rounded corners saat restored, shadow, kontrol window)
 
 ## v2 Requirements
 
@@ -149,7 +149,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-03 | Phase 1 | Complete |
 | CORE-04 | Phase 2 | Complete |
 | CORE-05 | Phase 1 | Complete |
-| CORE-06 | Phase 7 | Pending |
+| CORE-06 | Phase 7 | Complete |
 | AUTH-01 | Phase 3 | Complete |
 | AUTH-02 | Phase 3 | Complete |
 | AUTH-03 | Phase 3 | Complete |
@@ -208,19 +208,19 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CHAN-01 | Phase 6 | Complete |
 | CHAN-02 | Phase 6 | Complete |
 | CHAN-03 | Phase 6 | Complete |
-| BOT-01 | Phase 7 | Pending |
-| BOT-02 | Phase 7 | Pending |
-| BOT-03 | Phase 7 | Pending |
-| BOT-04 | Phase 7 | Pending |
-| BOT-05 | Phase 7 | Pending |
+| BOT-01 | Phase 7 | Complete |
+| BOT-02 | Phase 7 | Complete |
+| BOT-03 | Phase 7 | Complete |
+| BOT-04 | Phase 7 | Complete |
+| BOT-05 | Phase 7 | Complete |
 | SET-01 | Phase 3 | Complete |
-| SET-02 | Phase 7 | Pending |
-| SET-03 | Phase 7 | Pending |
+| SET-02 | Phase 7 | Complete |
+| SET-03 | Phase 7 | Complete |
 | SET-04 | Phase 3 | Complete |
-| SET-05 | Phase 7 | Pending |
-| SET-06 | Phase 7 | Pending |
+| SET-05 | Phase 7 | Complete |
+| SET-06 | Phase 7 | Complete |
 | SET-07 | Phase 3 | Complete |
-| SET-08 | Phase 7 | Pending |
+| SET-08 | Phase 7 | Complete |
 
 **Coverage:**
 
