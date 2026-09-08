@@ -5,8 +5,14 @@ use std::path::{Path, PathBuf};
 pub const APP_CONFIG_DIR: &str = "wa-bot-desktop";
 
 /// Get the system default base config directory.
+///
+/// When the OS config dir is unavailable, falls back to the **absolute**
+/// current directory — never the relative `"."` (which would silently
+/// scatter settings per launch cwd). Absolute keeps the location
+/// deterministic and debuggable in the degraded case.
 pub fn default_base_dir() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from("."))
+    dirs::config_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 /// Get the WA Bot config directory within the given base directory.
