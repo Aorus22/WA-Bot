@@ -144,6 +144,9 @@ impl SpawnOptions {
         self
     }
 
+    /// Set the child working directory. Must be absolute and exist —
+    /// enforced in [`Supervisor::spawn`] (relative dirs would silently change
+    /// which `database/*.db` the Go backend opens).
     pub fn with_work_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.work_dir = Some(dir.into());
         self
@@ -436,6 +439,24 @@ impl Supervisor {
                     .to_string(),
                 stderr_tail: self.stderr_tail(),
             });
+        }
+        // `work_dir` becomes the child cwd, against which the Go backend
+        // resolves `database/*.db` — so it gets the same absolute-path
+        // discipline as db_path/media_path. Reject relative or nonexistent
+        // dirs here with InvalidPath instead of a late spawn Failed.
+        if let Some(dir) = &opts.work_dir {
+            if !dir.is_absolute() {
+                return Err(SupervisorError::InvalidPath(format!(
+                    "work_dir must be absolute, got '{}'",
+                    dir.display()
+                )));
+            }
+            if !dir.exists() {
+                return Err(SupervisorError::InvalidPath(format!(
+                    "work_dir does not exist: '{}'",
+                    dir.display()
+                )));
+            }
         }
         let _ = self.status_tx.send(BackendStatus::Starting);
         self.stderr_tail.lock().clear();
