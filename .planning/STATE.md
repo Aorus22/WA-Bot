@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: desktop-gpui
 status: planning
 progress:
-  total_phases: 0
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -18,14 +18,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-08)
 
 **Core value:** User desktop mendapat seluruh kemampuan web wa-bot dalam aplikasi native yang cepat — tanpa browser, tanpa Electron — dengan tampilan dan perilaku yang identik dengan web.
-**Current focus:** Defining requirements
+**Current focus:** Phase 1 — Fondasi Workspace & Supervisor
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-09-08 — Milestone v1.0 started
+Phase: 1 of 7 (Fondasi Workspace & Supervisor)
+Plan: — (ready to plan)
+Status: Ready to plan Phase 1
+Last activity: 2026-09-08 — Roadmap v1.0 created (7 phases, 77/77 requirements mapped)
 
 Progress: [░░░░░░░░░░] 0%
 
