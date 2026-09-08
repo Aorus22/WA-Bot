@@ -1,3 +1,4 @@
+pub mod call_overlay;
 pub mod chat_info_sheet;
 pub mod chat_sidebar;
 pub mod connection_banner;
@@ -10,6 +11,7 @@ pub mod rich_bubbles;
 pub mod titlebar;
 pub mod toast;
 
+pub use call_overlay::*;
 pub use chat_info_sheet::*;
 pub use chat_sidebar::*;
 pub use connection_banner::*;
