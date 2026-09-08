@@ -1,0 +1,48 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v1.0 — )",
+  "phases": [
+    {
+      "number": "1",
+      "name": "Fondasi Workspace & Supervisor",
+      "status": "complete"
+    },
+    {
+      "number": "2",
+      "name": "Backend-client Rust",
+      "status": "complete"
+    },
+    {
+      "number": "3",
+      "name": "Shell + Theming + Auth",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Chat Sidebar + Percakapan Inti",
+      "status": "pending"
+    },
+    {
+      "number": "5",
+      "name": "Media + Rich Types + Group Admin",
+      "status": "pending"
+    },
+    {
+      "number": "6",
+      "name": "Calls + Status + Channels",
+      "status": "pending"
+    },
+    {
+      "number": "7",
+      "name": "Bot + Settings + Docs + Packaging + Audit",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step (plan phase 3)",
+    "reason": "Phase 3 of 7 — needs a plan"
+  },
+  "updated_at": "2026-09-08T18:39:49.533Z"
+}
