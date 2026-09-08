@@ -34,6 +34,11 @@ pub enum ThemeMode {
     System,
     Light,
     Dark,
+    /// Forward-compat catch-all: an unknown value (e.g. a future `"auto"`
+    /// from web) deserializes here instead of invalidating the whole file.
+    /// Serializes as `"unknown"`, which round-trips back to `Unknown`.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Window dimensions and layout state.
