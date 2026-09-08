@@ -1,0 +1,16 @@
+[package]
+name = "wabot-settings"
+description = "Desktop settings store: UI prefs only (server settings live in the backend)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
