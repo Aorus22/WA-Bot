@@ -120,8 +120,11 @@ impl DesktopSettings {
 
         let content = match fs::read_to_string(&file_path) {
             Ok(c) => c,
-            // Unreadable (e.g. non-UTF8 bytes) counts as corrupt, not fatal.
-            Err(_) => {
+            // Only non-UTF8 content counts as corrupt here (`read_to_string`
+            // surfaces bad UTF-8 as `InvalidData`). Any other IO failure
+            // (permission-denied, etc.) says nothing about file content and
+            // must propagate — never trigger destructive recovery.
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
                 let backup = corrupt_backup_path(&file_path);
                 let _ = fs::rename(&file_path, &backup);
                 let settings = Self {
@@ -131,6 +134,7 @@ impl DesktopSettings {
                 let _ = settings.save_to(base);
                 return Ok(settings);
             }
+            Err(e) => return Err(SettingsError::Io(e)),
         };
         match serde_json::from_str::<DesktopSettings>(&content) {
             Ok(mut settings) => {
