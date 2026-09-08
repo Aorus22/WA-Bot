@@ -82,12 +82,24 @@ pub enum WsEvent {
         event_type: String,
         payload: serde_json::Value,
     },
+    QrCode(String),
+    AuthSuccess,
     Raw(WsMessage),
 }
 
 impl WsMessage {
     pub fn to_event(&self) -> WsEvent {
         match self.msg_type.as_str() {
+            "qr_code" => {
+                let code = self
+                    .payload
+                    .get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                WsEvent::QrCode(code)
+            }
+            "auth_success" => WsEvent::AuthSuccess,
             "new_message" => {
                 if let Ok(msg) = serde_json::from_value::<Message>(self.payload.clone()) {
                     WsEvent::NewMessage(Box::new(msg))
