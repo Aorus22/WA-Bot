@@ -202,6 +202,7 @@ pub enum InfoSheetTab {
 pub struct MessageContextMenu {
     pub msg: Message,
     pub is_from_me: bool,
+    pub position: Point<Pixels>,
 }
 
 /// Pre-computed, cached renderable message to guarantee silky smooth 60fps scrolling
@@ -1055,7 +1056,7 @@ impl ChatView {
 }
 
 impl Render for ChatView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
         let border_color = theme.border;
         let bg_color = theme.background;
@@ -1764,10 +1765,11 @@ impl Render for ChatView {
                                                         cx.listener({
                                                             let m = msg_clone.clone();
                                                             let me = is_from_me;
-                                                            move |this, _, _, cx| {
+                                                            move |this, ev: &MouseDownEvent, _, cx| {
                                                                 this.context_menu = Some(MessageContextMenu {
                                                                     msg: m.clone(),
                                                                     is_from_me: me,
+                                                                    position: ev.position,
                                                                 });
                                                                 cx.notify();
                                                             }
@@ -2424,6 +2426,26 @@ impl Render for ChatView {
                 let msg_content = MessageBubbleHelper::decode_content(&ctx.msg.content);
                 let msg_obj = ctx.msg.clone();
 
+                let win_w = f32::from(window.viewport_size().width);
+                let win_h = f32::from(window.viewport_size().height);
+                let menu_w = 230.0;
+                let menu_h = 160.0;
+
+                let click_x = f32::from(ctx.position.x);
+                let click_y = f32::from(ctx.position.y);
+
+                let pos_x = if click_x + menu_w > win_w - 20.0 {
+                    (click_x - menu_w).max(20.0)
+                } else {
+                    click_x.max(20.0)
+                };
+
+                let pos_y = if click_y + menu_h > win_h - 20.0 {
+                    (click_y - menu_h).max(20.0)
+                } else {
+                    click_y.max(20.0)
+                };
+
                 Some(
                     div()
                         .id("context-menu-backdrop")
@@ -2436,8 +2458,8 @@ impl Render for ChatView {
                         .child(
                             v_flex()
                                 .absolute()
-                                .right(px(120.0))
-                                .bottom(px(100.0))
+                                .left(px(pos_x))
+                                .top(px(pos_y))
                                 .w(px(220.0))
                                 .p_2()
                                 .gap_1()
@@ -2446,6 +2468,7 @@ impl Render for ChatView {
                                 .border_1()
                                 .border_color(border_color)
                                 .shadow_xl()
+                                .on_mouse_down(MouseButton::Left, |_, _, _| {})
                                 // Quick Reactions Row matching Web
                                 .child(
                                     h_flex()
