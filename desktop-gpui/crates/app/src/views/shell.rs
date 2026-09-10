@@ -1,21 +1,37 @@
 //! Main application shell view.
 
 use gpui::{
-    div, App, Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window,
+    div, AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window,
 };
 use gpui_component::{h_flex, v_flex};
 
-use crate::components::connection_banner::ConnectionBanner;
+use crate::components::connection_banner::{ConnectionBanner, ConnectionState};
 use crate::components::nav_sidebar::NavigationSidebar;
 use crate::components::titlebar::AppTitleBar;
 use crate::router::{AppRoute, Router};
 use crate::theme::manager::AppThemeExt;
+use crate::views::settings::SettingsView;
 
-pub struct AppShellView;
+pub struct AppShellView {
+    _router_sub: gpui::Subscription,
+    _conn_sub: gpui::Subscription,
+    settings_view: Entity<SettingsView>,
+}
 
 impl AppShellView {
-    pub fn new() -> Self {
-        Self
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let router_sub = cx.observe_global::<Router>(|_this, cx| {
+            cx.notify();
+        });
+        let conn_sub = cx.observe_global::<ConnectionState>(|_this, cx| {
+            cx.notify();
+        });
+        let settings_view = cx.new(|cx| SettingsView::new(cx));
+        Self {
+            _router_sub: router_sub,
+            _conn_sub: conn_sub,
+            settings_view,
+        }
     }
 }
 
@@ -50,7 +66,7 @@ impl Render for AppShellView {
                                     .id("router-outlet")
                                     .size_full()
                                     .overflow_hidden()
-                                    .child(Self::render_route_outlet(&current_route, cx)),
+                                    .child(self.render_route_outlet(&current_route, cx)),
                             ),
                     ),
             )
@@ -58,7 +74,7 @@ impl Render for AppShellView {
 }
 
 impl AppShellView {
-    fn render_route_outlet(route: &AppRoute, cx: &App) -> impl IntoElement {
+    fn render_route_outlet(&self, route: &AppRoute, cx: &App) -> AnyElement {
         let theme = cx.app_theme();
 
         match route {
@@ -129,6 +145,7 @@ impl AppShellView {
                             .child(div().text_base().font_weight(gpui::FontWeight::SEMIBOLD).child("WA Bot Desktop"))
                             .child(div().text_xs().text_color(theme.muted_foreground).child("Send and receive messages with 1:1 web parity."))
                     )
+                    .into_any_element()
             }
             AppRoute::Status => {
                 v_flex()
@@ -138,6 +155,7 @@ impl AppShellView {
                     .gap_3()
                     .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Status Updates"))
                     .child(div().text_sm().text_color(theme.muted_foreground).child("View status updates from your contacts"))
+                    .into_any_element()
             }
             AppRoute::Channels => {
                 v_flex()
@@ -147,6 +165,7 @@ impl AppShellView {
                     .gap_3()
                     .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Channels"))
                     .child(div().text_sm().text_color(theme.muted_foreground).child("Stay updated on topics that interest you"))
+                    .into_any_element()
             }
             AppRoute::Calls => {
                 v_flex()
@@ -156,6 +175,7 @@ impl AppShellView {
                     .gap_3()
                     .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Calls History"))
                     .child(div().text_sm().text_color(theme.muted_foreground).child("No recent call history"))
+                    .into_any_element()
             }
             AppRoute::Triggers | AppRoute::TriggerDetail(_) | AppRoute::TriggerNew => {
                 v_flex()
@@ -165,6 +185,7 @@ impl AppShellView {
                     .gap_3()
                     .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Bot Triggers"))
                     .child(div().text_sm().text_color(theme.muted_foreground).child("Configure automated bot keyword responses"))
+                    .into_any_element()
             }
             AppRoute::Cron | AppRoute::CronDetail(_) | AppRoute::CronNew => {
                 v_flex()
@@ -174,6 +195,7 @@ impl AppShellView {
                     .gap_3()
                     .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Cron Jobs"))
                     .child(div().text_sm().text_color(theme.muted_foreground).child("Schedule periodic automated messages and actions"))
+                    .into_any_element()
             }
             AppRoute::Webhooks
             | AppRoute::WebhookDetail(_)
@@ -186,6 +208,7 @@ impl AppShellView {
                     .gap_3()
                     .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Webhooks"))
                     .child(div().text_sm().text_color(theme.muted_foreground).child("Forward WhatsApp events to external services"))
+                    .into_any_element()
             }
             AppRoute::Documentation => {
                 v_flex()
@@ -195,15 +218,10 @@ impl AppShellView {
                     .gap_3()
                     .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Documentation"))
                     .child(div().text_sm().text_color(theme.muted_foreground).child("API documentation and guides from backend"))
+                    .into_any_element()
             }
             AppRoute::Settings => {
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
-                    .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Settings"))
-                    .child(div().text_sm().text_color(theme.muted_foreground).child("App preferences, active themes, and connection configurations"))
+                self.settings_view.clone().into_any_element()
             }
         }
     }

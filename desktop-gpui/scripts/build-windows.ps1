@@ -12,11 +12,23 @@ Set-Location $RootDir
 
 $OutputDir = "$RootDir\compiled\gpui-windows"
 New-Item -ItemType Directory -Force -Path "$OutputDir\be" | Out-Null
+New-Item -ItemType Directory -Force -Path "$OutputDir\database" | Out-Null
+New-Item -ItemType Directory -Force -Path "$OutputDir\media" | Out-Null
 
 Write-Host "==> [1/3] Building Go backend (Windows release)..." -ForegroundColor Cyan
 go build -trimpath -ldflags "-s -w" -o "$RootDir\wa-bot-backend.exe" ./cmd/api
 Copy-Item -Force "$RootDir\wa-bot-backend.exe" "$OutputDir\be\wa-bot-backend.exe"
 Copy-Item -Force "$RootDir\wa-bot-backend.exe" "$OutputDir\wa-bot-backend.exe"
+
+# Ensure shader compiler helper is available for GPUI release build
+$FxcTool = "$RootDir\desktop-gpui\tools\fxc\fxc.exe"
+if ([string]::IsNullOrEmpty($env:GPUI_FXC_PATH) -or -not (Test-Path $env:GPUI_FXC_PATH -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path $FxcTool)) {
+        Write-Host "Compiling standalone FXC shader compiler helper..." -ForegroundColor Yellow
+        rustc -O "$RootDir\desktop-gpui\tools\fxc\main.rs" -o $FxcTool
+    }
+    $env:GPUI_FXC_PATH = $FxcTool
+}
 
 Write-Host "==> [2/3] Building GPUI desktop shell (Windows release)..." -ForegroundColor Cyan
 cargo build --release --locked --manifest-path "$RootDir\desktop-gpui\Cargo.toml" -p wabot

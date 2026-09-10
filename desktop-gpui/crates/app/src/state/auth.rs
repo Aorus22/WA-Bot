@@ -34,10 +34,10 @@ pub struct AuthState {
 impl Default for AuthState {
     fn default() -> Self {
         Self {
-            status: AuthStatus::Checking,
+            status: AuthStatus::Unauthenticated,
             active_tab: LoginTab::Qr,
             qr_code: None,
-            qr_loading: true,
+            qr_loading: false,
             qr_error: None,
             base_url: "http://127.0.0.1:3000/api".to_string(),
         }
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn test_auth_state_transitions() {
         let mut state = AuthState::default();
-        assert_eq!(state.status, AuthStatus::Checking);
+        assert_eq!(state.status, AuthStatus::Unauthenticated);
 
         // WS QrCode event transitions to Unauthenticated with code
         let changed = state.handle_ws_event(&WsEvent::QrCode("qr-pairing-123".into()));

@@ -13,11 +13,18 @@ use crate::state::auth::{AuthState, LoginTab};
 use crate::theme::manager::AppThemeExt;
 use super::qr::QrCodeView;
 
-pub struct LoginView;
+pub struct LoginView {
+    _auth_sub: gpui::Subscription,
+}
 
 impl LoginView {
-    pub fn new() -> Self {
-        Self
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let auth_sub = cx.observe_global::<AuthState>(|_this, cx| {
+            cx.notify();
+        });
+        Self {
+            _auth_sub: auth_sub,
+        }
     }
 }
 
