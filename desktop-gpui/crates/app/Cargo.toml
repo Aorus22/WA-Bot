@@ -21,6 +21,8 @@ path = "src/main.rs"
 gpui = { workspace = true }
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.3" }
 gpui-component = { workspace = true }
+gpui-kit-assets = { workspace = true }
+raw-window-handle = { workspace = true }
 wabot-supervisor = { workspace = true }
 wabot-settings = { workspace = true }
 wabot-backend-client = { workspace = true }

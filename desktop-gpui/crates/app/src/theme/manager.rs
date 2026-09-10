@@ -1,6 +1,6 @@
 //! Theme manager managing active preset, mode, and GPUI runtime synchronization.
 
-use gpui::{App, Global, Hsla, Window};
+use gpui::{App, BorrowAppContext, Global, Hsla, Window};
 use gpui_component::{Theme, ThemeMode as GpuiThemeMode};
 use wabot_settings::{DesktopSettings, ThemeMode as SettingsThemeMode};
 
@@ -136,6 +136,20 @@ impl ThemeManager {
         }
 
         cx.refresh_windows();
+    }
+
+    /// Change active theme preset statically avoiding double borrow of App.
+    pub fn apply_preset(name: &str, window: Option<&mut Window>, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| {
+            this.change_preset(name, window, cx);
+        });
+    }
+
+    /// Change theme mode statically avoiding double borrow of App.
+    pub fn apply_mode(mode: SettingsThemeMode, window: Option<&mut Window>, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| {
+            this.change_mode(mode, window, cx);
+        });
     }
 }
 

@@ -13,13 +13,18 @@ use crate::views::shell::AppShellView;
 pub struct RootGateView {
     login_view: Entity<LoginView>,
     shell_view: Entity<AppShellView>,
+    _auth_sub: gpui::Subscription,
 }
 
 impl RootGateView {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let auth_sub = cx.observe_global::<AuthState>(|_this, cx| {
+            cx.notify();
+        });
         Self {
-            login_view: cx.new(|_| LoginView::new()),
-            shell_view: cx.new(|_| AppShellView::new()),
+            login_view: cx.new(|cx| LoginView::new(cx)),
+            shell_view: cx.new(|cx| AppShellView::new(cx)),
+            _auth_sub: auth_sub,
         }
     }
 }
@@ -38,19 +43,38 @@ impl Render for RootGateView {
                 v_flex()
                     .size_full()
                     .bg(theme.background)
-                    .items_center()
-                    .justify_center()
+                    .child(crate::components::titlebar::AppTitleBar::new())
                     .child(
-                        Icon::new(IconName::LoaderCircle)
-                            .size(px(40.))
-                            .text_color(theme.primary),
+                        v_flex()
+                            .flex_1()
+                            .items_center()
+                            .justify_center()
+                            .gap_3()
+                            .child(
+                                Icon::new(IconName::LoaderCircle)
+                                    .size(px(40.))
+                                    .text_color(theme.primary),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child("Connecting to WA Bot..."),
+                            ),
                     )
                     .into_any_element()
             }
             AuthStatus::Unauthenticated => {
-                div()
+                v_flex()
                     .size_full()
-                    .child(self.login_view.clone())
+                    .bg(theme.background)
+                    .child(crate::components::titlebar::AppTitleBar::new())
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(self.login_view.clone()),
+                    )
                     .into_any_element()
             }
             AuthStatus::Authenticated => {

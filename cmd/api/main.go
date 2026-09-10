@@ -113,6 +113,10 @@ func InitializeApp() (*App, error) {
 	// Load .env if available; optional for desktop mode
 	_ = godotenv.Load()
 
+	// Ensure database and media directories exist
+	_ = os.MkdirAll("database", 0755)
+	_ = os.MkdirAll("media", 0755)
+
 	cfg := infrastructureConfig.NewEnvConfig()
 	storageRepo := storage.NewLocalStorage("media")
 	stateRepo := storage.NewInMemoryUserState()

@@ -24,6 +24,8 @@ wabot-backend-client = { path = "crates/backend-client" }
 # gpui-pre and gpui-component MUST always be bumped together (see crates/app/Cargo.toml).
 gpui = { package = "gpui-pre", version = "=0.3.3" }
 gpui-component = "=0.6.0"
+gpui-kit-assets = "=0.6.0"
+raw-window-handle = "=0.6.2"
 tokio = { version = "=1.53.1", features = [
     "rt-multi-thread",
     "process",
