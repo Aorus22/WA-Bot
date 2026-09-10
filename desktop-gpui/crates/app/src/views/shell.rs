@@ -10,12 +10,14 @@ use crate::components::nav_sidebar::NavigationSidebar;
 use crate::components::titlebar::AppTitleBar;
 use crate::router::{AppRoute, Router};
 use crate::theme::manager::AppThemeExt;
+use crate::views::chat::ChatView;
 use crate::views::settings::SettingsView;
 
 pub struct AppShellView {
     _router_sub: gpui::Subscription,
     _conn_sub: gpui::Subscription,
     settings_view: Entity<SettingsView>,
+    chat_view: Entity<ChatView>,
 }
 
 impl AppShellView {
@@ -27,10 +29,12 @@ impl AppShellView {
             cx.notify();
         });
         let settings_view = cx.new(|cx| SettingsView::new(cx));
+        let chat_view = cx.new(|cx| ChatView::new(cx));
         Self {
             _router_sub: router_sub,
             _conn_sub: conn_sub,
             settings_view,
+            chat_view,
         }
     }
 }
@@ -79,73 +83,7 @@ impl AppShellView {
 
         match route {
             AppRoute::Chat | AppRoute::ChatDetail(_) => {
-                h_flex()
-                    .size_full()
-                    .overflow_hidden()
-                    .child(
-                        v_flex()
-                            .w(gpui::px(340.0))
-                            .h_full()
-                            .border_r_1()
-                            .border_color(theme.border)
-                            .bg(theme.card)
-                            .child(
-                                v_flex()
-                                    .p_3()
-                                    .gap_2()
-                                    .border_b_1()
-                                    .border_color(theme.border)
-                                    .child(
-                                        h_flex()
-                                            .justify_between()
-                                            .items_center()
-                                            .child(div().text_base().font_weight(gpui::FontWeight::BOLD).child("Chats"))
-                                            .child(
-                                                h_flex()
-                                                    .gap_2()
-                                                    .child(div().text_xs().text_color(theme.primary).child("+ New Group"))
-                                                    .child(div().text_xs().text_color(theme.muted_foreground).child("Join via Link"))
-                                            )
-                                    )
-                                    .child(
-                                        div()
-                                            .px_3()
-                                            .py_1()
-                                            .bg(theme.background)
-                                            .rounded_md()
-                                            .border_1()
-                                            .border_color(theme.border)
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child("Search or start new chat...")
-                                    )
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .p_2()
-                                    .child(
-                                        div()
-                                            .p_3()
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child("Conversations ready. Click to open.")
-                                    )
-                            )
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .h_full()
-                            .bg(theme.background)
-                            .items_center()
-                            .justify_center()
-                            .gap_2()
-                            .child(div().text_base().font_weight(gpui::FontWeight::SEMIBOLD).child("WA Bot Desktop"))
-                            .child(div().text_xs().text_color(theme.muted_foreground).child("Send and receive messages with 1:1 web parity."))
-                    )
-                    .into_any_element()
+                self.chat_view.clone().into_any_element()
             }
             AppRoute::Status => {
                 v_flex()

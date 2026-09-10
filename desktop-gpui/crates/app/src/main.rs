@@ -9,6 +9,7 @@ use wabot_app::{
     components::connection_banner::ConnectionState,
     router::Router,
     state::auth::{AuthState, AuthStatus},
+    state::chat::ChatStore,
     theme::manager::ThemeManager,
     views::root::RootGateView,
     TOKIO_RT,
@@ -49,6 +50,7 @@ fn main() {
             // Initialize globals
             cx.set_global(Router::default());
             cx.set_global(ConnectionState::default());
+            cx.set_global(ChatStore::new());
 
             let mut auth_state = AuthState::default();
             let base_url = settings
@@ -149,10 +151,19 @@ fn main() {
             cx.spawn(async move |cx| {
                 while let Ok(event) = ws_rx.recv_async().await {
                     let _ = cx.update(|cx| {
+                        let mut needs_refresh = false;
                         if cx.has_global::<AuthState>() {
                             if AuthState::global_mut(cx).handle_ws_event(&event) {
-                                cx.refresh_windows();
+                                needs_refresh = true;
                             }
+                        }
+                        if cx.has_global::<ChatStore>() {
+                            if ChatStore::global_mut(cx).handle_ws_event(&event) {
+                                needs_refresh = true;
+                            }
+                        }
+                        if needs_refresh {
+                            cx.refresh_windows();
                         }
                     });
                 }
