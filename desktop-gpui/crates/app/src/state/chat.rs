@@ -41,9 +41,22 @@ pub struct ChatStore {
     pub peer_presence: HashMap<String, String>, // chat_id -> presence string (e.g. "available", "composing")
 }
 
+use gpui::{App, Global};
+use wabot_backend_client::ws::WsEvent;
+
+impl Global for ChatStore {}
+
 impl ChatStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn global(cx: &App) -> &Self {
+        cx.global::<Self>()
+    }
+
+    pub fn global_mut(cx: &mut App) -> &mut Self {
+        cx.global_mut::<Self>()
     }
 
     pub fn set_chats(&mut self, chats: Vec<Chat>) {
@@ -197,6 +210,83 @@ impl ChatStore {
     pub fn mark_chat_read(&mut self, chat_id: &str) {
         if let Some(chat) = self.chats.iter_mut().find(|c| c.id == chat_id) {
             chat.unread = 0;
+        }
+    }
+
+    pub fn handle_ws_event(&mut self, event: &WsEvent) -> bool {
+        match event {
+            WsEvent::NewMessage(msg) => {
+                let chat_id = msg.chat_id.clone();
+                self.upsert_message(&chat_id, *msg.clone());
+
+                if let Some(pos) = self.chats.iter().position(|c| c.id == chat_id) {
+                    let mut existing = self.chats.remove(pos);
+                    existing.last_msg = msg.content.clone();
+                    existing.last_time = msg.timestamp;
+                    if self.active_chat_id.as_deref() != Some(&chat_id) {
+                        existing.unread += 1;
+                    }
+                    self.chats.insert(0, existing);
+                } else {
+                    let new_chat = Chat {
+                        id: chat_id.clone(),
+                        name: msg.sender_name.clone().unwrap_or_else(|| chat_id.clone()),
+                        avatar: String::new(),
+                        last_msg: msg.content.clone(),
+                        last_time: msg.timestamp,
+                        unread: if self.active_chat_id.as_deref() == Some(&chat_id) { 0 } else { 1 },
+                        is_active: true,
+                        is_group: chat_id.contains("@g.us"),
+                        archived: false,
+                        pinned_at: None,
+                        mute_mode: "off".to_string(),
+                        muted_until: None,
+                    };
+                    self.chats.insert(0, new_chat);
+                }
+                true
+            }
+            WsEvent::MessageStatus { chat_id, id, status } => {
+                if let Some(cid) = chat_id {
+                    self.patch_message(cid, id, |m| m.status = status.clone());
+                } else {
+                    for entry in self.messages_by_chat.values_mut() {
+                        if let Some(m) = entry.messages.iter_mut().find(|m| m.id == *id) {
+                            m.status = status.clone();
+                        }
+                    }
+                }
+                true
+            }
+            WsEvent::MessageDeleted { chat_id, id } => {
+                self.delete_message(chat_id, id);
+                true
+            }
+            WsEvent::MessageEdited { chat_id, id, content } => {
+                self.patch_message(chat_id, id, |m| m.content = content.clone());
+                true
+            }
+            WsEvent::ChatState(state) => {
+                self.patch_chat_state(state);
+                true
+            }
+            WsEvent::ChatNameUpdate { chat_id, name } => {
+                if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
+                    chat.name = name.clone();
+                    true
+                } else {
+                    false
+                }
+            }
+            WsEvent::ChatPresence { chat_id, presence } => {
+                self.set_presence(chat_id, presence);
+                true
+            }
+            WsEvent::ChatsChanged { .. } => {
+                self.chats_loaded = false;
+                true
+            }
+            _ => false,
         }
     }
 }
