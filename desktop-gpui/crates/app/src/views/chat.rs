@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use gpui::*;
+use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{Chat, Message};
@@ -247,6 +248,10 @@ pub struct ChatView {
     pub cached_chat_id: Option<String>,
     pub cached_render_messages: Vec<RenderMessage>,
 
+    // Scroll handles for visual scrollbars
+    pub chat_list_scroll_handle: ScrollHandle,
+    pub messages_scroll_handle: ScrollHandle,
+
     // Context menu popup on message right click
     pub context_menu: Option<MessageContextMenu>,
 
@@ -297,6 +302,9 @@ impl ChatView {
 
             cached_chat_id: None,
             cached_render_messages: Vec::new(),
+
+            chat_list_scroll_handle: ScrollHandle::new(),
+            messages_scroll_handle: ScrollHandle::new(),
 
             context_menu: None,
             chat_context_menu: None,
@@ -371,6 +379,7 @@ impl ChatView {
         self.context_menu = None;
         self.chat_context_menu = None;
         self.is_info_sheet_open = false;
+        self.messages_scroll_handle.scroll_to_bottom();
 
         if cx.has_global::<ChatStore>() {
             let store = ChatStore::global_mut(cx);
@@ -466,6 +475,7 @@ impl ChatView {
                                     let has_more = msgs.len() >= 100;
                                     ChatStore::global_mut(cx).set_messages(&cid, msgs, has_more);
                                 }
+                                this.messages_scroll_handle.scroll_to_bottom();
                             }
                             cx.notify();
                         });
@@ -810,6 +820,7 @@ impl ChatView {
             ticks: MessageTicks::Sent,
             quoted: None,
         });
+        self.messages_scroll_handle.scroll_to_bottom();
 
         let target_chat = chat_id.clone();
         let sent_text = text.clone();
@@ -1402,15 +1413,21 @@ impl Render for ChatView {
                     } else {
                         None
                     })
-                    // Chat Scroll List (Uniform 72px item height strictly enforced)
+                    // Chat Scroll List (Uniform 72px item height strictly enforced) with scrollbar
                     .child(
-                        v_flex()
-                            .id("chat-list-scroll")
+                        div()
                             .flex_1()
-                            .overflow_y_scroll()
-                            .p_2()
-                            .gap_1()
-                            .children(if is_loading_chats && filtered_chats.is_empty() {
+                            .relative()
+                            .overflow_hidden()
+                            .child(
+                                v_flex()
+                                    .id("chat-list-scroll")
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&self.chat_list_scroll_handle)
+                                    .p_2()
+                                    .gap_1()
+                                    .children(if is_loading_chats && filtered_chats.is_empty() {
                                 vec![
                                     v_flex()
                                         .py_12()
@@ -1629,6 +1646,17 @@ impl Render for ChatView {
                                     })
                                     .collect()
                             }),
+                            )
+                            .child(
+                                Scrollbar::vertical(&self.chat_list_scroll_handle)
+                                    .mode(ScrollbarMode::Hover)
+                                    .styles(|s| {
+                                        s.track(|t| t.bg(transparent_black()))
+                                            .thumb(|th| th.bg(theme.muted_foreground.opacity(0.35)).radius(px(3.0)).width(px(6.0)))
+                                            .thumb_hover(|th| th.bg(theme.muted_foreground.opacity(0.65)).radius(px(4.0)).width(px(8.0)))
+                                            .thumb_active(|th| th.bg(theme.primary.opacity(0.8)).radius(px(4.0)).width(px(8.0)))
+                                    }),
+                            ),
                     ),
             )
             // ====================================================
@@ -1742,15 +1770,21 @@ impl Render for ChatView {
                                                 ),
                                         ),
                                 )
-                                // Messages History View (Optimized for 60fps scrolling)
+                                // Messages History View (Optimized for 60fps scrolling) with visual scrollbar
                                 .child(
-                                    v_flex()
-                                        .id("messages-scroll")
+                                    div()
                                         .flex_1()
-                                        .overflow_y_scroll()
-                                        .p_6()
-                                        .gap_3()
-                                        .children(if is_loading_messages && self.cached_render_messages.is_empty() {
+                                        .relative()
+                                        .overflow_hidden()
+                                        .child(
+                                            v_flex()
+                                                .id("messages-scroll")
+                                                .size_full()
+                                                .overflow_y_scroll()
+                                                .track_scroll(&self.messages_scroll_handle)
+                                                .p_6()
+                                                .gap_3()
+                                                .children(if is_loading_messages && self.cached_render_messages.is_empty() {
                                             vec![
                                                 v_flex()
                                                     .py_16()
@@ -2021,8 +2055,19 @@ impl Render for ChatView {
                                                 elements.push(row.child(bubble).into_any_element());
                                             }
 
-                                            elements
+                                             elements
                                         }),
+                                        )
+                                        .child(
+                                            Scrollbar::vertical(&self.messages_scroll_handle)
+                                                .mode(ScrollbarMode::Always)
+                                                .styles(|s| {
+                                                    s.track(|t| t.bg(transparent_black()))
+                                                        .thumb(|th| th.bg(theme.muted_foreground.opacity(0.35)).radius(px(3.0)).width(px(6.0)))
+                                                        .thumb_hover(|th| th.bg(theme.muted_foreground.opacity(0.65)).radius(px(4.0)).width(px(8.0)))
+                                                        .thumb_active(|th| th.bg(theme.primary.opacity(0.8)).radius(px(4.0)).width(px(8.0)))
+                                                }),
+                                        ),
                                 )
                                 // Bottom Compose Container (Banner + Input Field + Integrated Send Icon)
                                 .child(
