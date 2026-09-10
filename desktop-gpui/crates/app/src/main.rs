@@ -53,10 +53,8 @@ fn main() {
             cx.set_global(ChatStore::new());
 
             let mut auth_state = AuthState::default();
-            let base_url = settings
-                .last_backend_url
-                .clone()
-                .unwrap_or_else(|| "http://127.0.0.1:3000/api".to_string());
+            let base_url = detect_backend_url(&settings);
+            eprintln!("[GPUI] Connecting to backend at: {base_url}");
             auth_state.base_url = base_url.clone();
             cx.set_global(auth_state);
 
@@ -230,3 +228,64 @@ fn main() {
             .detach();
         });
 }
+
+/// Detects the backend URL using CLI flags, env vars, active port probes, settings, or .env fallback.
+fn detect_backend_url(settings: &DesktopSettings) -> String {
+    let args: Vec<String> = std::env::args().collect();
+    for i in 0..args.len() {
+        if (args[i] == "--url" || args[i] == "--backend-url") && i + 1 < args.len() {
+            return args[i + 1].clone();
+        }
+        if args[i].starts_with("--url=") {
+            return args[i].trim_start_matches("--url=").to_string();
+        }
+        if (args[i] == "--port" || args[i] == "-p") && i + 1 < args.len() {
+            return format!("http://127.0.0.1:{}/api", args[i + 1]);
+        }
+        if args[i].starts_with("--port=") {
+            return format!("http://127.0.0.1:{}/api", args[i].trim_start_matches("--port="));
+        }
+    }
+
+    if let Ok(url) = std::env::var("BACKEND_URL") {
+        if !url.trim().is_empty() {
+            return url.trim().to_string();
+        }
+    }
+    if let Ok(port) = std::env::var("BACKEND_PORT") {
+        let p = port.trim().trim_start_matches(':');
+        if !p.is_empty() {
+            return format!("http://127.0.0.1:{p}/api");
+        }
+    }
+
+    // Probe running loopback listeners: 3090 (.env default), 3000 (compiled default), 8080 (external)
+    for &port in &[3090, 3000, 8080] {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(50)).is_ok() {
+            return format!("http://127.0.0.1:{port}/api");
+        }
+    }
+
+    if let Some(ref url) = settings.last_backend_url {
+        if !url.trim().is_empty() {
+            return url.clone();
+        }
+    }
+
+    for env_path in &[std::path::Path::new(".env"), std::path::Path::new("../.env"), std::path::Path::new("../../.env")] {
+        if let Ok(content) = std::fs::read_to_string(env_path) {
+            for line in content.lines() {
+                if let Some(val) = line.strip_prefix("PORT=") {
+                    let p = val.trim().trim_matches('"').trim_matches('\'').trim_start_matches(':');
+                    if !p.is_empty() {
+                        return format!("http://127.0.0.1:{p}/api");
+                    }
+                }
+            }
+        }
+    }
+
+    "http://127.0.0.1:3090/api".to_string()
+}
+
