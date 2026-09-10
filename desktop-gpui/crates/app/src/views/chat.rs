@@ -1,6 +1,7 @@
 //! Chat view matching Web ChatPage, ChatSidebar, and ChatArea with 1:1 parity.
 
 use std::collections::HashSet;
+use std::ops::Range;
 use gpui::*;
 use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::{h_flex, v_flex, Icon, IconName};
@@ -244,13 +245,17 @@ pub struct ChatView {
     pub is_loading_messages: bool,
     pub toast_message: Option<(String, bool)>, // (message, is_error)
 
+    // Cached filtered chats for zero-allocation scrolling
+    pub cached_filtered_chats: Vec<Chat>,
+    pub last_filter_key: (u64, String, ChatFilter, bool),
+
     // Cached messages for 60fps scrolling
     pub cached_chat_id: Option<String>,
     pub cached_render_messages: Vec<RenderMessage>,
 
-    // Scroll handles for visual scrollbars
-    pub chat_list_scroll_handle: ScrollHandle,
-    pub messages_scroll_handle: ScrollHandle,
+    // Scroll handles for visual scrollbars (uniform_list and virtual list)
+    pub chat_list_scroll_handle: UniformListScrollHandle,
+    pub messages_list_state: ListState,
 
     // Context menu popup on message right click
     pub context_menu: Option<MessageContextMenu>,
@@ -300,11 +305,14 @@ impl ChatView {
             is_loading_messages: false,
             toast_message: None,
 
+            cached_filtered_chats: Vec::new(),
+            last_filter_key: (u64::MAX, String::new(), ChatFilter::All, false),
+
             cached_chat_id: None,
             cached_render_messages: Vec::new(),
 
-            chat_list_scroll_handle: ScrollHandle::new(),
-            messages_scroll_handle: ScrollHandle::new(),
+            chat_list_scroll_handle: UniformListScrollHandle::new(),
+            messages_list_state: ListState::new(0, ListAlignment::Top, px(200.0)),
 
             context_menu: None,
             chat_context_menu: None,
@@ -379,7 +387,7 @@ impl ChatView {
         self.context_menu = None;
         self.chat_context_menu = None;
         self.is_info_sheet_open = false;
-        self.messages_scroll_handle.scroll_to_bottom();
+        self.messages_list_state.scroll_to_end();
 
         if cx.has_global::<ChatStore>() {
             let store = ChatStore::global_mut(cx);
@@ -443,6 +451,10 @@ impl ChatView {
                 }
             })
             .collect();
+
+        let total_items = if self.cached_render_messages.is_empty() { 0 } else { self.cached_render_messages.len() + 1 };
+        self.messages_list_state.reset(total_items);
+        self.messages_list_state.scroll_to_end();
     }
 
     /// Fetch messages for a specific chat from GET /api/chats/:id/messages
@@ -475,7 +487,6 @@ impl ChatView {
                                     let has_more = msgs.len() >= 100;
                                     ChatStore::global_mut(cx).set_messages(&cid, msgs, has_more);
                                 }
-                                this.messages_scroll_handle.scroll_to_bottom();
                             }
                             cx.notify();
                         });
@@ -679,6 +690,8 @@ impl ChatView {
             ChatStore::global_mut(cx).delete_message(&chat_id, &msg_id);
         }
         self.cached_render_messages.retain(|m| m.msg.id != msg_id);
+        let total_items = if self.cached_render_messages.is_empty() { 0 } else { self.cached_render_messages.len() + 1 };
+        self.messages_list_state.reset(total_items);
         cx.notify();
 
         let cid = chat_id.clone();
@@ -820,7 +833,9 @@ impl ChatView {
             ticks: MessageTicks::Sent,
             quoted: None,
         });
-        self.messages_scroll_handle.scroll_to_bottom();
+        let total_items = self.cached_render_messages.len() + 1;
+        self.messages_list_state.reset(total_items);
+        self.messages_list_state.scroll_to_end();
 
         let target_chat = chat_id.clone();
         let sent_text = text.clone();
@@ -1136,53 +1151,72 @@ impl Render for ChatView {
             "http://127.0.0.1:3000/api".to_string()
         };
 
-        let all_chats: Vec<Chat> = if cx.has_global::<ChatStore>() {
-            ChatStore::global(cx).chats.clone()
+        let (chats_version, archived_count) = if cx.has_global::<ChatStore>() {
+            let store = ChatStore::global(cx);
+            (store.chats_version, store.chats.iter().filter(|c| c.archived).count())
         } else {
-            Vec::new()
+            (0, 0)
         };
 
-        // Filter and sort chats
-        let query = self.search_query.trim().to_lowercase();
-        let archived_mode = self.archived_mode;
-        let current_filter = self.filter;
+        // Cache filtered and sorted chats to avoid expensive allocations during 60fps scrolling
+        let filter_key = (chats_version, self.search_query.clone(), self.filter, self.archived_mode);
+        if self.last_filter_key != filter_key {
+            let empty_chats = Vec::new();
+            let all_chats = if cx.has_global::<ChatStore>() {
+                &ChatStore::global(cx).chats
+            } else {
+                &empty_chats
+            };
 
-        let mut filtered_chats: Vec<Chat> = all_chats
-            .iter()
-            .filter(|c| c.archived == archived_mode)
-            .filter(|c| match current_filter {
-                ChatFilter::All => true,
-                ChatFilter::Unread => c.unread > 0,
-                ChatFilter::Groups => c.is_group,
-                ChatFilter::Contacts => !c.is_group,
-            })
-            .filter(|c| {
-                if query.is_empty() {
-                    true
-                } else {
-                    c.name.to_lowercase().contains(&query)
-                        || c.id.to_lowercase().contains(&query)
-                        || c.last_msg.to_lowercase().contains(&query)
+            let query = self.search_query.trim().to_lowercase();
+            let archived_mode = self.archived_mode;
+            let current_filter = self.filter;
+
+            let mut filtered: Vec<Chat> = all_chats
+                .iter()
+                .filter(|c| c.archived == archived_mode)
+                .filter(|c| match current_filter {
+                    ChatFilter::All => true,
+                    ChatFilter::Unread => c.unread > 0,
+                    ChatFilter::Groups => c.is_group,
+                    ChatFilter::Contacts => !c.is_group,
+                })
+                .filter(|c| {
+                    if query.is_empty() {
+                        true
+                    } else {
+                        c.name.to_lowercase().contains(&query)
+                            || c.id.to_lowercase().contains(&query)
+                            || c.last_msg.to_lowercase().contains(&query)
+                    }
+                })
+                .cloned()
+                .collect();
+
+            // Sort: pinned first, then last_time descending
+            filtered.sort_by(|a, b| {
+                match (a.pinned_at, b.pinned_at) {
+                    (Some(pa), Some(pb)) => pb.cmp(&pa),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => b.last_time.cmp(&a.last_time),
                 }
-            })
-            .cloned()
-            .collect();
+            });
 
-        // Sort: pinned first, then last_time descending
-        filtered_chats.sort_by(|a, b| {
-            match (a.pinned_at, b.pinned_at) {
-                (Some(pa), Some(pb)) => pb.cmp(&pa),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => b.last_time.cmp(&a.last_time),
-            }
-        });
+            self.cached_filtered_chats = filtered;
+            self.last_filter_key = filter_key;
+        }
 
-        let archived_count = all_chats.iter().filter(|c| c.archived).count();
         let selected_chat = self
             .selected_chat_id
             .as_ref()
-            .and_then(|id| all_chats.iter().find(|c| c.id == *id).cloned());
+            .and_then(|id| {
+                if cx.has_global::<ChatStore>() {
+                    ChatStore::global(cx).chats.iter().find(|c| c.id == *id).cloned()
+                } else {
+                    None
+                }
+            });
 
         let selected_chat_id = self.selected_chat_id.clone();
         let is_loading_chats = self.is_loading_chats;
@@ -1229,7 +1263,7 @@ impl Render for ChatView {
                                         h_flex()
                                             .items_center()
                                             .gap_2()
-                                            .children(if archived_mode {
+                                            .children(if self.archived_mode {
                                                 Some(
                                                     h_flex()
                                                         .cursor_pointer()
@@ -1257,7 +1291,7 @@ impl Render for ChatView {
                                                     .text_2xl()
                                                     .font_weight(FontWeight::BOLD)
                                                     .text_color(text_color)
-                                                    .child(if archived_mode { "Archived" } else { "Messages" }),
+                                                    .child(if self.archived_mode { "Archived" } else { "Messages" }),
                                             ),
                                     )
                                     // Action buttons: New Group, Join Group (matching Web)
@@ -1367,7 +1401,7 @@ impl Render for ChatView {
                             ),
                     )
                     // Archived Button Row (when archived mode is false and archived chats exist)
-                    .children(if !archived_mode && self.search_query.is_empty() && archived_count > 0 {
+                    .children(if !self.archived_mode && self.search_query.is_empty() && archived_count > 0 {
                         Some(
                             h_flex()
                                 .mx_2()
@@ -1419,234 +1453,277 @@ impl Render for ChatView {
                             .flex_1()
                             .relative()
                             .overflow_hidden()
-                            .child(
+                            .child(if is_loading_chats && self.cached_filtered_chats.is_empty() {
                                 v_flex()
-                                    .id("chat-list-scroll")
                                     .size_full()
-                                    .overflow_y_scroll()
-                                    .track_scroll(&self.chat_list_scroll_handle)
                                     .p_2()
-                                    .gap_1()
-                                    .children(if is_loading_chats && filtered_chats.is_empty() {
-                                vec![
-                                    v_flex()
-                                        .py_12()
-                                        .items_center()
-                                        .justify_center()
-                                        .gap_2()
-                                        .child(Icon::new(IconName::LoaderCircle).size(px(24.)))
-                                        .child(div().text_xs().text_color(muted_text).child("Loading conversations..."))
-                                        .into_any_element(),
-                                ]
-                            } else if filtered_chats.is_empty() {
-                                vec![
-                                    v_flex()
-                                        .py_12()
-                                        .px_4()
-                                        .items_center()
-                                        .justify_center()
-                                        .gap_2()
-                                        .child(svg().data(MESSAGE_SQUARE_SVG).size(px(32.0)).text_color(muted_text))
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .text_color(text_color)
-                                                .child(if self.search_query.is_empty() {
-                                                    "No messages yet"
-                                                } else {
-                                                    "No results found"
-                                                }),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(muted_text)
-                                                .child(if self.search_query.is_empty() {
-                                                    "Incoming messages will appear here."
-                                                } else {
-                                                    "Try another search keyword."
-                                                }),
-                                        )
-                                        .into_any_element(),
-                                ]
+                                    .child(
+                                        v_flex()
+                                            .py_12()
+                                            .items_center()
+                                            .justify_center()
+                                            .gap_2()
+                                            .child(Icon::new(IconName::LoaderCircle).size(px(24.)))
+                                            .child(div().text_xs().text_color(muted_text).child("Loading conversations..."))
+                                    )
+                                    .into_any_element()
+                            } else if self.cached_filtered_chats.is_empty() {
+                                v_flex()
+                                    .size_full()
+                                    .p_2()
+                                    .child(
+                                        v_flex()
+                                            .py_12()
+                                            .px_4()
+                                            .items_center()
+                                            .justify_center()
+                                            .gap_2()
+                                            .child(svg().data(MESSAGE_SQUARE_SVG).size(px(32.0)).text_color(muted_text))
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(text_color)
+                                                    .child(if self.search_query.is_empty() {
+                                                        "No messages yet"
+                                                    } else {
+                                                        "No results found"
+                                                    }),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(muted_text)
+                                                    .child(if self.search_query.is_empty() {
+                                                        "Incoming messages will appear here."
+                                                    } else {
+                                                        "Try another search keyword."
+                                                    }),
+                                            )
+                                    )
+                                    .into_any_element()
                             } else {
-                                filtered_chats
-                                    .into_iter()
-                                    .map(|chat| {
-                                        let is_selected = selected_chat_id.as_deref() == Some(&chat.id);
-                                        let chat_id = chat.id.clone();
-                                        let is_pinned = chat.pinned_at.is_some();
-                                        let is_muted = chat.mute_mode != "off" && !chat.mute_mode.is_empty();
-
-                                        // Clamped single-line snippet to guarantee identical 72px row heights
-                                        let first_line = chat.last_msg.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
-                                        let last_msg_snippet = if first_line.is_empty() {
-                                            "Tap to chat".to_string()
+                                uniform_list(
+                                    "chat-list-scroll",
+                                    self.cached_filtered_chats.len(),
+                                    cx.processor(|this, range: Range<usize>, _window, cx| {
+                                        let theme = cx.app_theme();
+                                        let muted_text = theme.muted_foreground;
+                                        let text_color = theme.foreground;
+                                        let selected_chat_id = this.selected_chat_id.clone();
+                                        let base_url = if cx.has_global::<AuthState>() {
+                                            AuthState::global(cx).base_url.clone()
                                         } else {
-                                            MessageBubbleHelper::decode_content(first_line)
+                                            "http://127.0.0.1:3000/api".to_string()
                                         };
 
-                                        let formatted_time = Self::format_chat_time(chat.last_time);
-                                        let unread = chat.unread;
+                                        let mut items = Vec::with_capacity(range.len());
+                                        for ix in range {
+                                            if let Some(chat) = this.cached_filtered_chats.get(ix) {
+                                                let is_selected = selected_chat_id.as_deref() == Some(&chat.id);
+                                                let chat_id = chat.id.clone();
+                                                let is_pinned = chat.pinned_at.is_some();
+                                                let is_muted = chat.mute_mode != "off" && !chat.mute_mode.is_empty();
 
-                                        h_flex()
-                                            .w_full()
-                                            .h(px(72.0))
-                                            .overflow_hidden()
-                                            .px_3()
-                                            .py_2p5()
-                                            .rounded_xl()
-                                            .gap_3()
-                                            .items_center()
-                                            .cursor_pointer()
-                                            .relative()
-                                            .bg(if is_selected {
-                                                theme.primary.opacity(0.12)
-                                            } else {
-                                                rgba(0x00000000).into()
-                                            })
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener({
-                                                    let cid = chat_id.clone();
-                                                    move |this, _, window, cx| {
-                                                        this.chat_context_menu = None;
-                                                        this.select_chat(cid.clone(), window, cx);
-                                                    }
-                                                }),
-                                            )
-                                            .on_mouse_down(
-                                                MouseButton::Right,
-                                                cx.listener({
-                                                    let c_id = chat_id.clone();
-                                                    let c_name = chat.name.clone();
-                                                    let pinned = is_pinned;
-                                                    let archived = chat.archived;
-                                                    let muted = is_muted;
-                                                    move |this, ev: &MouseDownEvent, _, cx| {
-                                                        this.context_menu = None;
-                                                        this.chat_context_menu = Some(ChatContextMenu {
-                                                            chat_id: c_id.clone(),
-                                                            chat_name: c_name.clone(),
-                                                            is_pinned: pinned,
-                                                            is_archived: archived,
-                                                            is_muted: muted,
-                                                            position: ev.position,
-                                                            show_mute_submenu: false,
-                                                        });
-                                                        cx.notify();
-                                                    }
-                                                }),
-                                            )
-                                            // Selected Indicator Bar
-                                            .children(if is_selected {
-                                                Some(
-                                                    div()
-                                                        .absolute()
-                                                        .left(px(0.0))
-                                                        .top(px(16.0))
-                                                        .bottom(px(16.0))
-                                                        .w(px(3.5))
-                                                        .bg(primary_color)
-                                                        .rounded_r_full(),
-                                                )
-                                            } else {
-                                                None
-                                            })
-                                            // Real Profile Picture or Fallback Initial Avatar
-                                            .child(render_avatar(&chat.id, &chat.name, &chat.avatar, chat.is_group, 48.0, &base_url, &theme))
-                                            // Middle: Name & Clamped Last Msg
-                                            .child(
-                                                v_flex()
-                                                    .flex_1()
-                                                    .min_w(px(0.0))
+                                                let first_line = chat.last_msg.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+                                                let last_msg_snippet = if first_line.is_empty() {
+                                                    "Tap to chat".to_string()
+                                                } else {
+                                                    MessageBubbleHelper::decode_content(first_line)
+                                                };
+
+                                                let formatted_time = Self::format_chat_time(chat.last_time);
+                                                let unread = chat.unread;
+
+                                                let card = h_flex()
+                                                    .w_full()
+                                                    .h(px(72.0))
                                                     .overflow_hidden()
-                                                    .justify_center()
-                                                    .gap_0p5()
+                                                    .px_3()
+                                                    .py_2p5()
+                                                    .rounded_xl()
+                                                    .gap_3()
+                                                    .items_center()
+                                                    .cursor_pointer()
+                                                    .relative()
+                                                    .bg(if is_selected {
+                                                        theme.primary.opacity(0.12)
+                                                    } else {
+                                                        rgba(0x00000000).into()
+                                                    })
+                                                    .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        cx.listener({
+                                                            let cid = chat_id.clone();
+                                                            move |this, _, window, cx| {
+                                                                this.chat_context_menu = None;
+                                                                this.select_chat(cid.clone(), window, cx);
+                                                            }
+                                                        }),
+                                                    )
+                                                    .on_mouse_down(
+                                                        MouseButton::Right,
+                                                        cx.listener({
+                                                            let c_id = chat_id.clone();
+                                                            let c_name = chat.name.clone();
+                                                            let pinned = is_pinned;
+                                                            let archived = chat.archived;
+                                                            let muted = is_muted;
+                                                            move |this, ev: &MouseDownEvent, _, cx| {
+                                                                this.context_menu = None;
+                                                                this.chat_context_menu = Some(ChatContextMenu {
+                                                                    chat_id: c_id.clone(),
+                                                                    chat_name: c_name.clone(),
+                                                                    is_pinned: pinned,
+                                                                    is_archived: archived,
+                                                                    is_muted: muted,
+                                                                    position: ev.position,
+                                                                    show_mute_submenu: false,
+                                                                });
+                                                                cx.notify();
+                                                            }
+                                                        }),
+                                                    )
+                                                    // Contact Avatar
                                                     .child(
-                                                        h_flex()
-                                                            .items_center()
-                                                            .gap_1p5()
+                                                        div()
+                                                            .w(px(48.0))
+                                                            .h(px(48.0))
+                                                            .rounded_full()
+                                                            .flex_shrink_0()
+                                                            .overflow_hidden()
+                                                            .relative()
+                                                            .bg(avatar_color_for(&chat_id))
                                                             .child(
                                                                 div()
+                                                                    .size_full()
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_center()
+                                                                    .text_color(rgb(0xffffff))
+                                                                    .font_weight(FontWeight::BOLD)
                                                                     .text_sm()
-                                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                                    .text_color(text_color)
-                                                                    .overflow_hidden()
-                                                                    .child(chat.name.clone()),
+                                                                    .child(
+                                                                        chat.name
+                                                                            .chars()
+                                                                            .next()
+                                                                            .map(|c| c.to_uppercase().to_string())
+                                                                            .unwrap_or_else(|| "#".to_string()),
+                                                                    ),
                                                             )
-                                                            .children(if is_pinned {
+                                                            .children(if !chat.avatar.is_empty() {
+                                                                let a_url = resolve_avatar_url(&chat.avatar, &chat.id, &base_url);
                                                                 Some(
-                                                                    svg()
-                                                                        .data(PIN_SVG)
-                                                                        .size(px(12.0))
-                                                                        .text_color(muted_text),
-                                                                )
-                                                            } else {
-                                                                None
-                                                            })
-                                                            .children(if is_muted {
-                                                                Some(
-                                                                    svg()
-                                                                        .data(VOLUME_X_SVG)
-                                                                        .size(px(12.0))
-                                                                        .text_color(muted_text),
+                                                                    img(a_url)
+                                                                        .absolute()
+                                                                        .inset_0()
+                                                                        .size_full()
+                                                                        .rounded_full()
+                                                                        .object_fit(ObjectFit::Cover),
                                                                 )
                                                             } else {
                                                                 None
                                                             }),
                                                     )
+                                                    // Chat Title & Last Message
                                                     .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(if unread > 0 { text_color } else { muted_text })
-                                                            .font_weight(if unread > 0 { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
-                                                            .overflow_hidden()
-                                                            .child(last_msg_snippet),
-                                                    ),
-                                            )
-                                            // Right: Time & Unread Badge
-                                            .child(
-                                                v_flex()
-                                                    .items_end()
-                                                    .justify_center()
-                                                    .gap_1()
-                                                    .h_full()
-                                                    .flex_shrink_0()
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(if unread > 0 { rgb(0x00a884).into() } else { muted_text })
-                                                            .font_weight(if unread > 0 { FontWeight::BOLD } else { FontWeight::NORMAL })
-                                                            .child(formatted_time),
+                                                        v_flex()
+                                                            .flex_1()
+                                                            .min_w(px(0.0))
+                                                            .justify_center()
+                                                            .gap_0p5()
+                                                            .child(
+                                                                h_flex()
+                                                                    .items_center()
+                                                                    .gap_1p5()
+                                                                    .child(
+                                                                        div()
+                                                                            .flex_1()
+                                                                            .truncate()
+                                                                            .text_sm()
+                                                                            .font_weight(if unread > 0 { FontWeight::BOLD } else { FontWeight::MEDIUM })
+                                                                            .text_color(text_color)
+                                                                            .child(chat.name.clone()),
+                                                                    )
+                                                                    .children(if is_muted {
+                                                                        Some(
+                                                                            svg()
+                                                                                .data(VOLUME_X_SVG)
+                                                                                .size(px(13.0))
+                                                                                .text_color(muted_text)
+                                                                                .flex_shrink_0(),
+                                                                        )
+                                                                    } else {
+                                                                        None
+                                                                    })
+                                                                    .children(if is_pinned {
+                                                                        Some(
+                                                                            svg()
+                                                                                .data(PIN_SVG)
+                                                                                .size(px(12.0))
+                                                                                .text_color(muted_text)
+                                                                                .flex_shrink_0(),
+                                                                        )
+                                                                    } else {
+                                                                        None
+                                                                    }),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .truncate()
+                                                                    .text_xs()
+                                                                    .text_color(if unread > 0 { text_color } else { muted_text })
+                                                                    .child(last_msg_snippet),
+                                                            ),
                                                     )
-                                                    .children(if unread > 0 {
-                                                        Some(
-                                                            div()
-                                                                .px_1p5()
-                                                                .py_0p5()
-                                                                .min_w(px(18.0))
-                                                                .rounded_full()
-                                                                .bg(rgb(0x00a884))
-                                                                .text_xs()
-                                                                .font_weight(FontWeight::BOLD)
-                                                                .text_color(rgb(0xffffff))
-                                                                .flex()
-                                                                .items_center()
-                                                                .justify_center()
-                                                                .child(format!("{}", unread)),
-                                                        )
-                                                    } else {
-                                                        None
-                                                    }),
-                                            )
-                                            .into_any_element()
-                                    })
-                                    .collect()
-                            }),
-                            )
+                                                    // Timestamp & Unread Badge
+                                                    .child(
+                                                        v_flex()
+                                                            .items_end()
+                                                            .justify_center()
+                                                            .gap_1()
+                                                            .h_full()
+                                                            .flex_shrink_0()
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(if unread > 0 { rgb(0x00a884).into() } else { muted_text })
+                                                                    .font_weight(if unread > 0 { FontWeight::BOLD } else { FontWeight::NORMAL })
+                                                                    .child(formatted_time),
+                                                            )
+                                                            .children(if unread > 0 {
+                                                                Some(
+                                                                    div()
+                                                                        .px_1p5()
+                                                                        .py_0p5()
+                                                                        .min_w(px(18.0))
+                                                                        .rounded_full()
+                                                                        .bg(rgb(0x00a884))
+                                                                        .text_xs()
+                                                                        .font_weight(FontWeight::BOLD)
+                                                                        .text_color(rgb(0xffffff))
+                                                                        .flex()
+                                                                        .items_center()
+                                                                        .justify_center()
+                                                                        .child(format!("{}", unread)),
+                                                                )
+                                                            } else {
+                                                                None
+                                                            }),
+                                                    )
+                                                    .into_any_element();
+                                                items.push(card);
+                                            }
+                                        }
+                                        items
+                                    }),
+                                )
+                                .size_full()
+                                .p_2()
+                                .track_scroll(&self.chat_list_scroll_handle)
+                                .into_any_element()
+                            })
                             .child(
                                 Scrollbar::vertical(&self.chat_list_scroll_handle)
                                     .mode(ScrollbarMode::Hover)
@@ -1776,290 +1853,302 @@ impl Render for ChatView {
                                         .flex_1()
                                         .relative()
                                         .overflow_hidden()
-                                        .child(
+                                        .child(if is_loading_messages && self.cached_render_messages.is_empty() {
                                             v_flex()
-                                                .id("messages-scroll")
                                                 .size_full()
-                                                .overflow_y_scroll()
-                                                .track_scroll(&self.messages_scroll_handle)
                                                 .p_6()
-                                                .gap_3()
-                                                .children(if is_loading_messages && self.cached_render_messages.is_empty() {
-                                            vec![
-                                                v_flex()
-                                                    .py_16()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .gap_2()
-                                                    .child(Icon::new(IconName::LoaderCircle).size(px(24.)))
-                                                    .child(div().text_xs().text_color(muted_text).child("Loading messages..."))
-                                                    .into_any_element(),
-                                            ]
+                                                .child(
+                                                    v_flex()
+                                                        .py_16()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .gap_2()
+                                                        .child(Icon::new(IconName::LoaderCircle).size(px(24.)))
+                                                        .child(div().text_xs().text_color(muted_text).child("Loading messages..."))
+                                                )
+                                                .into_any_element()
                                         } else if self.cached_render_messages.is_empty() {
-                                            vec![
-                                                v_flex()
-                                                    .py_16()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .gap_2()
-                                                    .child(svg().data(MESSAGE_SQUARE_SVG).size(px(32.0)).text_color(muted_text))
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_color(text_color)
-                                                            .child("No messages in this chat yet"),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(muted_text)
-                                                            .child("Type a message below to start the conversation."),
-                                                    )
-                                                    .into_any_element(),
-                                            ]
-                                        } else {
-                                            let mut elements = Vec::new();
-                                            // Date separator badge matching Web: "TODAY"
-                                            elements.push(
-                                                h_flex()
-                                                    .w_full()
-                                                    .justify_center()
-                                                    .my_2()
-                                                    .child(
-                                                        div()
-                                                            .px_3()
-                                                            .py_1()
-                                                            .rounded_full()
-                                                            .bg(theme.muted.opacity(0.4))
-                                                            .text_xs()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(muted_text)
-                                                            .child("TODAY"),
-                                                    )
-                                                    .into_any_element(),
-                                            );
-
-                                            for r_msg in &self.cached_render_messages {
-                                                let is_from_me = r_msg.is_from_me;
-                                                let content = r_msg.content.clone();
-                                                let time_str = r_msg.time_str.clone();
-                                                let ticks = r_msg.ticks;
-                                                let quoted = r_msg.quoted.clone();
-                                                let msg_clone = r_msg.msg.clone();
-
-                                                let row = if is_from_me {
-                                                    h_flex().w_full().justify_end()
-                                                } else {
-                                                    h_flex().w_full().justify_start()
-                                                };
-
-                                                let msg_type = r_msg.msg.message_type.as_str();
-                                                let is_image = msg_type == "image" || (r_msg.msg.media_url.is_some() && (content == "[Image]" || content.is_empty()));
-                                                let is_sticker = msg_type == "sticker" || (r_msg.msg.media_url.is_some() && content == "[Sticker]");
-                                                let is_video = msg_type == "video" || (r_msg.msg.media_url.is_some() && content == "[Video]");
-
-                                                let is_dark_bg = theme.background.l < 0.5;
-                                                let (bubble_bg, bubble_text) = if is_sticker {
-                                                    (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
-                                                } else if is_dark_bg {
-                                                    if is_from_me {
-                                                        (rgb(0x005c4b), rgb(0xe9edef))
-                                                    } else {
-                                                        (rgb(0x202c33), rgb(0xe9edef))
-                                                    }
-                                                } else {
-                                                    if is_from_me {
-                                                        (rgb(0xdcf8c6), rgb(0x303030))
-                                                    } else {
-                                                        (rgb(0xffffff), rgb(0x303030))
-                                                    }
-                                                };
-
-                                                let bubble = v_flex()
-                                                    .max_w(px(520.0))
-                                                    .px_3p5()
-                                                    .py_2()
-                                                    .rounded_2xl()
-                                                    .bg(bubble_bg)
-                                                    .shadow_sm()
-                                                    .gap_1()
-                                                    // Right-click opens Context Menu popover!
-                                                    .on_mouse_down(
-                                                        MouseButton::Right,
-                                                        cx.listener({
-                                                            let m = msg_clone.clone();
-                                                            let me = is_from_me;
-                                                            move |this, ev: &MouseDownEvent, _, cx| {
-                                                                this.context_menu = Some(MessageContextMenu {
-                                                                    msg: m.clone(),
-                                                                    is_from_me: me,
-                                                                    position: ev.position,
-                                                                });
-                                                                cx.notify();
-                                                            }
-                                                        }),
-                                                    )
-                                                    // Sender name in group chat
-                                                    .children(if !is_from_me && r_msg.msg.sender_name.is_some() {
-                                                        Some(
+                                            v_flex()
+                                                .size_full()
+                                                .p_6()
+                                                .child(
+                                                    v_flex()
+                                                        .py_16()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .gap_2()
+                                                        .child(svg().data(MESSAGE_SQUARE_SVG).size(px(32.0)).text_color(muted_text))
+                                                        .child(
+                                                            div()
+                                                                .text_sm()
+                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                .text_color(text_color)
+                                                                .child("No messages in this chat yet"),
+                                                        )
+                                                        .child(
                                                             div()
                                                                 .text_xs()
-                                                                .font_weight(FontWeight::BOLD)
-                                                                .text_color(primary_color)
-                                                                .child(r_msg.msg.sender_name.clone().unwrap()),
+                                                                .text_color(muted_text)
+                                                                .child("Type a message below to start the conversation."),
                                                         )
+                                                )
+                                                .into_any_element()
+                                        } else {
+                                            list(
+                                                self.messages_list_state.clone(),
+                                                cx.processor(|this, index: usize, _window, cx| {
+                                                    let theme = cx.app_theme();
+                                                    let primary_color = theme.primary;
+                                                    let muted_text = theme.muted_foreground;
+                                                    let _text_color = theme.foreground;
+                                                    let base_url = if cx.has_global::<AuthState>() {
+                                                        AuthState::global(cx).base_url.clone()
                                                     } else {
-                                                        None
-                                                    })
-                                                    // Quoted reply box matching Web
-                                                    .children(if let Some((q_sender, q_line)) = quoted {
-                                                        Some(
-                                                            v_flex()
-                                                                .mb_1()
-                                                                .px_2p5()
-                                                                .py_1p5()
-                                                                .bg(theme.muted.opacity(0.35))
-                                                                .border_l_4()
-                                                                .border_color(primary_color)
-                                                                .rounded_r_lg()
-                                                                .overflow_hidden()
-                                                                .child(
+                                                        "http://127.0.0.1:3000/api".to_string()
+                                                    };
+
+                                                    if index == 0 {
+                                                        h_flex()
+                                                            .w_full()
+                                                            .justify_center()
+                                                            .py_2()
+                                                            .child(
+                                                                div()
+                                                                    .px_3()
+                                                                    .py_1()
+                                                                    .rounded_full()
+                                                                    .bg(theme.muted.opacity(0.4))
+                                                                    .text_xs()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(muted_text)
+                                                                    .child("TODAY"),
+                                                            )
+                                                            .into_any_element()
+                                                    } else if let Some(r_msg) = this.cached_render_messages.get(index - 1) {
+                                                        let is_from_me = r_msg.is_from_me;
+                                                        let content = r_msg.content.clone();
+                                                        let time_str = r_msg.time_str.clone();
+                                                        let ticks = r_msg.ticks;
+                                                        let quoted = r_msg.quoted.clone();
+                                                        let msg_clone = r_msg.msg.clone();
+
+                                                        let row = if is_from_me {
+                                                            h_flex().w_full().justify_end()
+                                                        } else {
+                                                            h_flex().w_full().justify_start()
+                                                        };
+
+                                                        let msg_type = r_msg.msg.message_type.as_str();
+                                                        let is_image = msg_type == "image" || (r_msg.msg.media_url.is_some() && (content == "[Image]" || content.is_empty()));
+                                                        let is_sticker = msg_type == "sticker" || (r_msg.msg.media_url.is_some() && content == "[Sticker]");
+                                                        let is_video = msg_type == "video" || (r_msg.msg.media_url.is_some() && content == "[Video]");
+
+                                                        let is_dark_bg = theme.background.l < 0.5;
+                                                        let (bubble_bg, bubble_text) = if is_sticker {
+                                                            (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
+                                                        } else if is_dark_bg {
+                                                            if is_from_me {
+                                                                (rgb(0x005c4b), rgb(0xe9edef))
+                                                            } else {
+                                                                (rgb(0x202c33), rgb(0xe9edef))
+                                                            }
+                                                        } else {
+                                                            if is_from_me {
+                                                                (rgb(0xdcf8c6), rgb(0x303030))
+                                                            } else {
+                                                                (rgb(0xffffff), rgb(0x303030))
+                                                            }
+                                                        };
+
+                                                        let bubble = v_flex()
+                                                            .max_w(px(520.0))
+                                                            .px_3p5()
+                                                            .py_2()
+                                                            .rounded_2xl()
+                                                            .bg(bubble_bg)
+                                                            .shadow_sm()
+                                                            .gap_1()
+                                                            // Right-click opens Context Menu popover!
+                                                            .on_mouse_down(
+                                                                MouseButton::Right,
+                                                                cx.listener({
+                                                                    let m = msg_clone.clone();
+                                                                    let me = is_from_me;
+                                                                    move |this, ev: &MouseDownEvent, _, cx| {
+                                                                        this.context_menu = Some(MessageContextMenu {
+                                                                            msg: m.clone(),
+                                                                            is_from_me: me,
+                                                                            position: ev.position,
+                                                                        });
+                                                                        cx.notify();
+                                                                    }
+                                                                }),
+                                                            )
+                                                            // Sender name in group chat
+                                                            .children(if !is_from_me && r_msg.msg.sender_name.is_some() {
+                                                                Some(
                                                                     div()
                                                                         .text_xs()
                                                                         .font_weight(FontWeight::BOLD)
                                                                         .text_color(primary_color)
-                                                                        .child(q_sender),
+                                                                        .child(r_msg.msg.sender_name.clone().unwrap()),
                                                                 )
-                                                                .child(
-                                                                    div()
-                                                                        .text_xs()
-                                                                        .text_color(muted_text)
+                                                            } else {
+                                                                None
+                                                            })
+                                                            // Quoted reply box matching Web
+                                                            .children(if let Some((q_sender, q_line)) = quoted {
+                                                                Some(
+                                                                    v_flex()
+                                                                        .mb_1()
+                                                                        .px_2p5()
+                                                                        .py_1p5()
+                                                                        .bg(theme.muted.opacity(0.35))
+                                                                        .border_l_4()
+                                                                        .border_color(primary_color)
+                                                                        .rounded_r_lg()
                                                                         .overflow_hidden()
-                                                                        .child(q_line),
-                                                                ),
-                                                        )
-                                                    } else {
-                                                        None
-                                                    })
-                                                    // Media attachment: Image or Sticker
-                                                    .children(if is_image {
-                                                        if let Some(ref m_url) = r_msg.msg.media_url {
-                                                            let full_url = resolve_media_url(m_url, &base_url);
-                                                            let click_url = full_url.clone();
-                                                            Some(
-                                                                div()
-                                                                    .mb_1p5()
-                                                                    .max_w(px(340.0))
-                                                                    .max_h(px(360.0))
-                                                                    .rounded_xl()
-                                                                    .overflow_hidden()
-                                                                    .cursor_pointer()
-                                                                    .on_mouse_down(MouseButton::Left, cx.listener({
-                                                                        let u = click_url.clone();
-                                                                        move |this, _, _, cx| {
-                                                                            this.preview_image_url = Some(u.clone());
-                                                                            cx.notify();
-                                                                        }
-                                                                    }))
-                                                                    .child(
-                                                                        img(full_url)
+                                                                        .child(
+                                                                            div()
+                                                                                .text_xs()
+                                                                                .font_weight(FontWeight::BOLD)
+                                                                                .text_color(primary_color)
+                                                                                .child(q_sender),
+                                                                        )
+                                                                        .child(
+                                                                            div()
+                                                                                .text_xs()
+                                                                                .text_color(muted_text)
+                                                                                .overflow_hidden()
+                                                                                .child(q_line),
+                                                                        ),
+                                                                )
+                                                            } else {
+                                                                None
+                                                            })
+                                                            // Media attachment: Image or Sticker
+                                                            .children(if is_image {
+                                                                if let Some(ref m_url) = r_msg.msg.media_url {
+                                                                    let full_url = resolve_media_url(m_url, &base_url);
+                                                                    let click_url = full_url.clone();
+                                                                    Some(
+                                                                        div()
+                                                                            .mb_1p5()
                                                                             .max_w(px(340.0))
                                                                             .max_h(px(360.0))
                                                                             .rounded_xl()
-                                                                            .object_fit(ObjectFit::Contain)
+                                                                            .overflow_hidden()
+                                                                            .cursor_pointer()
+                                                                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                                                                let u = click_url.clone();
+                                                                                move |this, _, _, cx| {
+                                                                                    this.preview_image_url = Some(u.clone());
+                                                                                    cx.notify();
+                                                                                }
+                                                                            }))
+                                                                            .child(
+                                                                                img(full_url)
+                                                                                    .max_w(px(340.0))
+                                                                                    .max_h(px(360.0))
+                                                                                    .rounded_xl()
+                                                                                    .object_fit(ObjectFit::Contain)
+                                                                            )
+                                                                            .into_any_element()
                                                                     )
-                                                                    .into_any_element()
-                                                            )
-                                                        } else {
-                                                            None
-                                                        }
-                                                    } else if is_sticker {
-                                                        if let Some(ref m_url) = r_msg.msg.media_url {
-                                                            let full_url = resolve_media_url(m_url, &base_url);
-                                                            Some(
-                                                                div()
-                                                                    .w(px(160.0))
-                                                                    .h(px(160.0))
-                                                                    .cursor_pointer()
-                                                                    .child(
-                                                                        img(full_url)
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            } else if is_sticker {
+                                                                if let Some(ref m_url) = r_msg.msg.media_url {
+                                                                    let full_url = resolve_media_url(m_url, &base_url);
+                                                                    Some(
+                                                                        div()
                                                                             .w(px(160.0))
                                                                             .h(px(160.0))
-                                                                            .object_fit(ObjectFit::Contain)
+                                                                            .cursor_pointer()
+                                                                            .child(
+                                                                                img(full_url)
+                                                                                    .w(px(160.0))
+                                                                                    .h(px(160.0))
+                                                                                    .object_fit(ObjectFit::Contain)
+                                                                            )
+                                                                            .into_any_element()
                                                                     )
-                                                                    .into_any_element()
-                                                            )
-                                                        } else {
-                                                            None
-                                                        }
-                                                    } else {
-                                                        None
-                                                    })
-                                                    // Message Body Text (hide placeholder if it's media without caption)
-                                                    .children({
-                                                        let is_media_placeholder = (is_image && (content == "[Image]" || content.is_empty()))
-                                                            || (is_sticker && (content == "[Sticker]" || content.is_empty()))
-                                                            || (is_video && (content == "[Video]" || content.is_empty()));
-                                                        if !content.is_empty() && !is_media_placeholder {
-                                                            Some(
-                                                                div()
-                                                                    .text_sm()
-                                                                    .text_color(bubble_text)
-                                                                    .child(content)
-                                                            )
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    // Bottom Right Timestamp & Checkmarks
-                                                    .child(
-                                                        h_flex()
-                                                            .w_full()
-                                                            .justify_end()
-                                                            .items_center()
-                                                            .gap_1()
-                                                            .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(bubble_text.opacity(0.6))
-                                                                    .child(time_str),
-                                                            )
-                                                            .children(if is_from_me {
-                                                                match ticks {
-                                                                    MessageTicks::Read => Some(
-                                                                        svg()
-                                                                            .data(CHECK_CHECK_SVG)
-                                                                            .size(px(14.0))
-                                                                            .text_color(rgb(0x53bdeb)),
-                                                                    ),
-                                                                    MessageTicks::Delivered => Some(
-                                                                        svg()
-                                                                            .data(CHECK_CHECK_SVG)
-                                                                            .size(px(14.0))
-                                                                            .text_color(bubble_text.opacity(0.6)),
-                                                                    ),
-                                                                    MessageTicks::Sent => Some(
-                                                                        svg()
-                                                                            .data(CHECK_SVG)
-                                                                            .size(px(14.0))
-                                                                            .text_color(bubble_text.opacity(0.6)),
-                                                                    ),
-                                                                    MessageTicks::None => None,
+                                                                } else {
+                                                                    None
                                                                 }
                                                             } else {
                                                                 None
-                                                            }),
-                                                    );
+                                                            })
+                                                            // Message Body Text (hide placeholder if it's media without caption)
+                                                            .children({
+                                                                let is_media_placeholder = (is_image && (content == "[Image]" || content.is_empty()))
+                                                                    || (is_sticker && (content == "[Sticker]" || content.is_empty()))
+                                                                    || (is_video && (content == "[Video]" || content.is_empty()));
+                                                                if !content.is_empty() && !is_media_placeholder {
+                                                                    Some(
+                                                                        div()
+                                                                            .text_sm()
+                                                                            .text_color(bubble_text)
+                                                                            .child(content)
+                                                                    )
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            })
+                                                            // Bottom Right Timestamp & Checkmarks
+                                                            .child(
+                                                                h_flex()
+                                                                    .w_full()
+                                                                    .justify_end()
+                                                                    .items_center()
+                                                                    .gap_1()
+                                                                    .child(
+                                                                        div()
+                                                                            .text_xs()
+                                                                            .text_color(bubble_text.opacity(0.6))
+                                                                            .child(time_str),
+                                                                    )
+                                                                    .children(if is_from_me {
+                                                                        match ticks {
+                                                                            MessageTicks::Read => Some(
+                                                                                svg()
+                                                                                    .data(CHECK_CHECK_SVG)
+                                                                                    .size(px(14.0))
+                                                                                    .text_color(rgb(0x53bdeb)),
+                                                                            ),
+                                                                            MessageTicks::Delivered => Some(
+                                                                                svg()
+                                                                                    .data(CHECK_CHECK_SVG)
+                                                                                    .size(px(14.0))
+                                                                                    .text_color(bubble_text.opacity(0.6)),
+                                                                            ),
+                                                                            MessageTicks::Sent => Some(
+                                                                                svg()
+                                                                                    .data(CHECK_SVG)
+                                                                                    .size(px(14.0))
+                                                                                    .text_color(bubble_text.opacity(0.6)),
+                                                                            ),
+                                                                            MessageTicks::None => None,
+                                                                        }
+                                                                    } else {
+                                                                        None
+                                                                    }),
+                                                            );
 
-                                                elements.push(row.child(bubble).into_any_element());
-                                            }
-
-                                             elements
-                                        }),
-                                        )
+                                                        row.child(bubble).pb_3().into_any_element()
+                                                    } else {
+                                                        div().into_any_element()
+                                                    }
+                                                }),
+                                            )
+                                            .size_full()
+                                            .px_6()
+                                            .py_4()
+                                            .into_any_element()
+                                        })
                                         .child(
-                                            Scrollbar::vertical(&self.messages_scroll_handle)
+                                            Scrollbar::vertical(&self.messages_list_state)
                                                 .mode(ScrollbarMode::Always)
                                                 .styles(|s| {
                                                     s.track(|t| t.bg(transparent_black()))
@@ -3027,7 +3116,11 @@ impl Render for ChatView {
             // MODAL: NEW GROUP DIALOG
             // ====================================================
             .children(if self.is_new_group_open {
-                let contacts: Vec<Chat> = all_chats.iter().filter(|c| !c.is_group && !c.archived).cloned().collect();
+                let contacts: Vec<Chat> = if cx.has_global::<ChatStore>() {
+                    ChatStore::global(cx).chats.iter().filter(|c| !c.is_group && !c.archived).cloned().collect()
+                } else {
+                    Vec::new()
+                };
                 Some(
                     div()
                         .absolute()

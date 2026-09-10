@@ -36,6 +36,7 @@ pub struct ChatStore {
     pub chats: Vec<Chat>,
     pub chats_loaded: bool,
     pub chats_loading: bool,
+    pub chats_version: u64,
     pub messages_by_chat: HashMap<String, ChatMessagesEntry>,
     pub active_chat_id: Option<String>,
     pub peer_presence: HashMap<String, String>, // chat_id -> presence string (e.g. "available", "composing")
@@ -63,9 +64,11 @@ impl ChatStore {
         self.chats = chats;
         self.chats_loaded = true;
         self.chats_loading = false;
+        self.chats_version = self.chats_version.wrapping_add(1);
     }
 
     pub fn upsert_chat(&mut self, chat: Chat) {
+        self.chats_version = self.chats_version.wrapping_add(1);
         if let Some(pos) = self.chats.iter().position(|c| c.id == chat.id) {
             let existing = &self.chats[pos];
             let last_changed = (!chat.last_msg.is_empty() && chat.last_msg != existing.last_msg)
@@ -100,6 +103,7 @@ impl ChatStore {
     }
 
     pub fn patch_chat_state(&mut self, state: &ChatState) {
+        self.chats_version = self.chats_version.wrapping_add(1);
         if let Some(chat) = self.chats.iter_mut().find(|c| c.id == state.chat_id) {
             chat.archived = state.archived;
             chat.pinned_at = state.pinned_at;
@@ -210,6 +214,7 @@ impl ChatStore {
     pub fn mark_chat_read(&mut self, chat_id: &str) {
         if let Some(chat) = self.chats.iter_mut().find(|c| c.id == chat_id) {
             chat.unread = 0;
+            self.chats_version = self.chats_version.wrapping_add(1);
         }
     }
 
@@ -244,6 +249,7 @@ impl ChatStore {
                     };
                     self.chats.insert(0, new_chat);
                 }
+                self.chats_version = self.chats_version.wrapping_add(1);
                 true
             }
             WsEvent::MessageStatus { chat_id, id, status } => {
@@ -273,6 +279,7 @@ impl ChatStore {
             WsEvent::ChatNameUpdate { chat_id, name } => {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
                     chat.name = name.clone();
+                    self.chats_version = self.chats_version.wrapping_add(1);
                     true
                 } else {
                     false
