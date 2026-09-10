@@ -1,7 +1,8 @@
 //! Channels view matching Web ChannelsPage 1:1.
 
 use gpui::*;
-use gpui_component::{h_flex, v_flex};
+use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{Channel, ChannelMessage, ChannelPreview};
 
@@ -89,6 +90,7 @@ pub struct ChannelsView {
     is_loading: bool,
     selected_channel: Option<Channel>,
     posts: Vec<ChannelMessage>,
+    posts_list_state: ListState,
     is_loading_posts: bool,
     is_loading_more: bool,
     has_more: bool,
@@ -112,6 +114,7 @@ impl ChannelsView {
             is_loading: true,
             selected_channel: None,
             posts: Vec::new(),
+            posts_list_state: ListState::new(0, ListAlignment::Top, px(120.0)),
             is_loading_posts: false,
             is_loading_more: false,
             has_more: false,
@@ -167,6 +170,7 @@ impl ChannelsView {
     pub fn select_channel(&mut self, channel: Channel, cx: &mut Context<Self>) {
         self.selected_channel = Some(channel.clone());
         self.posts.clear();
+        self.posts_list_state.reset(0);
         self.is_loading_posts = true;
         self.has_more = false;
         cx.notify();
@@ -195,6 +199,9 @@ impl ChannelsView {
                                 msgs.sort_by_key(|m| m.server_id);
                                 this.has_more = msgs.len() == 30;
                                 this.posts = msgs;
+                                let total_items = if this.posts.is_empty() { 0 } else { this.posts.len() + 1 };
+                                this.posts_list_state.reset(total_items);
+                                this.posts_list_state.scroll_to_end();
                             }
                             cx.notify();
                         });
@@ -238,12 +245,19 @@ impl ChannelsView {
                             this.is_loading_more = false;
                             if let Ok(Ok(older)) = res {
                                 this.has_more = older.len() == 30;
+                                let prev_count = this.posts.len();
                                 for p in older {
                                     if !this.posts.iter().any(|existing| existing.id == p.id) {
                                         this.posts.insert(0, p);
                                     }
                                 }
                                 this.posts.sort_by_key(|m| m.server_id);
+                                let total_items = if this.posts.is_empty() { 0 } else { this.posts.len() + 1 };
+                                let new_items_added = this.posts.len().saturating_sub(prev_count);
+                                this.posts_list_state.reset(total_items);
+                                if new_items_added > 0 {
+                                    this.posts_list_state.scroll_to_reveal_item(new_items_added + 1);
+                                }
                             }
                             cx.notify();
                         });
@@ -295,6 +309,7 @@ impl ChannelsView {
         self.selected_channel = None;
         self.confirm_unfollow = false;
         self.posts.clear();
+        self.posts_list_state.reset(0);
         self.toast_message = Some("Unfollowed channel".to_string());
         cx.notify();
 
@@ -826,168 +841,216 @@ impl Render for ChannelsView {
                                                 ),
                                         ),
                                 )
-                                // Posts Stream Feed
+                                // Posts Stream Feed with 60fps virtualization and visual scrollbar
                                 .child(
-                                    v_flex()
-                                        .id("channel-posts-scroll")
+                                    div()
                                         .flex_1()
-                                        .overflow_y_scroll()
-                                        .px_6()
-                                        .py_4()
-                                        .gap_4()
-                                        .children(if self.is_loading_posts {
-                                            Some(
-                                                div()
-                                                    .py_12()
-                                                    .flex()
-                                                    .justify_center()
-                                                    .text_sm()
-                                                    .text_color(muted_text)
-                                                    .child("Loading posts…"),
-                                            )
-                                        } else if self.posts.is_empty() {
-                                            Some(
-                                                div()
-                                                    .py_16()
-                                                    .flex()
-                                                    .justify_center()
-                                                    .text_sm()
-                                                    .text_color(muted_text.opacity(0.6))
-                                                    .child("No posts yet"),
-                                            )
-                                        } else {
-                                            None
-                                        })
-                                        // Load older posts button
-                                        .children(if self.has_more && !self.is_loading_posts {
-                                            Some(
-                                                h_flex()
-                                                    .justify_center()
-                                                    .py_2()
-                                                    .child(
-                                                        div()
-                                                            .cursor_pointer()
-                                                            .px_4()
-                                                            .py_1p5()
-                                                            .rounded_full()
-                                                            .border_1()
-                                                            .border_color(border_color)
-                                                            .text_xs()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(text_color)
-                                                            .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                            .child(if self.is_loading_more { "Loading…" } else { "Load older posts" })
-                                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                                this.load_more_posts(cx);
-                                                            })),
-                                                    ),
-                                            )
-                                        } else {
-                                            None
-                                        })
-                                        // Posts Cards
-                                        .children(self.posts.iter().map(|post| {
-                                            let time_str = format!("{} at {}", format_post_date(post.timestamp), format_post_time(post.timestamp));
-                                            let post_id = post.id.clone();
-                                            let server_id = post.server_id;
-                                            let reactions_map = post.reactions.clone().unwrap_or_default();
-                                            let content = post.content.clone().unwrap_or_default();
-
+                                        .relative()
+                                        .overflow_hidden()
+                                        .child(if self.is_loading_posts && self.posts.is_empty() {
                                             v_flex()
-                                                .id(SharedString::from(format!("ch-post-{}", post.id)))
-                                                .max_w(px(600.0))
-                                                .p_4()
-                                                .rounded_2xl()
-                                                .bg(card_bg)
-                                                .border_1()
-                                                .border_color(border_color)
-                                                .shadow_sm()
-                                                .gap_2p5()
-                                                // Post Header & Timestamp
-                                                .child(
-                                                    h_flex()
-                                                        .justify_between()
-                                                        .items_center()
-                                                        .child(
-                                                            div()
-                                                                .text_xs()
-                                                                .font_weight(FontWeight::BOLD)
-                                                                .text_color(theme.primary)
-                                                                .child(channel.name.clone()),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .text_xs()
-                                                                .text_color(muted_text)
-                                                                .child(time_str),
-                                                        ),
-                                                )
-                                                // Post Text Content
-                                                .child(
-                                                    div()
-                                                        .text_sm()
-                                                        .text_color(text_color)
-                                                        .line_height(relative(1.4))
-                                                        .child(content),
-                                                )
-                                                // Post Meta & Reactions Row
-                                                .child(
-                                                    h_flex()
-                                                        .justify_between()
-                                                        .items_center()
-                                                        .pt_1()
-                                                        .border_t_1()
-                                                        .border_color(border_color.opacity(0.5))
-                                                        .child(
+                                                .size_full()
+                                                .items_center()
+                                                .justify_center()
+                                                .gap_2()
+                                                .child(Icon::new(IconName::LoaderCircle).size(px(24.0)))
+                                                .child(div().text_xs().text_color(muted_text).child("Loading posts…"))
+                                                .into_any_element()
+                                        } else if self.posts.is_empty() {
+                                            v_flex()
+                                                .size_full()
+                                                .items_center()
+                                                .justify_center()
+                                                .gap_2()
+                                                .child(svg().data(MEGAPHONE_SVG).size(px(36.0)).text_color(muted_text.opacity(0.5)))
+                                                .child(div().text_sm().text_color(muted_text).child("No posts yet"))
+                                                .into_any_element()
+                                        } else {
+                                            list(
+                                                self.posts_list_state.clone(),
+                                                cx.processor(|this, index: usize, _window, cx| {
+                                                    let theme = *cx.app_theme();
+                                                    let border_color = theme.border;
+                                                    let text_color = theme.foreground;
+                                                    let muted_text = theme.muted_foreground;
+                                                    let card_bg = theme.card;
+                                                    let primary_color = theme.primary;
+
+                                                    // Auto-load older posts when user scrolls near top
+                                                    if index <= 1 && this.has_more && !this.is_loading_more && !this.is_loading_posts {
+                                                        this.load_more_posts(cx);
+                                                    }
+
+                                                    if index == 0 {
+                                                        if this.has_more {
                                                             h_flex()
-                                                                .items_center()
-                                                                .gap_1()
-                                                                .child(svg().data(EYE_SVG).size(px(14.0)).text_color(muted_text))
+                                                                .w_full()
+                                                                .justify_center()
+                                                                .py_3()
                                                                 .child(
                                                                     div()
+                                                                        .cursor_pointer()
+                                                                        .px_4()
+                                                                        .py_1p5()
+                                                                        .rounded_full()
+                                                                        .border_1()
+                                                                        .border_color(border_color)
                                                                         .text_xs()
-                                                                        .text_color(muted_text)
-                                                                        .child(format!("{}", post.views_count)),
-                                                                ),
-                                                        )
-                                                        // Reactions Chips
-                                                        .child(
+                                                                        .font_weight(FontWeight::MEDIUM)
+                                                                        .text_color(text_color)
+                                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                                        .child(if this.is_loading_more { "Loading…" } else { "Load older posts" })
+                                                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                                            this.load_more_posts(cx);
+                                                                        })),
+                                                                )
+                                                                .into_any_element()
+                                                        } else {
                                                             h_flex()
-                                                                .items_center()
-                                                                .gap_1p5()
-                                                                .children(reactions_map.iter().map(|(emoji, count)| {
-                                                                    h_flex()
-                                                                        .px_2()
-                                                                        .py_0p5()
+                                                                .w_full()
+                                                                .justify_center()
+                                                                .py_3()
+                                                                .child(
+                                                                    div()
+                                                                        .px_3()
+                                                                        .py_1()
                                                                         .rounded_full()
                                                                         .bg(theme.muted.opacity(0.4))
-                                                                        .gap_1()
-                                                                        .items_center()
-                                                                        .child(div().text_xs().child(emoji.clone()))
-                                                                        .child(div().text_xs().text_color(muted_text).child(format!("{count}")))
-                                                                }))
-                                                                // Quick Reactions Buttons
-                                                                .child(
-                                                                    h_flex()
-                                                                        .gap_1()
-                                                                        .pl_2()
-                                                                        .children(QUICK_REACTIONS.iter().map(|&emo| {
-                                                                            let pid = post_id.clone();
-                                                                            div()
-                                                                                .cursor_pointer()
-                                                                                .px_1p5()
-                                                                                .py_0p5()
-                                                                                .rounded_md()
-                                                                                .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                                                .child(div().text_xs().child(emo))
-                                                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                                                    this.react_message(pid.clone(), server_id, emo, cx);
-                                                                                }))
-                                                                        })),
-                                                                ),
-                                                        ),
-                                                )
-                                        })),
+                                                                        .text_xs()
+                                                                        .font_weight(FontWeight::MEDIUM)
+                                                                        .text_color(muted_text)
+                                                                        .child("Beginning of channel updates"),
+                                                                )
+                                                                .into_any_element()
+                                                        }
+                                                    } else if let Some(post) = this.posts.get(index - 1) {
+                                                        let time_str = format!("{} at {}", format_post_date(post.timestamp), format_post_time(post.timestamp));
+                                                        let post_id = post.id.clone();
+                                                        let server_id = post.server_id;
+                                                        let reactions_map = post.reactions.clone().unwrap_or_default();
+                                                        let content = post.content.clone().unwrap_or_default();
+                                                        let channel_name = this.selected_channel.as_ref().map(|c| c.name.clone()).unwrap_or_default();
+
+                                                        v_flex()
+                                                            .w_full()
+                                                            .px_6()
+                                                            .pb_4()
+                                                            .items_center()
+                                                            .child(
+                                                                v_flex()
+                                                                    .w_full()
+                                                                    .max_w(px(600.0))
+                                                                    .p_4()
+                                                                    .rounded_2xl()
+                                                                    .bg(card_bg)
+                                                                    .border_1()
+                                                                    .border_color(border_color)
+                                                                    .shadow_sm()
+                                                                    .gap_2p5()
+                                                                    // Post Header & Timestamp
+                                                                    .child(
+                                                                        h_flex()
+                                                                            .justify_between()
+                                                                            .items_center()
+                                                                            .child(
+                                                                                div()
+                                                                                    .text_xs()
+                                                                                    .font_weight(FontWeight::BOLD)
+                                                                                    .text_color(primary_color)
+                                                                                    .child(channel_name),
+                                                                            )
+                                                                            .child(
+                                                                                div()
+                                                                                    .text_xs()
+                                                                                    .text_color(muted_text)
+                                                                                    .child(time_str),
+                                                                            ),
+                                                                    )
+                                                                    // Post Text Content
+                                                                    .child(
+                                                                        div()
+                                                                            .text_sm()
+                                                                            .text_color(text_color)
+                                                                            .line_height(relative(1.4))
+                                                                            .child(content),
+                                                                    )
+                                                                    // Post Meta & Reactions Row
+                                                                    .child(
+                                                                        h_flex()
+                                                                            .justify_between()
+                                                                            .items_center()
+                                                                            .pt_1()
+                                                                            .border_t_1()
+                                                                            .border_color(border_color.opacity(0.5))
+                                                                            .child(
+                                                                                h_flex()
+                                                                                    .items_center()
+                                                                                    .gap_1()
+                                                                                    .child(svg().data(EYE_SVG).size(px(14.0)).text_color(muted_text))
+                                                                                    .child(
+                                                                                        div()
+                                                                                            .text_xs()
+                                                                                            .text_color(muted_text)
+                                                                                            .child(format!("{}", post.views_count)),
+                                                                                    ),
+                                                                            )
+                                                                            // Reactions Chips
+                                                                            .child(
+                                                                                h_flex()
+                                                                                    .items_center()
+                                                                                    .gap_1p5()
+                                                                                    .children(reactions_map.iter().map(|(emoji, count)| {
+                                                                                        h_flex()
+                                                                                            .px_2()
+                                                                                            .py_0p5()
+                                                                                            .rounded_full()
+                                                                                            .bg(theme.muted.opacity(0.4))
+                                                                                            .gap_1()
+                                                                                            .items_center()
+                                                                                            .child(div().text_xs().child(emoji.clone()))
+                                                                                            .child(div().text_xs().text_color(muted_text).child(format!("{count}")))
+                                                                                    }))
+                                                                                    // Quick Reactions Buttons
+                                                                                    .child(
+                                                                                        h_flex()
+                                                                                            .gap_1()
+                                                                                            .pl_2()
+                                                                                            .children(QUICK_REACTIONS.iter().map(|&emo| {
+                                                                                                let pid = post_id.clone();
+                                                                                                div()
+                                                                                                    .cursor_pointer()
+                                                                                                    .px_1p5()
+                                                                                                    .py_0p5()
+                                                                                                    .rounded_md()
+                                                                                                    .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                                                                    .child(div().text_xs().child(emo))
+                                                                                                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                                                                        this.react_message(pid.clone(), server_id, emo, cx);
+                                                                                                    }))
+                                                                                            })),
+                                                                                    ),
+                                                                            ),
+                                                                    ),
+                                                            )
+                                                            .into_any_element()
+                                                    } else {
+                                                        div().into_any_element()
+                                                    }
+                                                })
+                                            )
+                                            .size_full()
+                                            .into_any_element()
+                                        })
+                                        .child(
+                                            Scrollbar::vertical(&self.posts_list_state)
+                                                .mode(ScrollbarMode::Always)
+                                                .styles(|s| {
+                                                    s.track(|t| t.bg(transparent_black()))
+                                                        .thumb(|th| th.bg(theme.muted_foreground.opacity(0.35)).radius(px(3.0)).width(px(6.0)))
+                                                        .thumb_hover(|th| th.bg(theme.muted_foreground.opacity(0.65)).radius(px(4.0)).width(px(8.0)))
+                                                        .thumb_active(|th| th.bg(theme.primary.opacity(0.8)).radius(px(4.0)).width(px(8.0)))
+                                                }),
+                                        ),
                                 )
                                 // Bottom One-Way Channel Notice Footer
                                 .child(

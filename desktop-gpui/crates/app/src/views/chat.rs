@@ -7,7 +7,7 @@ use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
-use wabot_backend_client::dto::{Chat, Message};
+use wabot_backend_client::dto::{CallType, Chat, Message};
 
 use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
@@ -799,6 +799,79 @@ impl ChatView {
                         view.update(cx, |this, cx| {
                             if let Ok(Ok(links)) = res {
                                 this.info_links = links;
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Initiate voice or video call matching Web client parity
+    pub fn start_call(&mut self, is_video: bool, cx: &mut Context<Self>) {
+        let chat_id = match &self.selected_chat_id {
+            Some(id) => id.clone(),
+            None => return,
+        };
+
+        let is_group = chat_id.ends_with("@g.us") || if cx.has_global::<ChatStore>() {
+            ChatStore::global(cx).chats.iter().find(|c| c.id == chat_id).map(|c| c.is_group).unwrap_or(false)
+        } else {
+            false
+        };
+
+        let chat_name = if cx.has_global::<ChatStore>() {
+            ChatStore::global(cx).chats.iter().find(|c| c.id == chat_id).map(|c| c.name.clone()).unwrap_or_else(|| chat_id.clone())
+        } else {
+            chat_id.clone()
+        };
+
+        let call_type = match (is_group, is_video) {
+            (true, true) => CallType::GroupVideo,
+            (true, false) => CallType::GroupAudio,
+            (false, true) => CallType::Video,
+            (false, false) => CallType::Audio,
+        };
+
+        let call_label = if is_video { "video call" } else { "voice call" };
+        self.toast_message = Some((format!("Starting {} with {}…", call_label, chat_name), false));
+        cx.notify();
+
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+
+        let cid = chat_id.clone();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT.spawn(async move {
+                    if is_group {
+                        client.create_group_call(&cid, &[], call_type).await
+                    } else {
+                        client.create_call(&cid, call_type).await
+                    }
+                }).await;
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(call_state)) => {
+                                    this.toast_message = Some((format!("Call initiated ({})", call_state.id), false));
+                                }
+                                Ok(Err(e)) => {
+                                    this.toast_message = Some((format!("Failed to start call: {e}"), true));
+                                }
+                                Err(_) => {
+                                    this.toast_message = Some(("Failed to start call".to_string(), true));
+                                }
                             }
                             cx.notify();
                         });
@@ -2598,7 +2671,8 @@ impl Render for ChatView {
                                                 ),
                                         )
                                         // Header Action Icons matching Web: Phone, Video, Search, More
-                                        .child(
+                                        .child({
+                                            let is_group_chat = active_chat.is_group;
                                             h_flex()
                                                 .items_center()
                                                 .gap_1()
@@ -2610,12 +2684,11 @@ impl Render for ChatView {
                                                         .rounded_full()
                                                         .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                                         .tooltip(move |window, cx| {
-                                                            Tooltip::new("Voice call").build(window, cx)
+                                                            Tooltip::new(if is_group_chat { "Group voice call" } else { "Voice call" }).build(window, cx)
                                                         })
                                                         .child(svg().data(PHONE_SVG).size(px(18.0)).text_color(muted_text))
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                            this.toast_message = Some(("Voice call is handled via WhatsApp Web".into(), false));
-                                                            cx.notify();
+                                                            this.start_call(false, cx);
                                                         })),
                                                 )
                                                 .child(
@@ -2626,12 +2699,11 @@ impl Render for ChatView {
                                                         .rounded_full()
                                                         .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                                         .tooltip(move |window, cx| {
-                                                            Tooltip::new("Video call").build(window, cx)
+                                                            Tooltip::new(if is_group_chat { "Group video call" } else { "Video call" }).build(window, cx)
                                                         })
                                                         .child(svg().data(VIDEO_SVG).size(px(18.0)).text_color(muted_text))
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                            this.toast_message = Some(("Video call is handled via WhatsApp Web".into(), false));
-                                                            cx.notify();
+                                                            this.start_call(true, cx);
                                                         })),
                                                 )
                                                 .child(
@@ -2663,8 +2735,8 @@ impl Render for ChatView {
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                             this.toggle_info_sheet(cx);
                                                         })),
-                                                ),
-                                        ),
+                                                )
+                                        }),
                                 )
                                 // Messages History View (Optimized for 60fps scrolling) with visual scrollbar
                                 .child(
