@@ -244,6 +244,10 @@ pub struct ChatView {
     pub is_sending: bool,
     pub is_loading_chats: bool,
     pub is_loading_messages: bool,
+    pub is_loading_more: bool,
+    pub is_loading_newer: bool,
+    pub has_more: bool,
+    pub has_more_next: bool,
     pub toast_message: Option<(String, bool)>, // (message, is_error)
 
     // Cached filtered chats for zero-allocation scrolling
@@ -312,6 +316,10 @@ impl ChatView {
             is_sending: false,
             is_loading_chats: false,
             is_loading_messages: false,
+            is_loading_more: false,
+            is_loading_newer: false,
+            has_more: true,
+            has_more_next: false,
             toast_message: None,
 
             cached_filtered_chats: Vec::new(),
@@ -407,6 +415,10 @@ impl ChatView {
         self.search_sheet_query.clear();
         self.search_sheet_results.clear();
         self.is_searching_messages = false;
+        self.is_loading_more = false;
+        self.is_loading_newer = false;
+        self.has_more = true;
+        self.has_more_next = false;
         self.highlighted_message_id = None;
         self.messages_list_state.scroll_to_end();
 
@@ -478,6 +490,45 @@ impl ChatView {
         self.messages_list_state.scroll_to_end();
     }
 
+    /// Rebuild cached render messages without jumping to bottom (preserves scroll position)
+    fn rebuild_message_cache_preserve_scroll(&mut self, chat_id: &str, msgs: &[Message]) {
+        let mut lookup = std::collections::HashMap::new();
+        for m in msgs {
+            let sender = if m.from == "me" {
+                "You".to_string()
+            } else {
+                m.sender_name.clone().unwrap_or_else(|| "Sender".to_string())
+            };
+            let decoded = MessageBubbleHelper::decode_content(&m.content);
+            let first_line = decoded.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+            lookup.insert(m.id.clone(), (sender, first_line));
+        }
+
+        self.cached_chat_id = Some(chat_id.to_string());
+        self.cached_render_messages = msgs
+            .iter()
+            .map(|m| {
+                let is_from_me = MessageBubbleHelper::is_from_me(m, "me");
+                let content = MessageBubbleHelper::decode_content(&m.content);
+                let time_str = Self::format_chat_time(m.timestamp);
+                let ticks = MessageBubbleHelper::ticks(m, is_from_me);
+                let quoted = m.reply_to_id.as_ref().and_then(|rid| lookup.get(rid).cloned());
+
+                RenderMessage {
+                    msg: m.clone(),
+                    is_from_me,
+                    content,
+                    time_str,
+                    ticks,
+                    quoted,
+                }
+            })
+            .collect();
+
+        let total_items = if self.cached_render_messages.is_empty() { 0 } else { self.cached_render_messages.len() + 1 };
+        self.messages_list_state.reset(total_items);
+    }
+
     /// Fetch messages for a specific chat from GET /api/chats/:id/messages
     pub fn load_messages(&mut self, chat_id: &str, cx: &mut Context<Self>) {
         let base_url = if cx.has_global::<AuthState>() {
@@ -503,10 +554,133 @@ impl ChatView {
                         view.update(cx, |this, cx| {
                             this.is_loading_messages = false;
                             if let Ok(Ok(msgs)) = res {
+                                this.has_more = msgs.len() >= 100;
+                                this.has_more_next = false;
                                 this.rebuild_message_cache(&cid, &msgs);
                                 if cx.has_global::<ChatStore>() {
-                                    let has_more = msgs.len() >= 100;
-                                    ChatStore::global_mut(cx).set_messages(&cid, msgs, has_more);
+                                    ChatStore::global_mut(cx).set_messages(&cid, msgs, this.has_more);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Load older messages when scrolling near the top (paginating backwards)
+    pub fn load_older_messages(&mut self, cx: &mut Context<Self>) {
+        if self.is_loading_more || !self.has_more {
+            return;
+        }
+        let chat_id = match &self.selected_chat_id {
+            Some(id) => id.clone(),
+            None => return,
+        };
+        let oldest_ts = self.cached_render_messages.first().map(|m| m.msg.timestamp).unwrap_or(0);
+        if oldest_ts == 0 {
+            return;
+        }
+        self.is_loading_more = true;
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        let cid = chat_id.clone();
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            let cid_fetch = cid.clone();
+            let cid_async = cid_fetch.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.get_messages(&cid_async, Some(40), Some(oldest_ts), None).await })
+                    .await;
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_loading_more = false;
+                            if let Ok(Ok(older_msgs)) = res {
+                                if older_msgs.is_empty() {
+                                    this.has_more = false;
+                                } else {
+                                    this.has_more = older_msgs.len() >= 40;
+                                    let mut all_msgs = older_msgs;
+                                    for rm in &this.cached_render_messages {
+                                        all_msgs.push(rm.msg.clone());
+                                    }
+                                    all_msgs.sort_by_key(|m| m.timestamp);
+                                    all_msgs.dedup_by(|a, b| a.id == b.id);
+                                    this.rebuild_message_cache_preserve_scroll(&cid_fetch, &all_msgs);
+                                    if cx.has_global::<ChatStore>() {
+                                        ChatStore::global_mut(cx).set_messages(&cid_fetch, all_msgs, this.has_more);
+                                    }
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Load newer messages when scrolling near the bottom (after jumping to an older historical message)
+    pub fn load_newer_messages(&mut self, cx: &mut Context<Self>) {
+        if self.is_loading_newer || !self.has_more_next {
+            return;
+        }
+        let chat_id = match &self.selected_chat_id {
+            Some(id) => id.clone(),
+            None => return,
+        };
+        let newest_ts = self.cached_render_messages.last().map(|m| m.msg.timestamp).unwrap_or(0);
+        if newest_ts == 0 {
+            return;
+        }
+        self.is_loading_newer = true;
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        let cid = chat_id.clone();
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            let cid_fetch = cid.clone();
+            let cid_async = cid_fetch.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.get_messages(&cid_async, Some(40), None, Some(newest_ts)).await })
+                    .await;
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_loading_newer = false;
+                            if let Ok(Ok(newer_msgs)) = res {
+                                if newer_msgs.is_empty() {
+                                    this.has_more_next = false;
+                                } else {
+                                    this.has_more_next = newer_msgs.len() >= 40;
+                                    let mut all_msgs: Vec<Message> = this.cached_render_messages.iter().map(|rm| rm.msg.clone()).collect();
+                                    all_msgs.extend(newer_msgs);
+                                    all_msgs.sort_by_key(|m| m.timestamp);
+                                    all_msgs.dedup_by(|a, b| a.id == b.id);
+                                    this.rebuild_message_cache_preserve_scroll(&cid_fetch, &all_msgs);
+                                    if cx.has_global::<ChatStore>() {
+                                        ChatStore::global_mut(cx).set_messages(&cid_fetch, all_msgs, this.has_more);
+                                    }
                                 }
                             }
                             cx.notify();
@@ -806,6 +980,8 @@ impl ChatView {
                             if let Ok(Ok(mut msgs)) = res {
                                 if !msgs.is_empty() {
                                     msgs.sort_by_key(|m| m.timestamp);
+                                    this.has_more = true;
+                                    this.has_more_next = true;
                                     this.rebuild_message_cache(&cid, &msgs);
                                     if cx.has_global::<ChatStore>() {
                                         ChatStore::global_mut(cx).set_messages(&cid, msgs, true);
@@ -2537,7 +2713,7 @@ impl Render for ChatView {
                                             list(
                                                 self.messages_list_state.clone(),
                                                 cx.processor(|this, index: usize, _window, cx| {
-                                                    let theme = cx.app_theme();
+                                                    let theme = *cx.app_theme();
                                                     let primary_color = theme.primary;
                                                     let muted_text = theme.muted_foreground;
                                                     let _text_color = theme.foreground;
@@ -2546,6 +2722,15 @@ impl Render for ChatView {
                                                     } else {
                                                         "http://127.0.0.1:3000/api".to_string()
                                                     };
+
+                                                    // Auto-load older messages when user scrolls near top
+                                                    if index <= 2 && this.has_more && !this.is_loading_more && !this.is_loading_messages {
+                                                        this.load_older_messages(cx);
+                                                    }
+                                                    // Auto-load newer messages when user scrolls near bottom
+                                                    if index + 3 >= this.cached_render_messages.len() && this.has_more_next && !this.is_loading_newer && !this.is_loading_messages {
+                                                        this.load_newer_messages(cx);
+                                                    }
 
                                                     if index == 0 {
                                                         h_flex()
