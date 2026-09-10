@@ -35,7 +35,7 @@ impl RenderOnce for NavigationSidebar {
             .h_full()
             .bg(theme.background)
             .border_r_1()
-            .border_color(theme.border)
+            .border_color(theme.border.opacity(0.4))
             .items_center()
             .py_6()
             .flex_shrink_0()

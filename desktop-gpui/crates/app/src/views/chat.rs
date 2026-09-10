@@ -992,16 +992,14 @@ impl Render for ChatView {
                     .w(px(360.0))
                     .h_full()
                     .border_r_1()
-                    .border_color(border_color)
-                    .bg(card_bg)
+                    .border_color(border_color.opacity(0.4))
+                    .bg(bg_color)
                     .flex_shrink_0()
                     // Sidebar Header
                     .child(
                         v_flex()
                             .p_4()
                             .gap_3()
-                            .border_b_1()
-                            .border_color(border_color)
                             // Top Row: Title + Action Icons
                             .child(
                                 h_flex()
@@ -1042,7 +1040,7 @@ impl Render for ChatView {
                                                     .child(if archived_mode { "Archived" } else { "Messages" }),
                                             ),
                                     )
-                                    // Action buttons: New Group, Join Group, Sync
+                                    // Action buttons: New Group, Join Group (matching Web)
                                     .child(
                                         h_flex()
                                             .items_center()
@@ -1072,18 +1070,6 @@ impl Render for ChatView {
                                                         this.is_join_group_open = true;
                                                         cx.notify();
                                                     })),
-                                            )
-                                            // Sync chats Button
-                                            .child(
-                                                div()
-                                                    .cursor_pointer()
-                                                    .p_2()
-                                                    .rounded_full()
-                                                    .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                    .child(svg().data(REFRESH_CW_SVG).size(px(16.0)).text_color(muted_text))
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                        this.load_chats(cx);
-                                                    })),
                                             ),
                                     ),
                             )
@@ -1092,10 +1078,10 @@ impl Render for ChatView {
                                 h_flex()
                                     .px_3()
                                     .py_2()
-                                    .bg(bg_color)
+                                    .bg(theme.muted.opacity(0.5))
                                     .rounded_xl()
                                     .border_1()
-                                    .border_color(border_color)
+                                    .border_color(border_color.opacity(0.3))
                                     .items_center()
                                     .gap_2()
                                     .track_focus(&self.search_focus_handle)
@@ -1156,76 +1142,6 @@ impl Render for ChatView {
                                     } else {
                                         None
                                     }),
-                            )
-                            // Filter Chips Row: [All] [Unread] [Groups] [Contacts]
-                            .child(
-                                h_flex()
-                                    .items_center()
-                                    .gap_1p5()
-                                    .child(
-                                        div()
-                                            .cursor_pointer()
-                                            .px_2p5()
-                                            .py_1()
-                                            .rounded_full()
-                                            .text_xs()
-                                            .font_weight(if self.filter == ChatFilter::All { FontWeight::BOLD } else { FontWeight::MEDIUM })
-                                            .bg(if self.filter == ChatFilter::All { theme.primary.opacity(0.18) } else { theme.muted.opacity(0.35) })
-                                            .text_color(if self.filter == ChatFilter::All { primary_color } else { muted_text })
-                                            .child("All")
-                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                this.filter = ChatFilter::All;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        div()
-                                            .cursor_pointer()
-                                            .px_2p5()
-                                            .py_1()
-                                            .rounded_full()
-                                            .text_xs()
-                                            .font_weight(if self.filter == ChatFilter::Unread { FontWeight::BOLD } else { FontWeight::MEDIUM })
-                                            .bg(if self.filter == ChatFilter::Unread { theme.primary.opacity(0.18) } else { theme.muted.opacity(0.35) })
-                                            .text_color(if self.filter == ChatFilter::Unread { primary_color } else { muted_text })
-                                            .child("Unread")
-                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                this.filter = ChatFilter::Unread;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        div()
-                                            .cursor_pointer()
-                                            .px_2p5()
-                                            .py_1()
-                                            .rounded_full()
-                                            .text_xs()
-                                            .font_weight(if self.filter == ChatFilter::Groups { FontWeight::BOLD } else { FontWeight::MEDIUM })
-                                            .bg(if self.filter == ChatFilter::Groups { theme.primary.opacity(0.18) } else { theme.muted.opacity(0.35) })
-                                            .text_color(if self.filter == ChatFilter::Groups { primary_color } else { muted_text })
-                                            .child("Groups")
-                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                this.filter = ChatFilter::Groups;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        div()
-                                            .cursor_pointer()
-                                            .px_2p5()
-                                            .py_1()
-                                            .rounded_full()
-                                            .text_xs()
-                                            .font_weight(if self.filter == ChatFilter::Contacts { FontWeight::BOLD } else { FontWeight::MEDIUM })
-                                            .bg(if self.filter == ChatFilter::Contacts { theme.primary.opacity(0.18) } else { theme.muted.opacity(0.35) })
-                                            .text_color(if self.filter == ChatFilter::Contacts { primary_color } else { muted_text })
-                                            .child("Contacts")
-                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                this.filter = ChatFilter::Contacts;
-                                                cx.notify();
-                                            })),
-                                    ),
                             ),
                     )
                     // Archived Button Row (when archived mode is false and archived chats exist)
@@ -1334,7 +1250,6 @@ impl Render for ChatView {
                                         let chat_id = chat.id.clone();
                                         let is_pinned = chat.pinned_at.is_some();
                                         let initial = chat.name.chars().next().unwrap_or('?').to_uppercase().to_string();
-                                        let has_avatar = !chat.avatar.is_empty();
 
                                         // Clamped single-line snippet to guarantee identical 72px row heights
                                         let first_line = chat.last_msg.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
@@ -1390,7 +1305,14 @@ impl Render for ChatView {
                                             })
                                             // Real Profile Picture or Fallback Initial Avatar
                                             .child(
-                                                if chat.is_group {
+                                                if !chat.avatar.is_empty() {
+                                                    img(chat.avatar.clone())
+                                                        .w(px(48.0))
+                                                        .h(px(48.0))
+                                                        .rounded_full()
+                                                        .flex_shrink_0()
+                                                        .into_any_element()
+                                                } else if chat.is_group {
                                                     div()
                                                         .w(px(48.0))
                                                         .h(px(48.0))
@@ -1525,8 +1447,8 @@ impl Render for ChatView {
                                         .px_5()
                                         .py_3()
                                         .border_b_1()
-                                        .border_color(border_color)
-                                        .bg(card_bg)
+                                        .border_color(border_color.opacity(0.4))
+                                        .bg(bg_color)
                                         .items_center()
                                         .justify_between()
                                         // Left Profile Area (Clicking opens Info Sheet)
@@ -1542,7 +1464,14 @@ impl Render for ChatView {
                                                     this.toggle_info_sheet(cx);
                                                 }))
                                                 .child(
-                                                    if active_chat.is_group {
+                                                    if !active_chat.avatar.is_empty() {
+                                                        img(active_chat.avatar.clone())
+                                                            .w(px(40.0))
+                                                            .h(px(40.0))
+                                                            .rounded_full()
+                                                            .flex_shrink_0()
+                                                            .into_any_element()
+                                                    } else if active_chat.is_group {
                                                         div()
                                                             .w(px(40.0))
                                                             .h(px(40.0))
@@ -1721,22 +1650,28 @@ impl Render for ChatView {
                                                     h_flex().w_full().justify_start()
                                                 };
 
+                                                let is_dark_bg = theme.background.l < 0.5;
+                                                let (bubble_bg, bubble_text) = if is_dark_bg {
+                                                    if is_from_me {
+                                                        (rgb(0x005c4b), rgb(0xe9edef))
+                                                    } else {
+                                                        (rgb(0x202c33), rgb(0xe9edef))
+                                                    }
+                                                } else {
+                                                    if is_from_me {
+                                                        (rgb(0xdcf8c6), rgb(0x303030))
+                                                    } else {
+                                                        (rgb(0xffffff), rgb(0x303030))
+                                                    }
+                                                };
+
                                                 let bubble = v_flex()
                                                     .max_w(px(520.0))
                                                     .px_3p5()
-                                                    .py_2p5()
+                                                    .py_2()
                                                     .rounded_2xl()
-                                                    .bg(if is_from_me {
-                                                        theme.primary.opacity(0.22)
-                                                    } else {
-                                                        card_bg
-                                                    })
-                                                    .border_1()
-                                                    .border_color(if is_from_me {
-                                                        theme.primary.opacity(0.35)
-                                                    } else {
-                                                        border_color
-                                                    })
+                                                    .bg(bubble_bg)
+                                                    .shadow_sm()
                                                     .gap_1()
                                                     // Right-click opens Context Menu popover!
                                                     .on_mouse_down(
@@ -1799,7 +1734,7 @@ impl Render for ChatView {
                                                     .child(
                                                         div()
                                                             .text_sm()
-                                                            .text_color(text_color)
+                                                            .text_color(bubble_text)
                                                             .child(content),
                                                     )
                                                     // Bottom Right Timestamp & Checkmarks
@@ -1812,7 +1747,7 @@ impl Render for ChatView {
                                                             .child(
                                                                 div()
                                                                     .text_xs()
-                                                                    .text_color(muted_text)
+                                                                    .text_color(bubble_text.opacity(0.6))
                                                                     .child(time_str),
                                                             )
                                                             .children(if is_from_me {
@@ -1827,13 +1762,13 @@ impl Render for ChatView {
                                                                         svg()
                                                                             .data(CHECK_CHECK_SVG)
                                                                             .size(px(14.0))
-                                                                            .text_color(muted_text),
+                                                                            .text_color(bubble_text.opacity(0.6)),
                                                                     ),
                                                                     MessageTicks::Sent => Some(
                                                                         svg()
                                                                             .data(CHECK_SVG)
                                                                             .size(px(14.0))
-                                                                            .text_color(muted_text),
+                                                                            .text_color(bubble_text.opacity(0.6)),
                                                                     ),
                                                                     MessageTicks::None => None,
                                                                 }
@@ -1848,12 +1783,12 @@ impl Render for ChatView {
                                             elements
                                         }),
                                 )
-                                // Bottom Compose Container (Banner + Input Field + Circular Send Icon)
+                                // Bottom Compose Container (Banner + Input Field + Integrated Send Icon)
                                 .child(
                                     v_flex()
                                         .border_t_1()
-                                        .border_color(border_color)
-                                        .bg(card_bg)
+                                        .border_color(border_color.opacity(0.4))
+                                        .bg(bg_color)
                                         // Reply Preview Banner
                                         .children(if let Some(ref r_msg) = self.reply_to {
                                             let r_sender = if r_msg.from == "me" { "You" } else { r_msg.sender_name.as_deref().unwrap_or("Sender") };
@@ -1977,17 +1912,18 @@ impl Render for ChatView {
                                                         .hover(|s| s.bg(theme.muted.opacity(0.5)))
                                                         .child(svg().data(MIC_SVG).size(px(18.0)).text_color(muted_text)),
                                                 )
-                                                // Text Input Field
+                                                // Text Input Field with Integrated Send Button
                                                 .child(
                                                     h_flex()
                                                         .flex_1()
                                                         .px_4()
-                                                        .py_2p5()
+                                                        .py_2()
                                                         .rounded_2xl()
                                                         .border_1()
-                                                        .border_color(border_color)
-                                                        .bg(bg_color)
+                                                        .border_color(border_color.opacity(0.2))
+                                                        .bg(theme.muted.opacity(0.5))
                                                         .items_center()
+                                                        .gap_2()
                                                         .track_focus(&self.compose_focus_handle)
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                                             this.compose_focus_handle.focus(window, cx);
@@ -2051,25 +1987,40 @@ impl Render for ChatView {
                                                                 } else {
                                                                     self.compose_text.clone()
                                                                 }),
-                                                        ),
-                                                )
-                                                // Send Button: Circular Paper-plane Icon matching Web
-                                                .child(
-                                                    div()
-                                                        .cursor_pointer()
-                                                        .w(px(40.0))
-                                                        .h(px(40.0))
-                                                        .rounded_full()
-                                                        .bg(primary_color)
-                                                        .hover(|s| s.opacity(0.85))
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .flex_shrink_0()
-                                                        .child(svg().data(SEND_SVG).size(px(16.0)).text_color(rgb(0xffffff)))
-                                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                            this.send_current_message(cx);
-                                                        })),
+                                                        )
+                                                        // Send Button: Integrated inside input bar on the right
+                                                        .child({
+                                                            let has_text = !self.compose_text.trim().is_empty();
+                                                            div()
+                                                                .cursor_pointer()
+                                                                .p_1p5()
+                                                                .rounded_xl()
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .flex_shrink_0()
+                                                                .bg(if has_text { primary_color } else { rgba(0x00000000).into() })
+                                                                .hover(|h| {
+                                                                    if has_text {
+                                                                        h.opacity(0.85)
+                                                                    } else {
+                                                                        h
+                                                                    }
+                                                                })
+                                                                .child(
+                                                                    svg()
+                                                                        .data(SEND_SVG)
+                                                                        .size(px(16.0))
+                                                                        .text_color(if has_text {
+                                                                            theme.primary_foreground
+                                                                        } else {
+                                                                            muted_text.opacity(0.6)
+                                                                        }),
+                                                                )
+                                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                                    this.send_current_message(cx);
+                                                                }))
+                                                        }),
                                                 ),
                                         ),
                                 ),
@@ -2115,7 +2066,6 @@ impl Render for ChatView {
             .children(if self.is_info_sheet_open && selected_chat.is_some() {
                 let chat = selected_chat.clone().unwrap();
                 let initial = chat.name.chars().next().unwrap_or('?').to_uppercase().to_string();
-                let has_avatar = !chat.avatar.is_empty();
 
                 Some(
                     v_flex()
@@ -2125,8 +2075,8 @@ impl Render for ChatView {
                         .h_full()
                         .overflow_hidden()
                         .border_l_1()
-                        .border_color(border_color)
-                        .bg(card_bg)
+                        .border_color(border_color.opacity(0.4))
+                        .bg(bg_color)
                         .flex_shrink_0()
                         // Header
                         .child(
@@ -2134,7 +2084,8 @@ impl Render for ChatView {
                                 .px_4()
                                 .py_3()
                                 .border_b_1()
-                                .border_color(border_color)
+                                .border_color(border_color.opacity(0.4))
+                                .bg(theme.muted.opacity(0.2))
                                 .justify_between()
                                 .items_center()
                                 .child(
@@ -2172,7 +2123,14 @@ impl Render for ChatView {
                                         .gap_2()
                                         .py_2()
                                         .child(
-                                            if chat.is_group {
+                                            if !chat.avatar.is_empty() {
+                                                img(chat.avatar.clone())
+                                                    .w(px(80.0))
+                                                    .h(px(80.0))
+                                                    .rounded_full()
+                                                    .flex_shrink_0()
+                                                    .into_any_element()
+                                            } else if chat.is_group {
                                                 div()
                                                     .w(px(80.0))
                                                     .h(px(80.0))
@@ -2222,10 +2180,10 @@ impl Render for ChatView {
                                 .child(
                                     h_flex()
                                         .p_1()
-                                        .bg(bg_color)
+                                        .bg(theme.muted.opacity(0.5))
                                         .rounded_xl()
                                         .border_1()
-                                        .border_color(border_color)
+                                        .border_color(border_color.opacity(0.3))
                                         .justify_around()
                                         .child(
                                             div()
