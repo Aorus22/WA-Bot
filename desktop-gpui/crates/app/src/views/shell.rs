@@ -10,14 +10,20 @@ use crate::components::nav_sidebar::NavigationSidebar;
 use crate::components::titlebar::AppTitleBar;
 use crate::router::{AppRoute, Router};
 use crate::theme::manager::AppThemeExt;
+use crate::views::calls::CallsView;
+use crate::views::channels::ChannelsView;
 use crate::views::chat::ChatView;
 use crate::views::settings::SettingsView;
+use crate::views::status::StatusView;
 
 pub struct AppShellView {
     _router_sub: gpui::Subscription,
     _conn_sub: gpui::Subscription,
     settings_view: Entity<SettingsView>,
     chat_view: Entity<ChatView>,
+    status_view: Entity<StatusView>,
+    channels_view: Entity<ChannelsView>,
+    calls_view: Entity<CallsView>,
 }
 
 impl AppShellView {
@@ -30,11 +36,17 @@ impl AppShellView {
         });
         let settings_view = cx.new(|cx| SettingsView::new(cx));
         let chat_view = cx.new(|cx| ChatView::new(cx));
+        let status_view = cx.new(|cx| StatusView::new(cx));
+        let channels_view = cx.new(|cx| ChannelsView::new(cx));
+        let calls_view = cx.new(|cx| CallsView::new(cx));
         Self {
             _router_sub: router_sub,
             _conn_sub: conn_sub,
             settings_view,
             chat_view,
+            status_view,
+            channels_view,
+            calls_view,
         }
     }
 }
@@ -86,34 +98,13 @@ impl AppShellView {
                 self.chat_view.clone().into_any_element()
             }
             AppRoute::Status => {
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
-                    .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Status Updates"))
-                    .child(div().text_sm().text_color(theme.muted_foreground).child("View status updates from your contacts"))
-                    .into_any_element()
+                self.status_view.clone().into_any_element()
             }
             AppRoute::Channels => {
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
-                    .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Channels"))
-                    .child(div().text_sm().text_color(theme.muted_foreground).child("Stay updated on topics that interest you"))
-                    .into_any_element()
+                self.channels_view.clone().into_any_element()
             }
             AppRoute::Calls => {
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
-                    .child(div().text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child("Calls History"))
-                    .child(div().text_sm().text_color(theme.muted_foreground).child("No recent call history"))
-                    .into_any_element()
+                self.calls_view.clone().into_any_element()
             }
             AppRoute::Triggers | AppRoute::TriggerDetail(_) | AppRoute::TriggerNew => {
                 v_flex()
