@@ -10,7 +10,7 @@ use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::state::chat::ChatStore;
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{ActiveTokens, AppThemeExt};
 use crate::TOKIO_RT;
 
 /// Deterministic color palette for contact avatars
@@ -32,6 +32,149 @@ fn avatar_color_for(id: &str) -> Hsla {
     }
     let hex = AVATAR_COLORS[sum % AVATAR_COLORS.len()];
     rgb(hex).into()
+}
+
+fn urlencode(s: &str) -> String {
+    let mut encoded = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
+            encoded.push(b as char);
+        } else {
+            encoded.push_str(&format!("%{:02X}", b));
+        }
+    }
+    encoded
+}
+
+fn resolve_avatar_url(avatar: &str, chat_id: &str, base_url: &str) -> String {
+    let avatar = avatar.trim();
+    if !avatar.is_empty() && !avatar.starts_with("data:") {
+        if avatar.starts_with("http://") || avatar.starts_with("https://") {
+            return avatar.to_string();
+        }
+        let clean_base = base_url.trim_end_matches('/');
+        let clean_avatar = avatar.trim_start_matches('/');
+        if clean_avatar.starts_with("api/") {
+            let root = clean_base.strip_suffix("/api").unwrap_or(clean_base);
+            return format!("{root}/{clean_avatar}");
+        }
+        return format!("{clean_base}/{clean_avatar}");
+    }
+    let clean_base = base_url.trim_end_matches('/');
+    format!("{clean_base}/avatar/{}", urlencode(chat_id))
+}
+
+fn resolve_media_url(media_url: &str, base_url: &str) -> String {
+    let media_url = media_url.trim();
+    if media_url.starts_with("http://") || media_url.starts_with("https://") {
+        return media_url.to_string();
+    }
+    let clean_base = base_url.trim_end_matches('/');
+    let clean_url = media_url.trim_start_matches('/');
+    if clean_url.starts_with("api/") {
+        let root = clean_base.strip_suffix("/api").unwrap_or(clean_base);
+        format!("{root}/{clean_url}")
+    } else {
+        format!("{clean_base}/{clean_url}")
+    }
+}
+
+fn render_avatar(
+    chat_id: &str,
+    chat_name: &str,
+    avatar_field: &str,
+    is_group: bool,
+    size_px: f32,
+    base_url: &str,
+    theme: &ActiveTokens,
+) -> AnyElement {
+    let initial = chat_name.chars().next().unwrap_or('?').to_uppercase().to_string();
+    let avatar_url = resolve_avatar_url(avatar_field, chat_id, base_url);
+    let color = avatar_color_for(chat_id);
+
+    let fallback_init = initial.clone();
+    let fallback_theme = *theme;
+    let fallback_color = color;
+    let fallback_group = is_group;
+    let fallback_size = size_px;
+
+    let make_fallback = move || -> AnyElement {
+        if fallback_group {
+            div()
+                .w(px(fallback_size))
+                .h(px(fallback_size))
+                .rounded_full()
+                .bg(fallback_theme.primary.opacity(0.15))
+                .flex()
+                .items_center()
+                .justify_center()
+                .flex_shrink_0()
+                .child(svg().data(USERS_SVG).size(px(fallback_size * 0.46)).text_color(fallback_theme.primary))
+                .into_any_element()
+        } else {
+            div()
+                .w(px(fallback_size))
+                .h(px(fallback_size))
+                .rounded_full()
+                .bg(fallback_color.opacity(0.18))
+                .flex()
+                .items_center()
+                .justify_center()
+                .flex_shrink_0()
+                .text_size(px(fallback_size * 0.38))
+                .font_weight(FontWeight::BOLD)
+                .text_color(fallback_color)
+                .child(fallback_init.clone())
+                .into_any_element()
+        }
+    };
+
+    let loading_init = initial.clone();
+    let loading_theme = *theme;
+    let loading_color = color;
+    let loading_group = is_group;
+    let loading_size = size_px;
+
+    let make_loading = move || -> AnyElement {
+        if loading_group {
+            div()
+                .w(px(loading_size))
+                .h(px(loading_size))
+                .rounded_full()
+                .bg(loading_theme.primary.opacity(0.15))
+                .flex()
+                .items_center()
+                .justify_center()
+                .flex_shrink_0()
+                .child(svg().data(USERS_SVG).size(px(loading_size * 0.46)).text_color(loading_theme.primary))
+                .into_any_element()
+        } else {
+            div()
+                .w(px(loading_size))
+                .h(px(loading_size))
+                .rounded_full()
+                .bg(loading_color.opacity(0.18))
+                .flex()
+                .items_center()
+                .justify_center()
+                .flex_shrink_0()
+                .text_size(px(loading_size * 0.38))
+                .font_weight(FontWeight::BOLD)
+                .text_color(loading_color)
+                .child(loading_init.clone())
+                .into_any_element()
+        }
+    };
+
+    img(avatar_url)
+        .w(px(size_px))
+        .h(px(size_px))
+        .rounded_full()
+        .flex_shrink_0()
+        .object_fit(ObjectFit::Cover)
+        .with_fallback(make_fallback)
+        .with_loading(make_loading)
+        .into_any_element()
 }
 
 /// Filter chips below search in sidebar (matching Web / WhatsApp)
@@ -109,6 +252,9 @@ pub struct ChatView {
     pub new_group_focus: FocusHandle,
     pub is_creating_group: bool,
 
+    // Full-screen image preview
+    pub preview_image_url: Option<String>,
+
     // Join Group modal
     pub is_join_group_open: bool,
     pub join_group_link: String,
@@ -150,6 +296,8 @@ impl ChatView {
             new_group_selected: HashSet::new(),
             new_group_focus: cx.focus_handle(),
             is_creating_group: false,
+
+            preview_image_url: None,
 
             is_join_group_open: false,
             join_group_link: String::new(),
@@ -916,6 +1064,12 @@ impl Render for ChatView {
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
 
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+
         let all_chats: Vec<Chat> = if cx.has_global::<ChatStore>() {
             ChatStore::global(cx).chats.clone()
         } else {
@@ -1249,7 +1403,6 @@ impl Render for ChatView {
                                         let is_selected = selected_chat_id.as_deref() == Some(&chat.id);
                                         let chat_id = chat.id.clone();
                                         let is_pinned = chat.pinned_at.is_some();
-                                        let initial = chat.name.chars().next().unwrap_or('?').to_uppercase().to_string();
 
                                         // Clamped single-line snippet to guarantee identical 72px row heights
                                         let first_line = chat.last_msg.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
@@ -1304,44 +1457,7 @@ impl Render for ChatView {
                                                 None
                                             })
                                             // Real Profile Picture or Fallback Initial Avatar
-                                            .child(
-                                                if !chat.avatar.is_empty() {
-                                                    img(chat.avatar.clone())
-                                                        .w(px(48.0))
-                                                        .h(px(48.0))
-                                                        .rounded_full()
-                                                        .flex_shrink_0()
-                                                        .into_any_element()
-                                                } else if chat.is_group {
-                                                    div()
-                                                        .w(px(48.0))
-                                                        .h(px(48.0))
-                                                        .rounded_full()
-                                                        .bg(theme.primary.opacity(0.15))
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .flex_shrink_0()
-                                                        .child(svg().data(USERS_SVG).size(px(22.0)).text_color(primary_color))
-                                                        .into_any_element()
-                                                } else {
-                                                    let color = avatar_color_for(&chat.id);
-                                                    div()
-                                                        .w(px(48.0))
-                                                        .h(px(48.0))
-                                                        .rounded_full()
-                                                        .bg(color.opacity(0.18))
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .flex_shrink_0()
-                                                        .text_base()
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .text_color(color)
-                                                        .child(initial)
-                                                        .into_any_element()
-                                                }
-                                            )
+                                            .child(render_avatar(&chat.id, &chat.name, &chat.avatar, chat.is_group, 48.0, &base_url, &theme))
                                             // Middle: Name & Clamped Last Msg
                                             .child(
                                                 v_flex()
@@ -1436,7 +1552,6 @@ impl Render for ChatView {
                     .children(if let Some(ref active_chat) = selected_chat {
                         let chat_name = active_chat.name.clone();
                         let chat_jid = active_chat.id.clone();
-                        let avatar_initial = chat_name.chars().next().unwrap_or('?').to_uppercase().to_string();
 
                         Some(
                             v_flex()
@@ -1463,44 +1578,7 @@ impl Render for ChatView {
                                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                     this.toggle_info_sheet(cx);
                                                 }))
-                                                .child(
-                                                    if !active_chat.avatar.is_empty() {
-                                                        img(active_chat.avatar.clone())
-                                                            .w(px(40.0))
-                                                            .h(px(40.0))
-                                                            .rounded_full()
-                                                            .flex_shrink_0()
-                                                            .into_any_element()
-                                                    } else if active_chat.is_group {
-                                                        div()
-                                                            .w(px(40.0))
-                                                            .h(px(40.0))
-                                                            .rounded_full()
-                                                            .bg(theme.primary.opacity(0.15))
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .flex_shrink_0()
-                                                            .child(svg().data(USERS_SVG).size(px(20.0)).text_color(primary_color))
-                                                            .into_any_element()
-                                                    } else {
-                                                        let color = avatar_color_for(&active_chat.id);
-                                                        div()
-                                                            .w(px(40.0))
-                                                            .h(px(40.0))
-                                                            .rounded_full()
-                                                            .bg(color.opacity(0.18))
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .flex_shrink_0()
-                                                            .text_sm()
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .text_color(color)
-                                                            .child(avatar_initial)
-                                                            .into_any_element()
-                                                    }
-                                                )
+                                                .child(render_avatar(&active_chat.id, &active_chat.name, &active_chat.avatar, active_chat.is_group, 40.0, &base_url, &theme))
                                                 .child(
                                                     v_flex()
                                                         .child(
@@ -1650,8 +1728,15 @@ impl Render for ChatView {
                                                     h_flex().w_full().justify_start()
                                                 };
 
+                                                let msg_type = r_msg.msg.message_type.as_str();
+                                                let is_image = msg_type == "image" || (r_msg.msg.media_url.is_some() && (content == "[Image]" || content.is_empty()));
+                                                let is_sticker = msg_type == "sticker" || (r_msg.msg.media_url.is_some() && content == "[Sticker]");
+                                                let is_video = msg_type == "video" || (r_msg.msg.media_url.is_some() && content == "[Video]");
+
                                                 let is_dark_bg = theme.background.l < 0.5;
-                                                let (bubble_bg, bubble_text) = if is_dark_bg {
+                                                let (bubble_bg, bubble_text) = if is_sticker {
+                                                    (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
+                                                } else if is_dark_bg {
                                                     if is_from_me {
                                                         (rgb(0x005c4b), rgb(0xe9edef))
                                                     } else {
@@ -1730,13 +1815,76 @@ impl Render for ChatView {
                                                     } else {
                                                         None
                                                     })
-                                                    // Message Body Text
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .text_color(bubble_text)
-                                                            .child(content),
-                                                    )
+                                                    // Media attachment: Image or Sticker
+                                                    .children(if is_image {
+                                                        if let Some(ref m_url) = r_msg.msg.media_url {
+                                                            let full_url = resolve_media_url(m_url, &base_url);
+                                                            let click_url = full_url.clone();
+                                                            Some(
+                                                                div()
+                                                                    .mb_1p5()
+                                                                    .max_w(px(340.0))
+                                                                    .max_h(px(360.0))
+                                                                    .rounded_xl()
+                                                                    .overflow_hidden()
+                                                                    .cursor_pointer()
+                                                                    .on_mouse_down(MouseButton::Left, cx.listener({
+                                                                        let u = click_url.clone();
+                                                                        move |this, _, _, cx| {
+                                                                            this.preview_image_url = Some(u.clone());
+                                                                            cx.notify();
+                                                                        }
+                                                                    }))
+                                                                    .child(
+                                                                        img(full_url)
+                                                                            .max_w(px(340.0))
+                                                                            .max_h(px(360.0))
+                                                                            .rounded_xl()
+                                                                            .object_fit(ObjectFit::Contain)
+                                                                    )
+                                                                    .into_any_element()
+                                                            )
+                                                        } else {
+                                                            None
+                                                        }
+                                                    } else if is_sticker {
+                                                        if let Some(ref m_url) = r_msg.msg.media_url {
+                                                            let full_url = resolve_media_url(m_url, &base_url);
+                                                            Some(
+                                                                div()
+                                                                    .w(px(160.0))
+                                                                    .h(px(160.0))
+                                                                    .cursor_pointer()
+                                                                    .child(
+                                                                        img(full_url)
+                                                                            .w(px(160.0))
+                                                                            .h(px(160.0))
+                                                                            .object_fit(ObjectFit::Contain)
+                                                                    )
+                                                                    .into_any_element()
+                                                            )
+                                                        } else {
+                                                            None
+                                                        }
+                                                    } else {
+                                                        None
+                                                    })
+                                                    // Message Body Text (hide placeholder if it's media without caption)
+                                                    .children({
+                                                        let is_media_placeholder = (is_image && (content == "[Image]" || content.is_empty()))
+                                                            || (is_sticker && (content == "[Sticker]" || content.is_empty()))
+                                                            || (is_video && (content == "[Video]" || content.is_empty()));
+                                                        if !content.is_empty() && !is_media_placeholder {
+                                                            Some(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .text_color(bubble_text)
+                                                                    .child(content)
+                                                            )
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
                                                     // Bottom Right Timestamp & Checkmarks
                                                     .child(
                                                         h_flex()
@@ -2065,7 +2213,6 @@ impl Render for ChatView {
             // ====================================================
             .children(if self.is_info_sheet_open && selected_chat.is_some() {
                 let chat = selected_chat.clone().unwrap();
-                let initial = chat.name.chars().next().unwrap_or('?').to_uppercase().to_string();
 
                 Some(
                     v_flex()
@@ -2122,42 +2269,7 @@ impl Render for ChatView {
                                         .items_center()
                                         .gap_2()
                                         .py_2()
-                                        .child(
-                                            if !chat.avatar.is_empty() {
-                                                img(chat.avatar.clone())
-                                                    .w(px(80.0))
-                                                    .h(px(80.0))
-                                                    .rounded_full()
-                                                    .flex_shrink_0()
-                                                    .into_any_element()
-                                            } else if chat.is_group {
-                                                div()
-                                                    .w(px(80.0))
-                                                    .h(px(80.0))
-                                                    .rounded_full()
-                                                    .bg(theme.primary.opacity(0.15))
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .child(svg().data(USERS_SVG).size(px(40.0)).text_color(primary_color))
-                                                    .into_any_element()
-                                            } else {
-                                                let color = avatar_color_for(&chat.id);
-                                                div()
-                                                    .w(px(80.0))
-                                                    .h(px(80.0))
-                                                    .rounded_full()
-                                                    .bg(color.opacity(0.18))
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .text_3xl()
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .text_color(color)
-                                                    .child(initial)
-                                                    .into_any_element()
-                                            }
-                                        )
+                                        .child(render_avatar(&chat.id, &chat.name, &chat.avatar, chat.is_group, 80.0, &base_url, &theme))
                                         .child(
                                             div()
                                                 .text_lg()
@@ -2751,6 +2863,35 @@ impl Render for ChatView {
                         .text_color(rgb(0xffffff))
                         .shadow_lg()
                         .child(msg.clone()),
+                )
+            } else {
+                None
+            })
+            // Full-screen Image Preview Overlay (click anywhere to close)
+            .children(if let Some(ref img_url) = self.preview_image_url {
+                let u = img_url.clone();
+                Some(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(gpui::rgba(0x000000e0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .p_8()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                            this.preview_image_url = None;
+                            cx.notify();
+                        }))
+                        .child(
+                            img(u)
+                                .max_w(px(800.0))
+                                .max_h(px(700.0))
+                                .rounded_xl()
+                                .object_fit(ObjectFit::Contain)
+                        )
+                        .into_any_element()
                 )
             } else {
                 None

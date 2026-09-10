@@ -1,10 +1,12 @@
 //! WA Bot desktop shell (GPUI) - Main Entry Point.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 use gpui::{
     point, px, size, App, AppContext, Application, Bounds, TitlebarOptions, WindowBounds,
     WindowOptions,
 };
+use gpui_reqwest_client::ReqwestClient;
 use wabot_app::{
     components::connection_banner::ConnectionState,
     router::Router,
@@ -21,7 +23,10 @@ use wabot_settings::DesktopSettings;
 fn main() {
     let _tokio_guard = TOKIO_RT.enter();
 
+    let http_client = Arc::new(ReqwestClient::user_agent("wabot/1.0").expect("Failed to create HTTP client"));
+
     Application::with_platform(gpui_platform::current_platform(false))
+        .with_http_client(http_client)
         .with_assets(gpui_kit_assets::Assets)
         .run(move |cx: &mut App| {
             // Register bundled monospace font asset
