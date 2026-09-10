@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use gpui::*;
 use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{Chat, Message};
@@ -1266,13 +1267,14 @@ impl Render for ChatView {
                                             .children(if self.archived_mode {
                                                 Some(
                                                     h_flex()
+                                                        .id("btn-back-archived")
                                                         .cursor_pointer()
                                                         .items_center()
                                                         .gap_1()
                                                         .px_2()
                                                         .py_1()
                                                         .rounded_lg()
-                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                        .hover(|s| s.bg(theme.muted.opacity(0.6)))
                                                         .text_xs()
                                                         .font_weight(FontWeight::MEDIUM)
                                                         .text_color(primary_color)
@@ -1302,10 +1304,14 @@ impl Render for ChatView {
                                             // New Group Button
                                             .child(
                                                 div()
+                                                    .id("btn-new-group")
                                                     .cursor_pointer()
                                                     .p_2()
                                                     .rounded_full()
-                                                    .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                    .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                    .tooltip(move |window, cx| {
+                                                        Tooltip::new("New Group").build(window, cx)
+                                                    })
                                                     .child(svg().data(USERS_SVG).size(px(18.0)).text_color(muted_text))
                                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                         this.is_new_group_open = true;
@@ -1315,10 +1321,14 @@ impl Render for ChatView {
                                             // Join Group via Link Button
                                             .child(
                                                 div()
+                                                    .id("btn-join-group")
                                                     .cursor_pointer()
                                                     .p_2()
                                                     .rounded_full()
-                                                    .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                    .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                    .tooltip(move |window, cx| {
+                                                        Tooltip::new("Join Group via Link").build(window, cx)
+                                                    })
                                                     .child(svg().data(LINK_SVG).size(px(18.0)).text_color(muted_text))
                                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                         this.is_join_group_open = true;
@@ -1385,10 +1395,14 @@ impl Render for ChatView {
                                     .children(if !self.search_query.is_empty() {
                                         Some(
                                             div()
+                                                .id("btn-clear-search")
                                                 .cursor_pointer()
                                                 .p_1()
-                                                .hover(|s| s.bg(theme.muted.opacity(0.5)))
                                                 .rounded_full()
+                                                .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                .tooltip(move |window, cx| {
+                                                    Tooltip::new("Clear search").build(window, cx)
+                                                })
                                                 .child(svg().data(X_SVG).size(px(12.0)).text_color(muted_text))
                                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                     this.search_query.clear();
@@ -1404,6 +1418,7 @@ impl Render for ChatView {
                     .children(if !self.archived_mode && self.search_query.is_empty() && archived_count > 0 {
                         Some(
                             h_flex()
+                                .id("btn-archived-row")
                                 .mx_2()
                                 .mt_2()
                                 .px_3()
@@ -1536,6 +1551,7 @@ impl Render for ChatView {
                                                 let unread = chat.unread;
 
                                                 let card = h_flex()
+                                                    .id(SharedString::from(chat.id.clone()))
                                                     .w_full()
                                                     .h(px(72.0))
                                                     .overflow_hidden()
@@ -1547,11 +1563,17 @@ impl Render for ChatView {
                                                     .cursor_pointer()
                                                     .relative()
                                                     .bg(if is_selected {
-                                                        theme.primary.opacity(0.12)
+                                                        theme.primary.opacity(0.14)
                                                     } else {
                                                         rgba(0x00000000).into()
                                                     })
-                                                    .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                                    .hover(|s| {
+                                                        if is_selected {
+                                                            s.bg(theme.primary.opacity(0.22))
+                                                        } else {
+                                                            s.bg(theme.muted.opacity(0.65))
+                                                        }
+                                                    })
                                                     .on_mouse_down(
                                                         MouseButton::Left,
                                                         cx.listener({
@@ -1766,12 +1788,17 @@ impl Render for ChatView {
                                         // Left Profile Area (Clicking opens Info Sheet)
                                         .child(
                                             h_flex()
+                                                .id("chat-header-profile")
                                                 .items_center()
                                                 .gap_3()
                                                 .cursor_pointer()
-                                                .p_1()
-                                                .rounded_lg()
-                                                .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                                .px_2()
+                                                .py_1p5()
+                                                .rounded_xl()
+                                                .hover(|s| s.bg(theme.muted.opacity(0.6)))
+                                                .tooltip(move |window, cx| {
+                                                    Tooltip::new("Click for contact info").build(window, cx)
+                                                })
                                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                     this.toggle_info_sheet(cx);
                                                 }))
@@ -1800,10 +1827,14 @@ impl Render for ChatView {
                                                 .gap_1()
                                                 .child(
                                                     div()
+                                                        .id("btn-header-phone")
                                                         .cursor_pointer()
                                                         .p_2()
                                                         .rounded_full()
-                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                        .tooltip(move |window, cx| {
+                                                            Tooltip::new("Voice call").build(window, cx)
+                                                        })
                                                         .child(svg().data(PHONE_SVG).size(px(18.0)).text_color(muted_text))
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                             this.toast_message = Some(("Voice call is handled via WhatsApp Web".into(), false));
@@ -1812,10 +1843,14 @@ impl Render for ChatView {
                                                 )
                                                 .child(
                                                     div()
+                                                        .id("btn-header-video")
                                                         .cursor_pointer()
                                                         .p_2()
                                                         .rounded_full()
-                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                        .tooltip(move |window, cx| {
+                                                            Tooltip::new("Video call").build(window, cx)
+                                                        })
                                                         .child(svg().data(VIDEO_SVG).size(px(18.0)).text_color(muted_text))
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                             this.toast_message = Some(("Video call is handled via WhatsApp Web".into(), false));
@@ -1824,10 +1859,14 @@ impl Render for ChatView {
                                                 )
                                                 .child(
                                                     div()
+                                                        .id("btn-header-search")
                                                         .cursor_pointer()
                                                         .p_2()
                                                         .rounded_full()
-                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                        .tooltip(move |window, cx| {
+                                                            Tooltip::new("Search in conversation").build(window, cx)
+                                                        })
                                                         .child(svg().data(SEARCH_SVG).size(px(18.0)).text_color(muted_text))
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                                             this.search_focus_handle.focus(window, cx);
@@ -1836,10 +1875,14 @@ impl Render for ChatView {
                                                 )
                                                 .child(
                                                     div()
+                                                        .id("btn-header-more")
                                                         .cursor_pointer()
                                                         .p_2()
                                                         .rounded_full()
-                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                        .tooltip(move |window, cx| {
+                                                            Tooltip::new("Chat info").build(window, cx)
+                                                        })
                                                         .child(svg().data(MORE_VERTICAL_SVG).size(px(18.0)).text_color(muted_text))
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                             this.toggle_info_sheet(cx);
@@ -2272,19 +2315,27 @@ impl Render for ChatView {
                                                 // Plus / Attachment icon
                                                 .child(
                                                     div()
+                                                        .id("btn-attach")
                                                         .p_2()
                                                         .rounded_full()
                                                         .cursor_pointer()
-                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                        .tooltip(move |window, cx| {
+                                                            Tooltip::new("Attach").build(window, cx)
+                                                        })
                                                         .child(svg().data(PLUS_SVG).size(px(18.0)).text_color(muted_text)),
                                                 )
                                                 // Mic icon
                                                 .child(
                                                     div()
+                                                        .id("btn-mic")
                                                         .p_2()
                                                         .rounded_full()
                                                         .cursor_pointer()
-                                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                        .tooltip(move |window, cx| {
+                                                            Tooltip::new("Voice message").build(window, cx)
+                                                        })
                                                         .child(svg().data(MIC_SVG).size(px(18.0)).text_color(muted_text)),
                                                 )
                                                 // Text Input Field with Integrated Send Button
@@ -2369,6 +2420,7 @@ impl Render for ChatView {
                                                         .child({
                                                             let has_text = !self.compose_text.trim().is_empty();
                                                             div()
+                                                                .id("btn-send")
                                                                 .cursor_pointer()
                                                                 .p_1p5()
                                                                 .rounded_xl()
@@ -2381,8 +2433,11 @@ impl Render for ChatView {
                                                                     if has_text {
                                                                         h.opacity(0.85)
                                                                     } else {
-                                                                        h
+                                                                        h.bg(theme.muted.opacity(0.5))
                                                                     }
+                                                                })
+                                                                .tooltip(move |window, cx| {
+                                                                    Tooltip::new("Send message").build(window, cx)
                                                                 })
                                                                 .child(
                                                                     svg()
@@ -2473,10 +2528,14 @@ impl Render for ChatView {
                                 )
                                 .child(
                                     div()
+                                        .id("btn-close-info-sheet")
                                         .cursor_pointer()
                                         .p_1()
                                         .rounded_full()
-                                        .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                        .tooltip(move |window, cx| {
+                                            Tooltip::new("Close").build(window, cx)
+                                        })
                                         .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                             this.is_info_sheet_open = false;

@@ -4,6 +4,7 @@ use gpui::{
     div, prelude::FluentBuilder as _, px, App, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window,
 };
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{v_flex, Icon, IconName};
 
 use crate::router::{AppRoute, Router};
@@ -77,19 +78,11 @@ impl NavigationSidebar {
         let theme = cx.app_theme();
 
         div()
-            .id(label)
             .relative()
             .flex()
             .items_center()
             .justify_center()
             .w_full()
-            .cursor_pointer()
-            .on_click(move |_, _, cx| {
-                if cx.has_global::<Router>() {
-                    Router::global_mut(cx).navigate(route.clone());
-                    cx.refresh_windows();
-                }
-            })
             .child(
                 // Active indicator bar on left edge
                 div()
@@ -105,15 +98,27 @@ impl NavigationSidebar {
             .child(
                 // Button icon container
                 div()
+                    .id(label)
                     .p_3()
                     .rounded_2xl()
+                    .cursor_pointer()
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(label).build(window, cx)
+                    })
+                    .on_click(move |_, _, cx| {
+                        if cx.has_global::<Router>() {
+                            Router::global_mut(cx).navigate(route.clone());
+                            cx.refresh_windows();
+                        }
+                    })
                     .when(is_active, |s| {
                         s.bg(theme.primary)
                             .text_color(theme.primary_foreground)
+                            .hover(|h| h.bg(theme.primary.opacity(0.85)))
                     })
                     .when(!is_active, |s| {
                         s.text_color(theme.muted_foreground)
-                            .hover(|h| h.bg(theme.muted).text_color(theme.foreground))
+                            .hover(|h| h.bg(theme.muted.opacity(0.8)).text_color(theme.foreground))
                     })
                     .child(Icon::new(icon)),
             )
