@@ -205,6 +205,18 @@ pub struct MessageContextMenu {
     pub position: Point<Pixels>,
 }
 
+/// Context menu popup state when right-clicking a sidebar chat item
+#[derive(Clone, Debug)]
+pub struct ChatContextMenu {
+    pub chat_id: String,
+    pub chat_name: String,
+    pub is_pinned: bool,
+    pub is_archived: bool,
+    pub is_muted: bool,
+    pub position: Point<Pixels>,
+    pub show_mute_submenu: bool,
+}
+
 /// Pre-computed, cached renderable message to guarantee silky smooth 60fps scrolling
 #[derive(Clone, Debug)]
 pub struct RenderMessage {
@@ -237,6 +249,9 @@ pub struct ChatView {
 
     // Context menu popup on message right click
     pub context_menu: Option<MessageContextMenu>,
+
+    // Context menu popup on sidebar chat right click
+    pub chat_context_menu: Option<ChatContextMenu>,
 
     // Chat Info Sheet drawer (Right side)
     pub is_info_sheet_open: bool,
@@ -284,6 +299,7 @@ impl ChatView {
             cached_render_messages: Vec::new(),
 
             context_menu: None,
+            chat_context_menu: None,
 
             is_info_sheet_open: false,
             info_sheet_tab: InfoSheetTab::Media,
@@ -353,6 +369,7 @@ impl ChatView {
         self.reply_to = None;
         self.editing_message = None;
         self.context_menu = None;
+        self.chat_context_menu = None;
         self.is_info_sheet_open = false;
 
         if cx.has_global::<ChatStore>() {
@@ -941,6 +958,43 @@ impl ChatView {
         .detach();
     }
 
+    /// Set mute mode for a chat ("off", "8h", "1w", "forever")
+    pub fn set_mute(&mut self, chat_id: String, mode: String, cx: &mut Context<Self>) {
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+
+        let target_chat = chat_id.clone();
+        let target_mode = mode.clone();
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.mute_chat(&target_chat, &target_mode).await })
+                    .await;
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |_this, cx| {
+                            if let Ok(Ok(cs)) = res {
+                                if cx.has_global::<ChatStore>() {
+                                    ChatStore::global_mut(cx).patch_chat_state(&cs);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Create new group
     pub fn submit_create_group(&mut self, cx: &mut Context<Self>) {
         let name = self.new_group_name.trim().to_string();
@@ -1239,6 +1293,7 @@ impl Render for ChatView {
                                     .border_color(border_color.opacity(0.3))
                                     .items_center()
                                     .gap_2()
+                                    .cursor_text()
                                     .track_focus(&self.search_focus_handle)
                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                         this.search_focus_handle.focus(window, cx);
@@ -1273,6 +1328,7 @@ impl Render for ChatView {
                                     .child(
                                         div()
                                             .flex_1()
+                                            .cursor_text()
                                             .text_xs()
                                             .text_color(if self.search_query.is_empty() { muted_text } else { text_color })
                                             .child(if self.search_query.is_empty() {
@@ -1404,6 +1460,7 @@ impl Render for ChatView {
                                         let is_selected = selected_chat_id.as_deref() == Some(&chat.id);
                                         let chat_id = chat.id.clone();
                                         let is_pinned = chat.pinned_at.is_some();
+                                        let is_muted = chat.mute_mode != "off" && !chat.mute_mode.is_empty();
 
                                         // Clamped single-line snippet to guarantee identical 72px row heights
                                         let first_line = chat.last_msg.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
@@ -1438,7 +1495,31 @@ impl Render for ChatView {
                                                 cx.listener({
                                                     let cid = chat_id.clone();
                                                     move |this, _, window, cx| {
+                                                        this.chat_context_menu = None;
                                                         this.select_chat(cid.clone(), window, cx);
+                                                    }
+                                                }),
+                                            )
+                                            .on_mouse_down(
+                                                MouseButton::Right,
+                                                cx.listener({
+                                                    let c_id = chat_id.clone();
+                                                    let c_name = chat.name.clone();
+                                                    let pinned = is_pinned;
+                                                    let archived = chat.archived;
+                                                    let muted = is_muted;
+                                                    move |this, ev: &MouseDownEvent, _, cx| {
+                                                        this.context_menu = None;
+                                                        this.chat_context_menu = Some(ChatContextMenu {
+                                                            chat_id: c_id.clone(),
+                                                            chat_name: c_name.clone(),
+                                                            is_pinned: pinned,
+                                                            is_archived: archived,
+                                                            is_muted: muted,
+                                                            position: ev.position,
+                                                            show_mute_submenu: false,
+                                                        });
+                                                        cx.notify();
                                                     }
                                                 }),
                                             )
@@ -1483,6 +1564,16 @@ impl Render for ChatView {
                                                                 Some(
                                                                     svg()
                                                                         .data(PIN_SVG)
+                                                                        .size(px(12.0))
+                                                                        .text_color(muted_text),
+                                                                )
+                                                            } else {
+                                                                None
+                                                            })
+                                                            .children(if is_muted {
+                                                                Some(
+                                                                    svg()
+                                                                        .data(VOLUME_X_SVG)
                                                                         .size(px(12.0))
                                                                         .text_color(muted_text),
                                                                 )
@@ -2074,6 +2165,7 @@ impl Render for ChatView {
                                                         .bg(theme.muted.opacity(0.5))
                                                         .items_center()
                                                         .gap_2()
+                                                        .cursor_text()
                                                         .track_focus(&self.compose_focus_handle)
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                                             this.compose_focus_handle.focus(window, cx);
@@ -2120,6 +2212,7 @@ impl Render for ChatView {
                                                         .child(
                                                             div()
                                                                 .flex_1()
+                                                                .cursor_text()
                                                                 .text_sm()
                                                                 .text_color(if self.compose_text.is_empty() {
                                                                     muted_text
@@ -2580,6 +2673,307 @@ impl Render for ChatView {
                                     None
                                 }),
                         ),
+                )
+            } else {
+                None
+            })
+            // ====================================================
+            // CHAT SIDEBAR CONTEXT MENU POPOVER (RIGHT-CLICK ON CHAT)
+            // ====================================================
+            .children(if let Some(ref ctx) = self.chat_context_menu {
+                let chat_id = ctx.chat_id.clone();
+                let is_pinned = ctx.is_pinned;
+                let is_archived = ctx.is_archived;
+                let is_muted = ctx.is_muted;
+                let show_mute_submenu = ctx.show_mute_submenu;
+
+                let win_w = f32::from(window.viewport_size().width);
+                let win_h = f32::from(window.viewport_size().height);
+                let menu_w = 175.0;
+                let menu_h = 135.0;
+
+                let click_x = f32::from(ctx.position.x);
+                let click_y = f32::from(ctx.position.y);
+
+                let pos_x = if click_x + menu_w > win_w - 20.0 {
+                    (click_x - menu_w).max(20.0)
+                } else {
+                    click_x.max(20.0)
+                };
+
+                let pos_y = if click_y + menu_h > win_h - 20.0 {
+                    (click_y - menu_h).max(20.0)
+                } else {
+                    click_y.max(20.0)
+                };
+
+                let sub_w = 130.0;
+                let sub_h = 120.0;
+                let sub_x = if pos_x + menu_w + sub_w > win_w - 15.0 {
+                    (pos_x - sub_w - 4.0).max(10.0)
+                } else {
+                    pos_x + menu_w + 4.0
+                };
+                let sub_y = (pos_y + 70.0).min(win_h - sub_h - 15.0).max(10.0);
+
+                let mute_bg = if show_mute_submenu {
+                    theme.primary.opacity(0.25)
+                } else {
+                    rgba(0x00000000).into()
+                };
+
+                Some(
+                    div()
+                        .id("chat-context-menu-backdrop")
+                        .absolute()
+                        .inset_0()
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                            this.chat_context_menu = None;
+                            cx.notify();
+                        }))
+                        .on_mouse_down(MouseButton::Right, cx.listener(|this, _, _, cx| {
+                            this.chat_context_menu = None;
+                            cx.notify();
+                        }))
+                        .child(
+                            v_flex()
+                                .absolute()
+                                .left(px(pos_x))
+                                .top(px(pos_y))
+                                .w(px(menu_w))
+                                .p_1p5()
+                                .gap_0p5()
+                                .rounded_2xl()
+                                .bg(card_bg)
+                                .border_1()
+                                .border_color(border_color)
+                                .shadow_xl()
+                                .on_mouse_down(MouseButton::Left, |_, _, _| {})
+                                // Pin / Unpin Action
+                                .child({
+                                    let cid = chat_id.clone();
+                                    h_flex()
+                                        .cursor_pointer()
+                                        .px_3()
+                                        .py_2()
+                                        .rounded_xl()
+                                        .gap_2p5()
+                                        .items_center()
+                                        .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                        .on_mouse_move(cx.listener(|this, _, _, cx| {
+                                            if let Some(m) = this.chat_context_menu.as_mut() {
+                                                if m.show_mute_submenu {
+                                                    m.show_mute_submenu = false;
+                                                    cx.notify();
+                                                }
+                                            }
+                                        }))
+                                        .child(svg().data(PIN_SVG).size(px(15.0)).text_color(muted_text))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(text_color)
+                                                .child(if is_pinned { "Unpin" } else { "Pin" }),
+                                        )
+                                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                            this.toggle_pin(cid.clone(), is_pinned, cx);
+                                            this.chat_context_menu = None;
+                                            cx.notify();
+                                        }))
+                                })
+                                // Archive / Unarchive Action
+                                .child({
+                                    let cid = chat_id.clone();
+                                    h_flex()
+                                        .cursor_pointer()
+                                        .px_3()
+                                        .py_2()
+                                        .rounded_xl()
+                                        .gap_2p5()
+                                        .items_center()
+                                        .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                        .on_mouse_move(cx.listener(|this, _, _, cx| {
+                                            if let Some(m) = this.chat_context_menu.as_mut() {
+                                                if m.show_mute_submenu {
+                                                    m.show_mute_submenu = false;
+                                                    cx.notify();
+                                                }
+                                            }
+                                        }))
+                                        .child(svg().data(ARCHIVE_SVG).size(px(15.0)).text_color(muted_text))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(text_color)
+                                                .child(if is_archived { "Unarchive" } else { "Archive" }),
+                                        )
+                                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                            this.toggle_archive(cid.clone(), is_archived, cx);
+                                            this.chat_context_menu = None;
+                                            cx.notify();
+                                        }))
+                                })
+                                // Mute / Unmute Action
+                                .child({
+                                    let cid = chat_id.clone();
+                                    if is_muted {
+                                        // Directly unmute if already muted
+                                        h_flex()
+                                            .cursor_pointer()
+                                            .px_3()
+                                            .py_2()
+                                            .rounded_xl()
+                                            .gap_2p5()
+                                            .items_center()
+                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                            .child(svg().data(VOLUME_X_SVG).size(px(15.0)).text_color(muted_text))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(text_color)
+                                                    .child("Unmute"),
+                                            )
+                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                this.set_mute(cid.clone(), "off".to_string(), cx);
+                                                this.chat_context_menu = None;
+                                                cx.notify();
+                                            }))
+                                    } else {
+                                        // Flyout submenu on hover / click
+                                        h_flex()
+                                            .cursor_pointer()
+                                            .px_3()
+                                            .py_2()
+                                            .rounded_xl()
+                                            .justify_between()
+                                            .items_center()
+                                            .bg(mute_bg)
+                                            .hover(|s| s.bg(theme.primary.opacity(0.25)))
+                                            .on_mouse_move(cx.listener(|this, _, _, cx| {
+                                                if let Some(m) = this.chat_context_menu.as_mut() {
+                                                    if !m.show_mute_submenu {
+                                                        m.show_mute_submenu = true;
+                                                        cx.notify();
+                                                    }
+                                                }
+                                            }))
+                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                if let Some(m) = this.chat_context_menu.as_mut() {
+                                                    m.show_mute_submenu = !m.show_mute_submenu;
+                                                    cx.notify();
+                                                }
+                                            }))
+                                            .child(
+                                                h_flex()
+                                                    .gap_2p5()
+                                                    .items_center()
+                                                    .child(svg().data(VOLUME_X_SVG).size(px(15.0)).text_color(muted_text))
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(text_color)
+                                                            .child("Mute"),
+                                                    ),
+                                            )
+                                            .child(
+                                                svg()
+                                                    .data(CHEVRON_RIGHT_SVG)
+                                                    .size(px(13.0))
+                                                    .text_color(muted_text),
+                                            )
+                                    }
+                                }),
+                        )
+                        // Flyout Submenu for Mute Durations
+                        .children(if show_mute_submenu && !is_muted {
+                            let cid_8h = chat_id.clone();
+                            let cid_1w = chat_id.clone();
+                            let cid_always = chat_id.clone();
+                            Some(
+                                v_flex()
+                                    .absolute()
+                                    .left(px(sub_x))
+                                    .top(px(sub_y))
+                                    .w(px(sub_w))
+                                    .p_1p5()
+                                    .gap_0p5()
+                                    .rounded_2xl()
+                                    .bg(card_bg)
+                                    .border_1()
+                                    .border_color(border_color)
+                                    .shadow_xl()
+                                    .on_mouse_down(MouseButton::Left, |_, _, _| {})
+                                    .child(
+                                        h_flex()
+                                            .cursor_pointer()
+                                            .px_3()
+                                            .py_2()
+                                            .rounded_xl()
+                                            .items_center()
+                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(text_color)
+                                                    .child("8 hours"),
+                                            )
+                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                this.set_mute(cid_8h.clone(), "8h".to_string(), cx);
+                                                this.chat_context_menu = None;
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .cursor_pointer()
+                                            .px_3()
+                                            .py_2()
+                                            .rounded_xl()
+                                            .items_center()
+                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(text_color)
+                                                    .child("1 week"),
+                                            )
+                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                this.set_mute(cid_1w.clone(), "1w".to_string(), cx);
+                                                this.chat_context_menu = None;
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .cursor_pointer()
+                                            .px_3()
+                                            .py_2()
+                                            .rounded_xl()
+                                            .items_center()
+                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(text_color)
+                                                    .child("Always"),
+                                            )
+                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                this.set_mute(cid_always.clone(), "forever".to_string(), cx);
+                                                this.chat_context_menu = None;
+                                                cx.notify();
+                                            })),
+                                    ),
+                            )
+                        } else {
+                            None
+                        }),
                 )
             } else {
                 None
