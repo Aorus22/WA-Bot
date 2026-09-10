@@ -2,6 +2,7 @@ package routes
 
 import (
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -286,18 +287,52 @@ func (r *Router) handleMediaFile(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) setupStaticRoutes() {
-	frontendPath := filepath.Join(".", "frontend", "dist")
+	_ = mime.AddExtensionType(".js", "application/javascript")
+	_ = mime.AddExtensionType(".mjs", "application/javascript")
+	_ = mime.AddExtensionType(".css", "text/css")
+	_ = mime.AddExtensionType(".wasm", "application/wasm")
+
+	candidates := []string{
+		os.Getenv("WEB_DIST_PATH"),
+		os.Getenv("FRONTEND_DIST_PATH"),
+		filepath.Join(".", "web", "dist"),
+		filepath.Join(".", "frontend", "dist"),
+		filepath.Join("..", "web", "dist"),
+		filepath.Join("..", "frontend", "dist"),
+	}
+
+	resolveDistPath := func() string {
+		for _, p := range candidates {
+			if p == "" {
+				continue
+			}
+			if info, err := os.Stat(p); err == nil && info.IsDir() {
+				if _, err := os.Stat(filepath.Join(p, "index.html")); err == nil {
+					return p
+				}
+			}
+		}
+		return ""
+	}
 
 	r.muxRouter.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if _, err := os.Stat(frontendPath); err == nil {
-			filePath := filepath.Join(frontendPath, filepath.Clean(req.URL.Path))
+		distPath := resolveDistPath()
+		if distPath != "" {
+			reqPath := filepath.Clean(req.URL.Path)
+			if reqPath == "/" || reqPath == "." {
+				http.ServeFile(w, req, filepath.Join(distPath, "index.html"))
+				return
+			}
+
+			filePath := filepath.Join(distPath, reqPath)
 			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
 				http.ServeFile(w, req, filePath)
 				return
 			}
-			http.ServeFile(w, req, filepath.Join(frontendPath, "index.html"))
+			http.ServeFile(w, req, filepath.Join(distPath, "index.html"))
 		} else {
-			w.Write([]byte("Frontend build not found"))
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Frontend build not found. Please run 'npm run build' inside web directory."))
 		}
 	}))
 }
