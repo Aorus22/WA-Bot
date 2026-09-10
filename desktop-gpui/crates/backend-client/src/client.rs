@@ -1233,6 +1233,20 @@ impl HttpClient {
             .await?;
         Self::handle_response(resp).await
     }
+
+    // --- Groups ---
+
+    pub async fn join_group(&self, link: &str) -> Result<StatusResult> {
+        let resp = self
+            .client
+            .post(format!("{}/groups/join", self.base_url))
+            .json(&json!({
+                "link": link,
+            }))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
 }
 
 fn urlencoding(s: &str) -> String {
