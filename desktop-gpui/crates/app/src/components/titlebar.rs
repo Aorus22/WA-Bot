@@ -2,7 +2,7 @@
 
 use gpui::{
     div, px, rgb, svg, App, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    RenderOnce, StatefulInteractiveElement, Styled, Window, WindowControlArea,
+    RenderOnce, Styled, Window, WindowControlArea,
 };
 use gpui_component::h_flex;
 #[cfg(target_os = "windows")]
@@ -113,9 +113,9 @@ impl RenderOnce for AppTitleBar {
             .id("app-titlebar")
             .w_full()
             .h(px(TITLEBAR_HEIGHT))
-            .bg(theme.secondary)
+            .bg(theme.background)
             .border_b_1()
-            .border_color(theme.border)
+            .border_color(theme.border.opacity(0.4))
             .items_center()
             .justify_between()
             .pl_3()
