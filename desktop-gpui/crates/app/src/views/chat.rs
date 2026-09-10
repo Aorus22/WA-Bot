@@ -1529,15 +1529,18 @@ impl Render for ChatView {
                                         .bg(card_bg)
                                         .items_center()
                                         .justify_between()
-                                        .cursor_pointer()
-                                        .hover(|s| s.bg(theme.muted.opacity(0.3)))
-                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                            this.toggle_info_sheet(cx);
-                                        }))
+                                        // Left Profile Area (Clicking opens Info Sheet)
                                         .child(
                                             h_flex()
                                                 .items_center()
                                                 .gap_3()
+                                                .cursor_pointer()
+                                                .p_1()
+                                                .rounded_lg()
+                                                .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                    this.toggle_info_sheet(cx);
+                                                }))
                                                 .child(
                                                     if active_chat.is_group {
                                                         div()
@@ -1597,7 +1600,11 @@ impl Render for ChatView {
                                                         .p_2()
                                                         .rounded_full()
                                                         .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                        .child(svg().data(PHONE_SVG).size(px(18.0)).text_color(muted_text)),
+                                                        .child(svg().data(PHONE_SVG).size(px(18.0)).text_color(muted_text))
+                                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                            this.toast_message = Some(("Voice call is handled via WhatsApp Web".into(), false));
+                                                            cx.notify();
+                                                        })),
                                                 )
                                                 .child(
                                                     div()
@@ -1605,7 +1612,11 @@ impl Render for ChatView {
                                                         .p_2()
                                                         .rounded_full()
                                                         .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                        .child(svg().data(VIDEO_SVG).size(px(18.0)).text_color(muted_text)),
+                                                        .child(svg().data(VIDEO_SVG).size(px(18.0)).text_color(muted_text))
+                                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                            this.toast_message = Some(("Video call is handled via WhatsApp Web".into(), false));
+                                                            cx.notify();
+                                                        })),
                                                 )
                                                 .child(
                                                     div()
@@ -1613,7 +1624,11 @@ impl Render for ChatView {
                                                         .p_2()
                                                         .rounded_full()
                                                         .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                        .child(svg().data(SEARCH_SVG).size(px(18.0)).text_color(muted_text)),
+                                                        .child(svg().data(SEARCH_SVG).size(px(18.0)).text_color(muted_text))
+                                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                                            this.search_focus_handle.focus(window, cx);
+                                                            cx.notify();
+                                                        })),
                                                 )
                                                 .child(
                                                     div()
@@ -1621,7 +1636,10 @@ impl Render for ChatView {
                                                         .p_2()
                                                         .rounded_full()
                                                         .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                        .child(svg().data(MORE_VERTICAL_SVG).size(px(18.0)).text_color(muted_text)),
+                                                        .child(svg().data(MORE_VERTICAL_SVG).size(px(18.0)).text_color(muted_text))
+                                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                            this.toggle_info_sheet(cx);
+                                                        })),
                                                 ),
                                         ),
                                 )
