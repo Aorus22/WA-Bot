@@ -306,6 +306,7 @@ impl HttpClient {
             .client
             .post(format!("{}/send-message", self.base_url))
             .json(&json!({
+                "secret": "default-secret",
                 "target": target,
                 "message": message,
             }))
