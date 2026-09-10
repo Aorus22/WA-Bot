@@ -2726,6 +2726,14 @@ impl Render for ChatView {
                                                         "http://127.0.0.1:3000/api".to_string()
                                                     };
 
+                                                    let is_group_chat = this.selected_chat_id.as_ref().map(|cid| {
+                                                        cid.ends_with("@g.us") || if cx.has_global::<ChatStore>() {
+                                                            ChatStore::global(cx).chats.iter().find(|c| c.id == *cid).map(|c| c.is_group).unwrap_or(false)
+                                                        } else {
+                                                            false
+                                                        }
+                                                    }).unwrap_or(false);
+
                                                     // Auto-load older messages when user scrolls near top
                                                     if index <= 2 && this.has_more && !this.is_loading_more && !this.is_loading_messages {
                                                         this.load_older_messages(cx);
@@ -2739,7 +2747,7 @@ impl Render for ChatView {
                                                         h_flex()
                                                             .w_full()
                                                             .justify_center()
-                                                            .py_2()
+                                                            .py_3()
                                                             .child(
                                                                 div()
                                                                     .px_3()
@@ -2753,18 +2761,29 @@ impl Render for ChatView {
                                                             )
                                                             .into_any_element()
                                                     } else if let Some(r_msg) = this.cached_render_messages.get(index - 1) {
+                                                        let msg_idx = index - 1;
                                                         let is_from_me = r_msg.is_from_me;
+                                                        let is_first_in_sequence = if msg_idx > 0 {
+                                                            if let Some(prev) = this.cached_render_messages.get(msg_idx - 1) {
+                                                                prev.msg.from != r_msg.msg.from
+                                                            } else {
+                                                                true
+                                                            }
+                                                        } else {
+                                                            true
+                                                        };
+
+                                                        let sender_jid = r_msg.msg.from.clone();
+                                                        let sender_name = r_msg.msg.sender_name.clone().unwrap_or_else(|| {
+                                                            sender_jid.split('@').next().unwrap_or(&sender_jid).to_string()
+                                                        });
+                                                        let sender_color = avatar_color_for(&sender_jid);
+
                                                         let content = r_msg.content.clone();
                                                         let time_str = r_msg.time_str.clone();
                                                         let ticks = r_msg.ticks;
                                                         let quoted = r_msg.quoted.clone();
                                                         let msg_clone = r_msg.msg.clone();
-
-                                                        let row = if is_from_me {
-                                                            h_flex().w_full().justify_end()
-                                                        } else {
-                                                            h_flex().w_full().justify_start()
-                                                        };
 
                                                         let msg_type = r_msg.msg.message_type.as_str();
                                                         let is_image = msg_type == "image" || (r_msg.msg.media_url.is_some() && (content == "[Image]" || content.is_empty()));
@@ -2819,18 +2838,6 @@ impl Render for ChatView {
                                                                     }
                                                                 }),
                                                             )
-                                                            // Sender name in group chat
-                                                            .children(if !is_from_me && r_msg.msg.sender_name.is_some() {
-                                                                Some(
-                                                                    div()
-                                                                        .text_xs()
-                                                                        .font_weight(FontWeight::BOLD)
-                                                                        .text_color(primary_color)
-                                                                        .child(r_msg.msg.sender_name.clone().unwrap()),
-                                                                )
-                                                            } else {
-                                                                None
-                                                            })
                                                             // Quoted reply box matching Web
                                                             .children(if let Some((q_sender, q_line)) = quoted {
                                                                 Some(
@@ -2971,15 +2978,74 @@ impl Render for ChatView {
                                                                     }),
                                                             );
 
-                                                        row.child(bubble).pb_3().into_any_element()
+                                                        if is_from_me {
+                                                            h_flex()
+                                                                .w_full()
+                                                                .justify_end()
+                                                                .px_6()
+                                                                .pb_2()
+                                                                .child(bubble)
+                                                                .into_any_element()
+                                                        } else if is_group_chat {
+                                                            let avatar_slot = div()
+                                                                .w(px(32.0))
+                                                                .h(px(32.0))
+                                                                .flex_shrink_0()
+                                                                .children(if is_first_in_sequence {
+                                                                    Some(render_avatar(
+                                                                        &sender_jid,
+                                                                        &sender_name,
+                                                                        "",
+                                                                        false,
+                                                                        32.0,
+                                                                        &base_url,
+                                                                        &theme,
+                                                                    ))
+                                                                } else {
+                                                                    None
+                                                                });
+
+                                                            let msg_column = v_flex()
+                                                                .gap_1()
+                                                                .children(if is_first_in_sequence {
+                                                                    Some(
+                                                                        div()
+                                                                            .text_xs()
+                                                                            .font_weight(FontWeight::BOLD)
+                                                                            .text_color(sender_color)
+                                                                            .ml_1()
+                                                                            .child(sender_name),
+                                                                    )
+                                                                } else {
+                                                                    None
+                                                                })
+                                                                .child(bubble);
+
+                                                            h_flex()
+                                                                .w_full()
+                                                                .justify_start()
+                                                                .items_start()
+                                                                .gap_2p5()
+                                                                .px_6()
+                                                                .pb_2()
+                                                                .child(avatar_slot)
+                                                                .child(msg_column)
+                                                                .into_any_element()
+                                                        } else {
+                                                            h_flex()
+                                                                .w_full()
+                                                                .justify_start()
+                                                                .px_6()
+                                                                .pb_2()
+                                                                .child(bubble)
+                                                                .into_any_element()
+                                                        }
                                                     } else {
                                                         div().into_any_element()
                                                     }
                                                 }),
                                             )
                                             .size_full()
-                                            .px_6()
-                                            .py_4()
                                             .into_any_element()
                                         })
                                         .child(
