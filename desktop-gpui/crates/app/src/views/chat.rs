@@ -9,7 +9,10 @@ use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{Chat, Message};
 
+use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
+use crate::components::nav_sidebar::SIDEBAR_WIDTH;
+use crate::components::titlebar::TITLEBAR_HEIGHT;
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::state::chat::ChatStore;
@@ -3510,19 +3513,33 @@ impl Render for ChatView {
                 let menu_w = 230.0;
                 let menu_h = 160.0;
 
-                let click_x = f32::from(ctx.position.x);
-                let click_y = f32::from(ctx.position.y);
-
-                let pos_x = if click_x + menu_w > win_w - 20.0 {
-                    (click_x - menu_w).max(20.0)
+                let banner_h = if cx.has_global::<ConnectionState>() {
+                    match ConnectionState::global(cx).status {
+                        ConnectionStatus::Connected => 0.0,
+                        _ => 36.0,
+                    }
                 } else {
-                    click_x.max(20.0)
+                    0.0
+                };
+                let offset_x = SIDEBAR_WIDTH;
+                let offset_y = TITLEBAR_HEIGHT + banner_h;
+
+                let view_w = (win_w - offset_x).max(100.0);
+                let view_h = (win_h - offset_y).max(100.0);
+
+                let rel_x = f32::from(ctx.position.x) - offset_x;
+                let rel_y = f32::from(ctx.position.y) - offset_y;
+
+                let pos_x = if rel_x + menu_w > view_w - 15.0 {
+                    (rel_x - menu_w).max(8.0)
+                } else {
+                    rel_x.max(8.0)
                 };
 
-                let pos_y = if click_y + menu_h > win_h - 20.0 {
-                    (click_y - menu_h).max(20.0)
+                let pos_y = if rel_y + menu_h > view_h - 15.0 {
+                    (rel_y - menu_h).max(8.0)
                 } else {
-                    click_y.max(20.0)
+                    rel_y.max(8.0)
                 };
 
                 Some(
@@ -3678,29 +3695,43 @@ impl Render for ChatView {
                 let menu_w = 175.0;
                 let menu_h = 135.0;
 
-                let click_x = f32::from(ctx.position.x);
-                let click_y = f32::from(ctx.position.y);
-
-                let pos_x = if click_x + menu_w > win_w - 20.0 {
-                    (click_x - menu_w).max(20.0)
+                let banner_h = if cx.has_global::<ConnectionState>() {
+                    match ConnectionState::global(cx).status {
+                        ConnectionStatus::Connected => 0.0,
+                        _ => 36.0,
+                    }
                 } else {
-                    click_x.max(20.0)
+                    0.0
+                };
+                let offset_x = SIDEBAR_WIDTH;
+                let offset_y = TITLEBAR_HEIGHT + banner_h;
+
+                let view_w = (win_w - offset_x).max(100.0);
+                let view_h = (win_h - offset_y).max(100.0);
+
+                let rel_x = f32::from(ctx.position.x) - offset_x;
+                let rel_y = f32::from(ctx.position.y) - offset_y;
+
+                let pos_x = if rel_x + menu_w > view_w - 15.0 {
+                    (rel_x - menu_w).max(8.0)
+                } else {
+                    rel_x.max(8.0)
                 };
 
-                let pos_y = if click_y + menu_h > win_h - 20.0 {
-                    (click_y - menu_h).max(20.0)
+                let pos_y = if rel_y + menu_h > view_h - 15.0 {
+                    (rel_y - menu_h).max(8.0)
                 } else {
-                    click_y.max(20.0)
+                    rel_y.max(8.0)
                 };
 
                 let sub_w = 130.0;
                 let sub_h = 120.0;
-                let sub_x = if pos_x + menu_w + sub_w > win_w - 15.0 {
-                    (pos_x - sub_w - 4.0).max(10.0)
+                let sub_x = if pos_x + menu_w + sub_w > view_w - 15.0 {
+                    (pos_x - sub_w - 4.0).max(8.0)
                 } else {
                     pos_x + menu_w + 4.0
                 };
-                let sub_y = (pos_y + 70.0).min(win_h - sub_h - 15.0).max(10.0);
+                let sub_y = (pos_y + 70.0).min(view_h - sub_h - 15.0).max(8.0);
 
                 let mute_bg = if show_mute_submenu {
                     theme.primary.opacity(0.25)
