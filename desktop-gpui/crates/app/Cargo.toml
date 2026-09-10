@@ -19,6 +19,7 @@ path = "src/main.rs"
 # Partial bumps compile each side separately but fail at the call site (E0277);
 # plan 01-01 task 2 guards the pairing. Never use the stale gpui 0.2.2 snapshot.
 gpui = { workspace = true }
+gpui-reqwest-client = { workspace = true }
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.3" }
 gpui-component = { workspace = true }
 gpui-kit-assets = { workspace = true }
