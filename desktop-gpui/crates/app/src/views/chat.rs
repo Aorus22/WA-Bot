@@ -1390,26 +1390,32 @@ impl Render for ChatView {
                                             })
                                             // Real Profile Picture or Fallback Initial Avatar
                                             .child(
-                                                if has_avatar {
-                                                    img(chat.avatar.clone())
-                                                        .w(px(48.0))
-                                                        .h(px(48.0))
-                                                        .rounded_full()
-                                                        .flex_shrink_0()
-                                                        .into_any_element()
-                                                } else {
+                                                if chat.is_group {
                                                     div()
                                                         .w(px(48.0))
                                                         .h(px(48.0))
                                                         .rounded_full()
-                                                        .bg(theme.primary.opacity(0.12))
+                                                        .bg(theme.primary.opacity(0.15))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .flex_shrink_0()
+                                                        .child(svg().data(USERS_SVG).size(px(22.0)).text_color(primary_color))
+                                                        .into_any_element()
+                                                } else {
+                                                    let color = avatar_color_for(&chat.id);
+                                                    div()
+                                                        .w(px(48.0))
+                                                        .h(px(48.0))
+                                                        .rounded_full()
+                                                        .bg(color.opacity(0.18))
                                                         .flex()
                                                         .items_center()
                                                         .justify_center()
                                                         .flex_shrink_0()
                                                         .text_base()
                                                         .font_weight(FontWeight::BOLD)
-                                                        .text_color(primary_color)
+                                                        .text_color(color)
                                                         .child(initial)
                                                         .into_any_element()
                                                 }
@@ -1501,13 +1507,14 @@ impl Render for ChatView {
             .child(
                 v_flex()
                     .flex_1()
+                    .min_w(px(0.0))
                     .h_full()
+                    .overflow_hidden()
                     .bg(bg_color)
                     .children(if let Some(ref active_chat) = selected_chat {
                         let chat_name = active_chat.name.clone();
                         let chat_jid = active_chat.id.clone();
                         let avatar_initial = chat_name.chars().next().unwrap_or('?').to_uppercase().to_string();
-                        let has_avatar = !active_chat.avatar.is_empty();
 
                         Some(
                             v_flex()
@@ -1532,25 +1539,32 @@ impl Render for ChatView {
                                                 .items_center()
                                                 .gap_3()
                                                 .child(
-                                                    if has_avatar {
-                                                        img(active_chat.avatar.clone())
-                                                            .w(px(40.0))
-                                                            .h(px(40.0))
-                                                            .rounded_full()
-                                                            .flex_shrink_0()
-                                                            .into_any_element()
-                                                    } else {
+                                                    if active_chat.is_group {
                                                         div()
                                                             .w(px(40.0))
                                                             .h(px(40.0))
                                                             .rounded_full()
-                                                            .bg(theme.primary.opacity(0.12))
+                                                            .bg(theme.primary.opacity(0.15))
                                                             .flex()
                                                             .items_center()
                                                             .justify_center()
+                                                            .flex_shrink_0()
+                                                            .child(svg().data(USERS_SVG).size(px(20.0)).text_color(primary_color))
+                                                            .into_any_element()
+                                                    } else {
+                                                        let color = avatar_color_for(&active_chat.id);
+                                                        div()
+                                                            .w(px(40.0))
+                                                            .h(px(40.0))
+                                                            .rounded_full()
+                                                            .bg(color.opacity(0.18))
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .flex_shrink_0()
                                                             .text_sm()
                                                             .font_weight(FontWeight::BOLD)
-                                                            .text_color(primary_color)
+                                                            .text_color(color)
                                                             .child(avatar_initial)
                                                             .into_any_element()
                                                     }
@@ -2088,7 +2102,10 @@ impl Render for ChatView {
                 Some(
                     v_flex()
                         .w(px(320.0))
+                        .min_w(px(320.0))
+                        .max_w(px(320.0))
                         .h_full()
+                        .overflow_hidden()
                         .border_l_1()
                         .border_color(border_color)
                         .bg(card_bg)
@@ -2137,13 +2154,7 @@ impl Render for ChatView {
                                         .gap_2()
                                         .py_2()
                                         .child(
-                                            if has_avatar {
-                                                img(chat.avatar.clone())
-                                                    .w(px(80.0))
-                                                    .h(px(80.0))
-                                                    .rounded_full()
-                                                    .into_any_element()
-                                            } else {
+                                            if chat.is_group {
                                                 div()
                                                     .w(px(80.0))
                                                     .h(px(80.0))
@@ -2152,9 +2163,21 @@ impl Render for ChatView {
                                                     .flex()
                                                     .items_center()
                                                     .justify_center()
-                                                    .text_2xl()
+                                                    .child(svg().data(USERS_SVG).size(px(40.0)).text_color(primary_color))
+                                                    .into_any_element()
+                                            } else {
+                                                let color = avatar_color_for(&chat.id);
+                                                div()
+                                                    .w(px(80.0))
+                                                    .h(px(80.0))
+                                                    .rounded_full()
+                                                    .bg(color.opacity(0.18))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .text_3xl()
                                                     .font_weight(FontWeight::BOLD)
-                                                    .text_color(primary_color)
+                                                    .text_color(color)
                                                     .child(initial)
                                                     .into_any_element()
                                             }
@@ -2164,12 +2187,16 @@ impl Render for ChatView {
                                                 .text_lg()
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(text_color)
+                                                .max_w_full()
+                                                .overflow_hidden()
                                                 .child(chat.name.clone()),
                                         )
                                         .child(
                                             div()
                                                 .text_xs()
                                                 .text_color(muted_text)
+                                                .max_w_full()
+                                                .overflow_hidden()
                                                 .child(chat.id.clone()),
                                         ),
                                 )
