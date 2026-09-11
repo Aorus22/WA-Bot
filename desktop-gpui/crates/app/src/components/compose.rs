@@ -127,6 +127,21 @@ pub fn is_audio_file(file_name: &str) -> bool {
     )
 }
 
+/// Whether a message body is a bare document file name (web's document
+/// attachments carry the file name as their content). Requires a single
+/// token so ordinary text ending in ".pdf" is not mistaken for a file.
+pub fn looks_like_document_name(content: &str) -> bool {
+    let name = content.trim();
+    if name.is_empty() || name.split_whitespace().count() != 1 {
+        return false;
+    }
+    matches!(
+        extension_lower(name).as_str(),
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "csv" | "rtf" | "odt"
+            | "ods" | "zip" | "rar" | "7z" | "json" | "xml" | "apk" | "epub"
+    )
+}
+
 /// Video extension recognition.
 pub fn is_video_file(file_name: &str) -> bool {
     matches!(
@@ -385,6 +400,18 @@ mod tests {
         assert!(!is_audio_file("a.mp4"));
         assert!(is_video_file("a.mkv"));
         assert!(!is_video_file("a.mkvz"));
+    }
+
+    #[test]
+    fn document_name_detection_is_conservative() {
+        assert!(looks_like_document_name("kosongan.docx"));
+        assert!(looks_like_document_name(" data.JSON "));
+        // Only a bare file name counts; captions and sentences are left alone
+        // (real document messages carry `type == "document"` anyway).
+        assert!(!looks_like_document_name("Laporan Q3.pdf"));
+        assert!(!looks_like_document_name("lihat file.pdf"));
+        assert!(!looks_like_document_name("halo"));
+        assert!(!looks_like_document_name(""));
     }
 
     #[test]
