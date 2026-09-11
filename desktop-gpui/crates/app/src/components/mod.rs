@@ -1,6 +1,7 @@
 pub mod call_overlay;
 pub mod chat_info_sheet;
 pub mod chat_sidebar;
+pub mod compose;
 pub mod connection_banner;
 pub mod dialogs;
 pub mod emoji_picker;
@@ -14,6 +15,7 @@ pub mod toast;
 pub use call_overlay::*;
 pub use chat_info_sheet::*;
 pub use chat_sidebar::*;
+pub use compose::*;
 pub use connection_banner::*;
 pub use emoji_picker::*;
 pub use media_player::*;

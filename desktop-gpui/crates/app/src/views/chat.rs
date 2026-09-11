@@ -9,8 +9,14 @@ use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{CallType, Chat, Message, ReactionEntry};
+use wabot_backend_client::multipart::SendMediaBuilder;
 
 use crate::components::{
+    compose::{
+        encode_markdown, AttachPanel, ComposeDialog, ContactDraft, LocationDraft, MediaKind,
+        PollDraft, StickerPickerState,
+    },
+    emoji_picker::{EmojiPickerState, EMOJI_CATEGORIES},
     connection_banner::{ConnectionState, ConnectionStatus},
     toast,
 };
@@ -300,6 +306,21 @@ pub struct ChatView {
     pub new_group_focus: FocusHandle,
     pub is_creating_group: bool,
 
+    // Attach (+) menu, emoji picker and compose dialogs (web parity)
+    pub attach_panel: AttachPanel,
+    pub emoji_picker: EmojiPickerState,
+    pub is_md_mode: bool,
+    pub compose_dialog: Option<ComposeDialog>,
+    pub poll_draft: PollDraft,
+    pub location_draft: LocationDraft,
+    pub contact_draft: ContactDraft,
+    pub sticker_picker: StickerPickerState,
+    // Focus handle shared by every dialog input; `active_compose_field` selects
+    // which field receives the keystrokes.
+    pub compose_field_focus: FocusHandle,
+    pub active_compose_field: usize,
+    pub is_sending_attachment: bool,
+
     // Full-screen image preview
     pub preview_image_url: Option<String>,
 
@@ -366,6 +387,18 @@ impl ChatView {
             preview_image_url: None,
 
             is_join_group_open: false,
+
+            attach_panel: AttachPanel::None,
+            emoji_picker: EmojiPickerState::new(),
+            is_md_mode: false,
+            compose_dialog: None,
+            poll_draft: PollDraft::new(),
+            location_draft: LocationDraft::new(),
+            contact_draft: ContactDraft::new(),
+            sticker_picker: StickerPickerState::new(),
+            compose_field_focus: cx.focus_handle(),
+            active_compose_field: 0,
+            is_sending_attachment: false,
             join_group_link: String::new(),
             join_group_focus: cx.focus_handle(),
             is_joining_group: false,
@@ -1242,6 +1275,590 @@ impl ChatView {
         cx.notify();
     }
 
+    // ========================================================================
+    // ATTACH MENU, PICKERS AND COMPOSE DIALOGS (web parity)
+    // ========================================================================
+
+    fn compose_base_url(cx: &App) -> String {
+        if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        }
+    }
+
+    /// Toggle the attach (+) panel: closes whatever is open, else opens the menu.
+    pub fn toggle_attach_panel(&mut self, cx: &mut Context<Self>) {
+        self.attach_panel.toggle_menu();
+        cx.notify();
+    }
+
+    /// Close the attach panel / pickers.
+    pub fn close_attach_panel(&mut self, cx: &mut Context<Self>) {
+        self.attach_panel = AttachPanel::None;
+        cx.notify();
+    }
+
+    /// Show the emoji picker panel.
+    pub fn open_emoji_panel(&mut self, cx: &mut Context<Self>) {
+        self.emoji_picker.open();
+        self.attach_panel = AttachPanel::Emoji;
+        cx.notify();
+    }
+
+    /// Append an emoji to the compose box (web's `addEmoji`).
+    pub fn insert_emoji(&mut self, emoji: &str, cx: &mut Context<Self>) {
+        self.compose_text.push_str(emoji);
+        cx.notify();
+    }
+
+    /// Toggle markdown mode (web's "Markdown (on/off)" item).
+    pub fn toggle_markdown_mode(&mut self, cx: &mut Context<Self>) {
+        self.is_md_mode = !self.is_md_mode;
+        self.attach_panel = AttachPanel::None;
+        if self.is_md_mode {
+            toast::info("Markdown aktif untuk pesan berikutnya", cx);
+        } else {
+            toast::info("Markdown nonaktif", cx);
+        }
+        cx.notify();
+    }
+
+    /// Show the sticker picker, lazily loading favourites once.
+    pub fn open_sticker_panel(&mut self, cx: &mut Context<Self>) {
+        self.attach_panel = AttachPanel::Sticker;
+        if self.sticker_picker.loaded || self.sticker_picker.is_loading {
+            cx.notify();
+            return;
+        }
+        self.sticker_picker.begin_loading();
+        let base_url = Self::compose_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.get_favorite_stickers().await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(favorites)) => this.sticker_picker.set_favorites(favorites),
+                                _ => {
+                                    this.sticker_picker.failed();
+                                    toast::error("Gagal memuat stiker", cx);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Send a sticker by its media URL (web's `handleStickerSelect`).
+    pub fn send_sticker(&mut self, media_url: String, is_animated: bool, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.selected_chat_id.clone() else {
+            return;
+        };
+        self.attach_panel = AttachPanel::None;
+        let base_url = Self::compose_base_url(cx);
+        let temp_id = self.push_optimistic_attachment(
+            cx,
+            &chat_id,
+            "[Sticker]".to_string(),
+            "sticker",
+            Some(media_url.clone()),
+        );
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let target = chat_id.clone();
+                let url = media_url.clone();
+                let res = TOKIO_RT
+                    .spawn(async move { client.send_sticker(&target, &url, is_animated).await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(id_res)) => {
+                                    this.finish_optimistic_attachment(
+                                        cx,
+                                        &chat_id,
+                                        &temp_id,
+                                        Some(id_res.id),
+                                    );
+                                }
+                                _ => {
+                                    this.finish_optimistic_attachment(cx, &chat_id, &temp_id, None);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Open the native file picker for `kind` and send the picked file.
+    pub fn pick_attachment(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.selected_chat_id.clone() else {
+            return;
+        };
+        self.attach_panel = AttachPanel::None;
+        self.is_sending_attachment = true;
+        let base_url = Self::compose_base_url(cx);
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let options = PathPromptOptions {
+                    files: true,
+                    directories: false,
+                    multiple: false,
+                    prompt: Some(kind.prompt().into()),
+                };
+                let receiver = cx_handle.update(|cx: &mut App| cx.prompt_for_paths(options));
+                let picked = match receiver.await {
+                    Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                    _ => None,
+                };
+                let Some(path) = picked else {
+                    // Cancelled: nothing to send.
+                    let _ = cx_handle.update(|cx: &mut App| {
+                        if let Some(view) = this.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.is_sending_attachment = false;
+                                cx.notify();
+                            });
+                        }
+                    });
+                    return;
+                };
+
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "file".to_string());
+                let media_type = kind.media_type(&file_name).to_string();
+
+                let read_path = path.clone();
+                let read = TOKIO_RT
+                    .spawn_blocking(move || std::fs::read(read_path))
+                    .await;
+                let Ok(Ok(bytes)) = read else {
+                    let _ = cx_handle.update(|cx: &mut App| {
+                        if let Some(view) = this.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.is_sending_attachment = false;
+                                toast::error("Gagal membaca file", cx);
+                                cx.notify();
+                            });
+                        }
+                    });
+                    return;
+                };
+
+                // Optimistic bubble, like the web client's temp message.
+                let content = kind.optimistic_content(&file_name, &media_type);
+                let msg_type = kind.optimistic_type(&media_type).to_string();
+                let mut temp_id = String::new();
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            temp_id = this.push_optimistic_attachment(
+                                cx,
+                                &chat_id,
+                                content.clone(),
+                                &msg_type,
+                                None,
+                            );
+                            cx.notify();
+                        });
+                    }
+                });
+                if temp_id.is_empty() {
+                    return;
+                }
+
+                let client = HttpClient::new(&base_url);
+                let target = chat_id.clone();
+                let file_for_send = file_name.clone();
+                let media_for_send = media_type.clone();
+                let res = TOKIO_RT
+                    .spawn(async move {
+                        if media_for_send == "audio" {
+                            client
+                                .send_audio(&target, bytes, &file_for_send, false, None, None)
+                                .await
+                        } else {
+                            client
+                                .send_media(SendMediaBuilder::new(
+                                    &target,
+                                    media_for_send,
+                                    bytes,
+                                    file_for_send,
+                                ))
+                                .await
+                        }
+                    })
+                    .await;
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_sending_attachment = false;
+                            match res {
+                                Ok(Ok(id_res)) => {
+                                    this.finish_optimistic_attachment(
+                                        cx,
+                                        &chat_id,
+                                        &temp_id,
+                                        Some(id_res.id),
+                                    );
+                                    toast::success("Lampiran terkirim", cx);
+                                }
+                                _ => {
+                                    this.finish_optimistic_attachment(cx, &chat_id, &temp_id, None);
+                                    toast::error("Gagal mengirim lampiran", cx);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Insert the local pending bubble for an outgoing attachment.
+    fn push_optimistic_attachment(
+        &mut self,
+        cx: &mut Context<Self>,
+        chat_id: &str,
+        content: String,
+        msg_type: &str,
+        media_url: Option<String>,
+    ) -> String {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let temp_id = format!("temp-{}-{}", msg_type, now_ms);
+        let msg = Message {
+            id: temp_id.clone(),
+            chat_id: chat_id.to_string(),
+            from: "me".to_string(),
+            to: chat_id.to_string(),
+            content: content.clone(),
+            timestamp: now_ms,
+            status: "pending".to_string(),
+            message_type: msg_type.to_string(),
+            media_url,
+            is_automatic: None,
+            sender_name: Some("You".to_string()),
+            reply_to_id: self.reply_to.as_ref().map(|r| r.id.clone()),
+            forwarded: None,
+            reactions: None,
+            extra: None,
+        };
+
+        if cx.has_global::<ChatStore>() {
+            let store = ChatStore::global_mut(cx);
+            store.upsert_message(chat_id, msg.clone());
+            if let Some(c) = store.chats.iter_mut().find(|c| c.id == chat_id) {
+                c.last_msg = content.clone();
+                c.last_time = now_ms;
+            }
+        }
+
+        self.cached_render_messages.push(RenderMessage {
+            msg,
+            is_from_me: true,
+            content,
+            time_str: Self::format_chat_time(now_ms),
+            ticks: MessageTicks::Sent,
+            quoted: None,
+        });
+        let total_items = self.cached_render_messages.len() + 1;
+        self.messages_list_state.reset(total_items);
+        self.messages_list_state.scroll_to_end();
+        temp_id
+    }
+
+    /// Reconcile the optimistic attachment bubble with the server response.
+    fn finish_optimistic_attachment(
+        &mut self,
+        cx: &mut Context<Self>,
+        chat_id: &str,
+        temp_id: &str,
+        real_id: Option<String>,
+    ) {
+        let Some(real_id) = real_id else {
+            // Failure: keep the bubble around marked as failed.
+            if cx.has_global::<ChatStore>() {
+                ChatStore::global_mut(cx).patch_message(chat_id, temp_id, |m| {
+                    m.status = "failed".to_string();
+                });
+            }
+            if let Some(rm) = self.cached_render_messages.iter_mut().find(|m| m.msg.id == temp_id) {
+                rm.msg.status = "failed".to_string();
+                rm.ticks = MessageTicks::Failed;
+            }
+            self.messages_list_state.remeasure();
+            return;
+        };
+
+        // The authoritative WS broadcast may have landed first; then the temp
+        // bubble is a duplicate and gets dropped (web does the same).
+        let already_arrived = cx.has_global::<ChatStore>()
+            && ChatStore::global(cx)
+                .messages_by_chat
+                .get(chat_id)
+                .map(|entry| entry.messages.iter().any(|m| m.id == real_id))
+                .unwrap_or(false);
+
+        if already_arrived {
+            if cx.has_global::<ChatStore>() {
+                ChatStore::global_mut(cx).delete_message(chat_id, temp_id);
+            }
+            self.cached_render_messages.retain(|m| m.msg.id != temp_id);
+        } else {
+            let rid = real_id.clone();
+            if cx.has_global::<ChatStore>() {
+                ChatStore::global_mut(cx).patch_message(chat_id, temp_id, move |m| {
+                    m.id = rid.clone();
+                    m.status = "sent".to_string();
+                });
+            }
+            if let Some(rm) = self.cached_render_messages.iter_mut().find(|m| m.msg.id == temp_id) {
+                rm.msg.id = real_id;
+                rm.msg.status = "sent".to_string();
+            }
+        }
+        self.messages_list_state.remeasure();
+    }
+
+    /// Open one of the poll / location / contact dialogs.
+    pub fn open_compose_dialog(&mut self, dialog: ComposeDialog, cx: &mut Context<Self>) {
+        self.attach_panel = AttachPanel::None;
+        self.active_compose_field = 0;
+        self.compose_dialog = Some(dialog);
+        cx.notify();
+    }
+
+    /// Close the active compose dialog.
+    pub fn close_compose_dialog(&mut self, cx: &mut Context<Self>) {
+        self.compose_dialog = None;
+        self.active_compose_field = 0;
+        cx.notify();
+    }
+
+    /// Route a keystroke to the focused dialog field.
+    fn dialog_key_input(&mut self, ev: &KeyDownEvent, cx: &mut Context<Self>) {
+        match ev.keystroke.key.as_str() {
+            "escape" => self.close_compose_dialog(cx),
+            "backspace" => {
+                if let Some(field) = self.active_dialog_field_mut() {
+                    field.pop();
+                }
+                cx.notify();
+            }
+            "space" => {
+                if let Some(field) = self.active_dialog_field_mut() {
+                    field.push(' ');
+                }
+                cx.notify();
+            }
+            k if k.len() == 1 => {
+                if let Some(field) = self.active_dialog_field_mut() {
+                    field.push_str(k);
+                }
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    fn active_dialog_field_mut(&mut self) -> Option<&mut String> {
+        let dialog = self.compose_dialog?;
+        let index = self.active_compose_field;
+        match dialog {
+            ComposeDialog::Poll => {
+                if index == 0 {
+                    Some(&mut self.poll_draft.question)
+                } else {
+                    self.poll_draft.options.get_mut(index - 1)
+                }
+            }
+            ComposeDialog::Location => match index {
+                0 => Some(&mut self.location_draft.latitude),
+                1 => Some(&mut self.location_draft.longitude),
+                2 => Some(&mut self.location_draft.name),
+                _ => Some(&mut self.location_draft.address),
+            },
+            ComposeDialog::Contact => match index {
+                0 => Some(&mut self.contact_draft.name),
+                _ => Some(&mut self.contact_draft.phone),
+            },
+        }
+    }
+
+    /// Send the poll dialog contents (web's `PollDialog`).
+    pub fn send_poll(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.selected_chat_id.clone() else {
+            return;
+        };
+        let (question, options, multi_select) = match self.poll_draft.validated() {
+            Ok(parts) => parts,
+            Err(msg) => {
+                toast::error(msg, cx);
+                return;
+            }
+        };
+        if self.is_sending_attachment {
+            return;
+        }
+        self.is_sending_attachment = true;
+        let base_url = Self::compose_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move {
+                        client.send_poll(&chat_id, &question, &options, multi_select).await
+                    })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_sending_attachment = false;
+                            match res {
+                                Ok(Ok(_)) => {
+                                    this.poll_draft.reset();
+                                    this.close_compose_dialog(cx);
+                                    toast::success("Poll terkirim", cx);
+                                }
+                                _ => toast::error("Gagal mengirim poll", cx),
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Send the location dialog contents (web's `LocationDialog`).
+    pub fn send_location(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.selected_chat_id.clone() else {
+            return;
+        };
+        let (latitude, longitude, name, address, live) = match self.location_draft.validated() {
+            Ok(parts) => parts,
+            Err(msg) => {
+                toast::error(msg, cx);
+                return;
+            }
+        };
+        if self.is_sending_attachment {
+            return;
+        }
+        self.is_sending_attachment = true;
+        let base_url = Self::compose_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move {
+                        client
+                            .send_location(&chat_id, latitude, longitude, Some(&name), Some(&address), Some(live))
+                            .await
+                    })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_sending_attachment = false;
+                            match res {
+                                Ok(Ok(_)) => {
+                                    this.location_draft.reset();
+                                    this.close_compose_dialog(cx);
+                                    toast::success("Lokasi terkirim", cx);
+                                }
+                                _ => toast::error("Gagal mengirim lokasi", cx),
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Send the contact dialog contents (web's `ContactDialog`).
+    pub fn send_contact(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.selected_chat_id.clone() else {
+            return;
+        };
+        let (name, phone) = match self.contact_draft.validated() {
+            Ok(parts) => parts,
+            Err(msg) => {
+                toast::error(msg, cx);
+                return;
+            }
+        };
+        if self.is_sending_attachment {
+            return;
+        }
+        self.is_sending_attachment = true;
+        let base_url = Self::compose_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.send_contact(&chat_id, &name, &phone, None).await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_sending_attachment = false;
+                            match res {
+                                Ok(Ok(_)) => {
+                                    this.contact_draft.reset();
+                                    this.close_compose_dialog(cx);
+                                    toast::success("Kontak terkirim", cx);
+                                }
+                                _ => toast::error("Gagal mengirim kontak", cx),
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
     /// Start replying to a message
     pub fn start_reply(&mut self, msg: Message, window: &mut Window, cx: &mut Context<Self>) {
         self.reply_to = Some(msg);
@@ -1342,6 +1959,14 @@ impl ChatView {
         self.compose_text.clear();
         self.is_sending = true;
 
+        // Markdown mode wraps the outgoing text in the `{{md:…}}` wire format
+        // the renderers understand; the optimistic bubble keeps the plain text.
+        let wire_text = if self.is_md_mode {
+            encode_markdown(&text)
+        } else {
+            text.clone()
+        };
+
         let base_url = if cx.has_global::<AuthState>() {
             AuthState::global(cx).base_url.clone()
         } else {
@@ -1351,7 +1976,7 @@ impl ChatView {
         // Case 1: Editing existing message
         if let Some(edit_msg) = self.editing_message.take() {
             let edit_id = edit_msg.id.clone();
-            let sent_text = text.clone();
+            let sent_text = wire_text.clone();
             let target_chat = chat_id.clone();
 
             if cx.has_global::<ChatStore>() {
@@ -1360,7 +1985,8 @@ impl ChatView {
                 });
             }
             if let Some(rm) = self.cached_render_messages.iter_mut().find(|m| m.msg.id == edit_id) {
-                rm.content = sent_text.clone();
+                rm.content = text.clone();
+                rm.msg.content = sent_text.clone();
             }
 
             cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -1407,7 +2033,7 @@ impl ChatView {
             chat_id: chat_id.clone(),
             from: "me".to_string(),
             to: chat_id.clone(),
-            content: text.clone(),
+            content: wire_text.clone(),
             timestamp: now_ms,
             status: "pending".to_string(),
             message_type: "text".to_string(),
@@ -1443,7 +2069,7 @@ impl ChatView {
         self.messages_list_state.scroll_to_end();
 
         let target_chat = chat_id.clone();
-        let sent_text = text.clone();
+        let sent_text = wire_text.clone();
         let opt_id_clone = temp_id.clone();
         let rep_id = reply_to_id.clone();
 
@@ -2068,6 +2694,761 @@ impl ChatView {
                 },
             )
             .into_any_element()
+    }
+
+    /// One row of the attach (+) menu: tinted lucide icon + label, matching
+    /// the web's plus popover.
+    fn attach_menu_row(
+        label: String,
+        icon: &'static [u8],
+        accent: Hsla,
+        text_color: Hsla,
+        hover_bg: Hsla,
+        handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        h_flex()
+            .w_full()
+            .cursor_pointer()
+            .items_center()
+            .gap_3()
+            .px_3()
+            .py_2()
+            .rounded_lg()
+            .hover(move |s| s.bg(hover_bg))
+            .child(svg().data(icon).size(px(16.0)).flex_shrink_0().text_color(accent))
+            .child(div().text_sm().text_color(text_color).child(label))
+            .on_mouse_down(MouseButton::Left, handler)
+            .into_any_element()
+    }
+
+    /// Text field row used by the compose dialogs. All rows share one focus
+    /// handle; `active_compose_field` decides where keystrokes land.
+    fn dialog_field_row(
+        index: usize,
+        value: &str,
+        placeholder: &str,
+        is_active: bool,
+        theme: ActiveTokens,
+        border_color: Hsla,
+        text_color: Hsla,
+        muted_text: Hsla,
+        primary_color: Hsla,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let display = if value.is_empty() {
+            placeholder.to_string()
+        } else {
+            value.to_string()
+        };
+        h_flex()
+            .w_full()
+            .px_3()
+            .py_2()
+            .rounded_xl()
+            .border_1()
+            .border_color(if is_active { primary_color } else { border_color })
+            .bg(theme.background)
+            .cursor_text()
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
+                this.active_compose_field = index;
+                this.compose_field_focus.focus(window, cx);
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(if value.is_empty() { muted_text } else { text_color })
+                    .child(display),
+            )
+            .into_any_element()
+    }
+
+    /// Checkbox row used by the compose dialogs (multi-select, live location).
+    fn dialog_toggle_row(
+        label: &'static str,
+        checked: bool,
+        border_color: Hsla,
+        text_color: Hsla,
+        primary_color: Hsla,
+        handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        h_flex()
+            .w_full()
+            .cursor_pointer()
+            .items_center()
+            .gap_2()
+            .on_mouse_down(MouseButton::Left, handler)
+            .child(
+                div()
+                    .w(px(18.0))
+                    .h(px(18.0))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if checked { primary_color } else { border_color })
+                    .bg(if checked { primary_color } else { rgba(0x00000000).into() })
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .children(if checked {
+                        Some(svg().data(CHECK_SVG).size(px(11.0)).text_color(rgb(0xffffff)))
+                    } else {
+                        None
+                    }),
+            )
+            .child(div().text_sm().text_color(text_color).child(label))
+            .into_any_element()
+    }
+
+    /// Footer button used by the compose dialogs.
+    fn dialog_button(
+        label: String,
+        primary: bool,
+        border_color: Hsla,
+        text_color: Hsla,
+        primary_color: Hsla,
+        handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        div()
+            .cursor_pointer()
+            .px_4()
+            .py_2()
+            .rounded_xl()
+            .border_1()
+            .border_color(if primary { primary_color } else { border_color })
+            .bg(if primary { primary_color } else { rgba(0x00000000).into() })
+            .text_xs()
+            .font_weight(if primary { FontWeight::BOLD } else { FontWeight::MEDIUM })
+            .text_color(if primary { rgb(0xffffff).into() } else { text_color })
+            .child(label)
+            .on_mouse_down(MouseButton::Left, handler)
+            .into_any_element()
+    }
+
+    /// Attach (+) menu, emoji picker and sticker picker, drawn just above the
+    /// compose input row (web's `ChatArea` plus popover).
+    fn render_attach_panel(
+        &self,
+        theme: ActiveTokens,
+        border_color: Hsla,
+        card_bg: Hsla,
+        primary_color: Hsla,
+        text_color: Hsla,
+        muted_text: Hsla,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover_bg = theme.muted.opacity(0.5);
+        // Floats above the compose bar: absolute so it never takes flow space
+        // (an in-flow panel would stretch the compose container over the chat).
+        let panel_shell = |children: Vec<AnyElement>| {
+            v_flex()
+                .absolute()
+                .left(px(12.0))
+                .bottom_full()
+                .mb(px(8.0))
+                .w(px(320.0))
+                .p_2()
+                .gap_1()
+                .rounded_2xl()
+                .bg(card_bg)
+                .border_1()
+                .border_color(border_color)
+                .shadow_2xl()
+                .children(children)
+                .into_any_element()
+        };
+
+        match self.attach_panel {
+            AttachPanel::None => None,
+            AttachPanel::Menu => {
+                let rows: Vec<AnyElement> = vec![
+                    Self::attach_menu_row(
+                        "Emoji".to_string(),
+                        SMILE_SVG,
+                        rgb(0xeab308).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, _, cx| this.open_emoji_panel(cx)),
+                    ),
+                    Self::attach_menu_row(
+                        "Sticker".to_string(),
+                        STICKER_SVG,
+                        rgb(0xa855f7).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, _, cx| this.open_sticker_panel(cx)),
+                    ),
+                    Self::attach_menu_row(
+                        "Media".to_string(),
+                        PAPERCLIP_SVG,
+                        rgb(0x3b82f6).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, _, cx| this.pick_attachment(MediaKind::Media, cx)),
+                    ),
+                    Self::attach_menu_row(
+                        "Document".to_string(),
+                        FILE_TEXT_SVG,
+                        rgb(0xf97316).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, _, cx| {
+                            this.pick_attachment(MediaKind::Document, cx)
+                        }),
+                    ),
+                    Self::attach_menu_row(
+                        "Audio".to_string(),
+                        MIC_SVG,
+                        rgb(0xef4444).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, _, cx| this.pick_attachment(MediaKind::Audio, cx)),
+                    ),
+                    Self::attach_menu_row(
+                        "GIF".to_string(),
+                        IMAGE_PLAY_SVG,
+                        rgb(0xec4899).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, _, cx| this.pick_attachment(MediaKind::Gif, cx)),
+                    ),
+                    Self::attach_menu_row(
+                        "Poll".to_string(),
+                        CHART_COLUMN_SVG,
+                        rgb(0x06b6d4).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, window, cx| {
+                            this.open_compose_dialog(ComposeDialog::Poll, cx);
+                            this.compose_field_focus.focus(window, cx);
+                        }),
+                    ),
+                    Self::attach_menu_row(
+                        "Location".to_string(),
+                        MAP_PIN_SVG,
+                        rgb(0x10b981).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, window, cx| {
+                            this.open_compose_dialog(ComposeDialog::Location, cx);
+                            this.compose_field_focus.focus(window, cx);
+                        }),
+                    ),
+                    Self::attach_menu_row(
+                        "Contact".to_string(),
+                        USER_SVG,
+                        rgb(0x6366f1).into(),
+                        text_color,
+                        hover_bg,
+                        cx.listener(|this, _, window, cx| {
+                            this.open_compose_dialog(ComposeDialog::Contact, cx);
+                            this.compose_field_focus.focus(window, cx);
+                        }),
+                    ),
+                    Self::attach_menu_row(
+                        format!("Markdown {}", if self.is_md_mode { "(on)" } else { "(off)" }),
+                        FILE_TEXT_SVG,
+                        if self.is_md_mode { primary_color } else { muted_text },
+                        if self.is_md_mode { primary_color } else { text_color },
+                        hover_bg,
+                        cx.listener(|this, _, _, cx| this.toggle_markdown_mode(cx)),
+                    ),
+                ];
+                Some(
+                    v_flex()
+                        .absolute()
+                        .left(px(12.0))
+                        .bottom_full()
+                        .mb(px(8.0))
+                        .w(px(216.0))
+                        .p_1()
+                        .gap_1()
+                        .rounded_2xl()
+                        .bg(card_bg)
+                        .border_1()
+                        .border_color(border_color)
+                        .shadow_2xl()
+                        .children(rows)
+                        .into_any_element(),
+                )
+            }
+            AttachPanel::Emoji => {
+                let tabs: Vec<AnyElement> = EMOJI_CATEGORIES
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, category)| {
+                        let active = idx == self.emoji_picker.selected_category_idx;
+                        div()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .text_xs()
+                            .bg(if active {
+                                primary_color.opacity(0.15)
+                            } else {
+                                rgba(0x00000000).into()
+                            })
+                            .text_color(if active { primary_color } else { muted_text })
+                            .child(category.name)
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                this.emoji_picker.selected_category_idx = idx;
+                                cx.notify();
+                            }))
+                            .into_any_element()
+                    })
+                    .collect();
+
+                let emojis: Vec<AnyElement> = self
+                    .emoji_picker
+                    .current_emojis()
+                    .into_iter()
+                    .map(|emoji| {
+                        let em = emoji.to_string();
+                        let em_handler = em.clone();
+                        div()
+                            .w(px(30.0))
+                            .h(px(30.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .text_size(px(16.0))
+                            .hover(move |s| s.bg(hover_bg))
+                            .child(em)
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                this.insert_emoji(&em_handler, cx);
+                            }))
+                            .into_any_element()
+                    })
+                    .collect();
+
+                Some(panel_shell(vec![
+                    h_flex()
+                        .w_full()
+                        .justify_between()
+                        .items_center()
+                        .px_1()
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(svg().data(SMILE_SVG).size(px(14.0)).text_color(rgb(0xeab308)))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(text_color)
+                                        .child("Emoji"),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .cursor_pointer()
+                                .p_1()
+                                .rounded_full()
+                                .hover(move |s| s.bg(hover_bg))
+                                .child(svg().data(X_SVG).size(px(13.0)).text_color(muted_text))
+                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                    this.close_attach_panel(cx);
+                                })),
+                        )
+                        .into_any_element(),
+                    h_flex()
+                        .w_full()
+                        .gap_1()
+                        .px_1()
+                        .children(tabs)
+                        .into_any_element(),
+                    v_flex()
+                        .id("attach-emoji-scroll")
+                        .max_h(px(190.0))
+                        .overflow_y_scroll()
+                        .child(h_flex().flex_wrap().gap_1().children(emojis))
+                        .into_any_element(),
+                ]))
+            }
+            AttachPanel::Sticker => {
+                let body: AnyElement = if self.sticker_picker.is_loading {
+                    h_flex()
+                        .w_full()
+                        .py_4()
+                        .justify_center()
+                        .child(Spinner::new().color(primary_color))
+                        .into_any_element()
+                } else if self.sticker_picker.favorites.is_empty() {
+                    div()
+                        .w_full()
+                        .py_4()
+                        .text_xs()
+                        .text_color(muted_text)
+                        .child("Belum ada stiker favorit")
+                        .into_any_element()
+                } else {
+                    let base_url = Self::compose_base_url(cx);
+                    let stickers: Vec<AnyElement> = self
+                        .sticker_picker
+                        .favorites
+                        .iter()
+                        .map(|fav| {
+                            let url = resolve_media_url(&fav.media_url, &base_url);
+                            let send_url = fav.media_url.clone();
+                            let is_animated = fav.is_animated;
+                            div()
+                                .w(px(64.0))
+                                .h(px(64.0))
+                                .rounded_lg()
+                                .overflow_hidden()
+                                .cursor_pointer()
+                                .bg(theme.muted.opacity(0.35))
+                                .child(img(url).w_full().h_full().object_fit(ObjectFit::Contain))
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                    this.send_sticker(send_url.clone(), is_animated, cx);
+                                }))
+                                .into_any_element()
+                        })
+                        .collect();
+                    v_flex()
+                        .id("attach-sticker-scroll")
+                        .max_h(px(190.0))
+                        .overflow_y_scroll()
+                        .child(h_flex().flex_wrap().gap_2().children(stickers))
+                        .into_any_element()
+                };
+
+                Some(panel_shell(vec![
+                    h_flex()
+                        .w_full()
+                        .justify_between()
+                        .items_center()
+                        .px_1()
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(svg().data(STICKER_SVG).size(px(14.0)).text_color(rgb(0xa855f7)))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(text_color)
+                                        .child("Sticker"),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .cursor_pointer()
+                                .p_1()
+                                .rounded_full()
+                                .hover(move |s| s.bg(hover_bg))
+                                .child(svg().data(X_SVG).size(px(13.0)).text_color(muted_text))
+                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                    this.close_attach_panel(cx);
+                                })),
+                        )
+                        .into_any_element(),
+                    body,
+                ]))
+            }
+        }
+    }
+
+    /// Poll / location / contact modal, mirroring the web's compose dialogs.
+    fn render_compose_dialog(
+        &self,
+        theme: ActiveTokens,
+        border_color: Hsla,
+        card_bg: Hsla,
+        primary_color: Hsla,
+        text_color: Hsla,
+        muted_text: Hsla,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let dialog = self.compose_dialog?;
+        let active = self.active_compose_field;
+        let busy = self.is_sending_attachment;
+
+        let (title, body, action_label): (&str, Vec<AnyElement>, &str) = match dialog {
+            ComposeDialog::Poll => {
+                let options: Vec<AnyElement> = self
+                    .poll_draft
+                    .options
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, option)| {
+                        let index = idx + 1;
+                        let can_remove = self.poll_draft.options.len() > 2;
+                        h_flex()
+                            .w_full()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                div().flex_1().child(Self::dialog_field_row(
+                                    index,
+                                    option,
+                                    &format!("Opsi {}", index),
+                                    active == index,
+                                    theme,
+                                    border_color,
+                                    text_color,
+                                    muted_text,
+                                    primary_color,
+                                    cx,
+                                )),
+                            )
+                            .children(if can_remove {
+                                Some(
+                                    div()
+                                        .cursor_pointer()
+                                        .p_2()
+                                        .rounded_lg()
+                                        .hover(move |s| s.bg(theme.muted.opacity(0.5)))
+                                        .child(svg().data(X_SVG).size(px(13.0)).text_color(muted_text))
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.poll_draft.remove_option(idx);
+                                                if this.active_compose_field > idx + 1 {
+                                                    this.active_compose_field -= 1;
+                                                }
+                                                cx.notify();
+                                            }),
+                                        )
+                                        .into_any_element(),
+                                )
+                            } else {
+                                None
+                            })
+                            .into_any_element()
+                    })
+                    .collect();
+
+                let at_max = self.poll_draft.options.len() >= crate::components::compose::POLL_MAX_OPTIONS;
+                let mut body: Vec<AnyElement> = vec![Self::dialog_field_row(
+                    0,
+                    &self.poll_draft.question,
+                    "Pertanyaan",
+                    active == 0,
+                    theme,
+                    border_color,
+                    text_color,
+                    muted_text,
+                    primary_color,
+                    cx,
+                )];
+                body.extend(options);
+                body.push(
+                    div()
+                        .w_full()
+                        .cursor_pointer()
+                        .px_3()
+                        .py_1p5()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(border_color)
+                        .text_xs()
+                        .text_color(if at_max { muted_text } else { primary_color })
+                        .child("+ Tambah opsi")
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                            this.poll_draft.add_option();
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                );
+                body.push(Self::dialog_toggle_row(
+                    "Izinkan jawaban ganda",
+                    self.poll_draft.multi_select,
+                    border_color,
+                    text_color,
+                    primary_color,
+                    cx.listener(|this, _, _, cx| {
+                        this.poll_draft.multi_select = !this.poll_draft.multi_select;
+                        cx.notify();
+                    }),
+                ));
+                ("Buat poll", body, "Kirim")
+            }
+            ComposeDialog::Location => {
+                let body = vec![
+                    h_flex()
+                        .w_full()
+                        .gap_2()
+                        .child(
+                            div().flex_1().child(Self::dialog_field_row(
+                                0,
+                                &self.location_draft.latitude,
+                                "Latitude",
+                                active == 0,
+                                theme,
+                                border_color,
+                                text_color,
+                                muted_text,
+                                primary_color,
+                                cx,
+                            )),
+                        )
+                        .child(
+                            div().flex_1().child(Self::dialog_field_row(
+                                1,
+                                &self.location_draft.longitude,
+                                "Longitude",
+                                active == 1,
+                                theme,
+                                border_color,
+                                text_color,
+                                muted_text,
+                                primary_color,
+                                cx,
+                            )),
+                        )
+                        .into_any_element(),
+                    Self::dialog_field_row(
+                        2,
+                        &self.location_draft.name,
+                        "Nama tempat (opsional)",
+                        active == 2,
+                        theme,
+                        border_color,
+                        text_color,
+                        muted_text,
+                        primary_color,
+                        cx,
+                    ),
+                    Self::dialog_field_row(
+                        3,
+                        &self.location_draft.address,
+                        "Alamat (opsional)",
+                        active == 3,
+                        theme,
+                        border_color,
+                        text_color,
+                        muted_text,
+                        primary_color,
+                        cx,
+                    ),
+                    Self::dialog_toggle_row(
+                        "Bagikan lokasi live",
+                        self.location_draft.live,
+                        border_color,
+                        text_color,
+                        primary_color,
+                        cx.listener(|this, _, _, cx| {
+                            this.location_draft.live = !this.location_draft.live;
+                            cx.notify();
+                        }),
+                    ),
+                ];
+                ("Bagikan lokasi", body, "Bagikan")
+            }
+            ComposeDialog::Contact => {
+                let body = vec![
+                    Self::dialog_field_row(
+                        0,
+                        &self.contact_draft.name,
+                        "Nama kontak",
+                        active == 0,
+                        theme,
+                        border_color,
+                        text_color,
+                        muted_text,
+                        primary_color,
+                        cx,
+                    ),
+                    Self::dialog_field_row(
+                        1,
+                        &self.contact_draft.phone,
+                        "Nomor telepon (mis. +62812…)",
+                        active == 1,
+                        theme,
+                        border_color,
+                        text_color,
+                        muted_text,
+                        primary_color,
+                        cx,
+                    ),
+                ];
+                ("Bagikan kontak", body, "Bagikan")
+            }
+        };
+
+        let submit = move |this: &mut ChatView, cx: &mut Context<ChatView>| match dialog {
+            ComposeDialog::Poll => this.send_poll(cx),
+            ComposeDialog::Location => this.send_location(cx),
+            ComposeDialog::Contact => this.send_contact(cx),
+        };
+
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .bg(rgba(0x00000088))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    v_flex()
+                        .w(px(420.0))
+                        .p_5()
+                        .gap_3()
+                        .rounded_2xl()
+                        .bg(card_bg)
+                        .border_1()
+                        .border_color(border_color)
+                        .shadow_2xl()
+                        .track_focus(&self.compose_field_focus)
+                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                            this.dialog_key_input(ev, cx);
+                        }))
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .justify_between()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_lg()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(text_color)
+                                        .child(title),
+                                )
+                                .child(
+                                    div()
+                                        .cursor_pointer()
+                                        .p_1()
+                                        .rounded_full()
+                                        .hover(move |s| s.bg(theme.muted.opacity(0.5)))
+                                        .child(svg().data(X_SVG).size(px(15.0)).text_color(muted_text))
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                            this.close_compose_dialog(cx);
+                                        })),
+                                ),
+                        )
+                        .children(body)
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .justify_end()
+                                .gap_2()
+                                .child(Self::dialog_button(
+                                    "Batal".to_string(),
+                                    false,
+                                    border_color,
+                                    text_color,
+                                    primary_color,
+                                    cx.listener(|this, _, _, cx| this.close_compose_dialog(cx)),
+                                ))
+                                .child(Self::dialog_button(
+                                    if busy { "Mengirim…".to_string() } else { action_label.to_string() },
+                                    true,
+                                    border_color,
+                                    text_color,
+                                    primary_color,
+                                    cx.listener(move |this, _, _, cx| submit(this, cx)),
+                                )),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 }
 
@@ -3142,6 +4523,12 @@ impl Render for ChatView {
                                                                                     .size(px(14.0))
                                                                                     .text_color(bubble_text.opacity(0.6)),
                                                                             ),
+                                                                            MessageTicks::Failed => Some(
+                                                                                svg()
+                                                                                    .data(X_SVG)
+                                                                                    .size(px(12.0))
+                                                                                    .text_color(rgb(0xef4444)),
+                                                                            ),
                                                                             MessageTicks::None => None,
                                                                         }
                                                                     } else {
@@ -3293,6 +4680,7 @@ impl Render for ChatView {
                                 // Bottom Compose Container (Banner + Input Field + Integrated Send Icon)
                                 .child(
                                     v_flex()
+                                        .relative()
                                         .border_t_1()
                                         .border_color(border_color.opacity(0.4))
                                         .bg(bg_color)
@@ -3395,6 +4783,16 @@ impl Render for ChatView {
                                         } else {
                                             None
                                         })
+                                        // Attach (+) menu, emoji and sticker panels
+                                        .children(self.render_attach_panel(
+                                            theme,
+                                            border_color,
+                                            card_bg,
+                                            primary_color,
+                                            text_color,
+                                            muted_text,
+                                            cx,
+                                        ))
                                         // Input Row matching Web
                                         .child(
                                             h_flex()
@@ -3408,11 +4806,21 @@ impl Render for ChatView {
                                                         .p_2()
                                                         .rounded_full()
                                                         .cursor_pointer()
+                                                        .bg(if self.attach_panel.is_open() {
+                                                            primary_color.opacity(0.15)
+                                                        } else {
+                                                            rgba(0x00000000).into()
+                                                        })
                                                         .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                                         .tooltip(move |window, cx| {
                                                             Tooltip::new("Attach").build(window, cx)
                                                         })
-                                                        .child(svg().data(PLUS_SVG).size(px(18.0)).text_color(muted_text)),
+                                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                            this.toggle_attach_panel(cx);
+                                                        }))
+                                                        .child(svg().data(PLUS_SVG).size(px(18.0)).text_color(
+                                                            if self.attach_panel.is_open() { primary_color } else { muted_text }
+                                                        )),
                                                 )
                                                 // Mic icon
                                                 .child(
@@ -4476,6 +5884,18 @@ impl Render for ChatView {
             // ====================================================
             // MODAL: NEW GROUP DIALOG
             // ====================================================
+            // ====================================================
+            // MODAL: POLL / LOCATION / CONTACT COMPOSE DIALOGS
+            // ====================================================
+            .children(self.render_compose_dialog(
+                theme,
+                border_color,
+                card_bg,
+                primary_color,
+                text_color,
+                muted_text,
+                cx,
+            ))
             .children(if self.is_new_group_open {
                 let contacts: Vec<Chat> = if cx.has_global::<ChatStore>() {
                     ChatStore::global(cx).chats.iter().filter(|c| !c.is_group && !c.archived).cloned().collect()
