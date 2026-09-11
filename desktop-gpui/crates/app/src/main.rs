@@ -11,6 +11,7 @@ use wabot_app::{
     components::connection_banner::ConnectionState,
     router::Router,
     state::auth::{AuthState, AuthStatus},
+    state::call::CallManager,
     state::chat::ChatStore,
     theme::manager::ThemeManager,
     views::root::RootGateView,
@@ -56,6 +57,7 @@ fn main() {
             cx.set_global(Router::default());
             cx.set_global(ConnectionState::default());
             cx.set_global(ChatStore::new());
+            cx.set_global(CallManager::new());
 
             let mut auth_state = AuthState::default();
             let base_url = detect_backend_url(&settings);
@@ -165,11 +167,39 @@ fn main() {
                                 needs_refresh = true;
                             }
                         }
+                        // call.* events drive the full-screen call overlay
+                        if cx.has_global::<CallManager>() {
+                            if CallManager::global_mut(cx).handle_ws_event(&event) {
+                                needs_refresh = true;
+                            }
+                        }
                         if needs_refresh {
                             cx.refresh_windows();
                         }
                     });
                 }
+            })
+            .detach();
+
+            // Pick up a call that was already running (started by the API or a
+            // previous session) so the overlay shows up on launch.
+            let active_call_url = base_url.clone();
+            cx.spawn(async move |cx| {
+                let res = TOKIO_RT
+                    .spawn(async move {
+                        let client = HttpClient::new(&active_call_url);
+                        client.get_active_call().await
+                    })
+                    .await;
+
+                let _ = cx.update(|cx| {
+                    if let Ok(Ok(Some(call))) = res {
+                        if cx.has_global::<CallManager>() {
+                            CallManager::global_mut(cx).adopt(call);
+                            cx.refresh_windows();
+                        }
+                    }
+                });
             })
             .detach();
 
