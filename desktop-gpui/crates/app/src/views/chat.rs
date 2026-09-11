@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use gpui::*;
 use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
@@ -719,6 +720,8 @@ impl ChatView {
             "http://127.0.0.1:3000/api".to_string()
         };
 
+        self.is_loading_info = true;
+
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let view_weak = this;
             let cx_handle = cx.clone();
@@ -732,6 +735,7 @@ impl ChatView {
                             if let Ok(Ok(media)) = res {
                                 this.info_media = media;
                             }
+                            this.is_loading_info = false;
                             cx.notify();
                         });
                     }
@@ -3569,37 +3573,166 @@ impl Render for ChatView {
                                     match self.info_sheet_tab {
                                         InfoSheetTab::Media => {
                                             if self.info_media.is_empty() {
-                                                div().py_8().text_xs().text_color(muted_text).text_center().child("No media found").into_any_element()
+                                                if self.is_loading_info {
+                                                    v_flex()
+                                                        .py_8()
+                                                        .items_center()
+                                                        .gap_2()
+                                                        .child(Spinner::new().color(primary_color))
+                                                        .child(div().text_sm().text_color(muted_text).child("Loading media..."))
+                                                        .into_any_element()
+                                                } else {
+                                                    v_flex()
+                                                        .py_8()
+                                                        .items_center()
+                                                        .gap_2()
+                                                        .opacity(0.4)
+                                                        .child(svg().data(IMAGE_SVG).size(px(48.0)).text_color(muted_text))
+                                                        .child(div().text_sm().text_color(muted_text).child("No media shared yet"))
+                                                        .into_any_element()
+                                                }
                                             } else {
+                                                // Web parity: 3-column square thumbnail grid.
+                                                // Images open the full-screen preview, videos open externally.
+                                                let rows: Vec<Vec<(bool, String)>> = self
+                                                    .info_media
+                                                    .chunks(3)
+                                                    .map(|chunk| {
+                                                        chunk
+                                                            .iter()
+                                                            .map(|m| {
+                                                                let is_image = m.message_type == "image";
+                                                                let url = m
+                                                                    .media_url
+                                                                    .as_deref()
+                                                                    .map(|u| resolve_media_url(u, &base_url))
+                                                                    .unwrap_or_default();
+                                                                (is_image, url)
+                                                            })
+                                                            .collect()
+                                                    })
+                                                    .collect();
+
                                                 v_flex()
                                                     .gap_2()
-                                                    .children(self.info_media.iter().map(|m| {
-                                                        div()
-                                                            .p_2()
-                                                            .rounded_lg()
-                                                            .bg(bg_color)
-                                                            .text_xs()
-                                                            .text_color(text_color)
-                                                            .child(format!("[Media] {}", m.content))
-                                                            .into_any_element()
+                                                    .children(rows.into_iter().map(|row| {
+                                                        h_flex()
+                                                            .gap_2()
+                                                            .children(row.into_iter().map(|(is_image, url)| {
+                                                                let cell = div()
+                                                                    .w(px(88.0))
+                                                                    .h(px(88.0))
+                                                                    .rounded_lg()
+                                                                    .overflow_hidden()
+                                                                    .border_1()
+                                                                    .border_color(border_color.opacity(0.4))
+                                                                    .bg(theme.muted.opacity(0.2))
+                                                                    .cursor_pointer();
+
+                                                                if is_image && !url.is_empty() {
+                                                                    cell.on_mouse_down(MouseButton::Left, cx.listener({
+                                                                        let u = url.clone();
+                                                                        move |this, _, _, cx| {
+                                                                            this.preview_image_url = Some(u.clone());
+                                                                            cx.notify();
+                                                                        }
+                                                                    }))
+                                                                    .child(img(url).w_full().h_full().object_fit(ObjectFit::Cover))
+                                                                    .into_any_element()
+                                                                } else if !url.is_empty() {
+                                                                    cell.on_mouse_down(MouseButton::Left, cx.listener({
+                                                                        let u = url.clone();
+                                                                        move |_, _, _, cx| {
+                                                                            cx.open_url(&u);
+                                                                        }
+                                                                    }))
+                                                                    .child(
+                                                                        div()
+                                                                            .w_full()
+                                                                            .h_full()
+                                                                            .flex()
+                                                                            .items_center()
+                                                                            .justify_center()
+                                                                            .child(svg().data(VIDEO_SVG).size(px(28.0)).text_color(primary_color.opacity(0.4))),
+                                                                    )
+                                                                    .into_any_element()
+                                                                } else {
+                                                                    cell.into_any_element()
+                                                                }
+                                                            }))
                                                     }))
                                                     .into_any_element()
                                             }
                                         }
                                         InfoSheetTab::Docs => {
                                             if self.info_docs.is_empty() {
-                                                div().py_8().text_xs().text_color(muted_text).text_center().child("No documents found").into_any_element()
-                                            } else {
                                                 v_flex()
+                                                    .py_8()
+                                                    .items_center()
                                                     .gap_2()
-                                                    .children(self.info_docs.iter().map(|d| {
-                                                        div()
-                                                            .p_2()
-                                                            .rounded_lg()
-                                                            .bg(bg_color)
-                                                            .text_xs()
-                                                            .text_color(text_color)
-                                                            .child(format!("[Doc] {}", d.content))
+                                                    .opacity(0.4)
+                                                    .child(svg().data(FILE_TEXT_SVG).size(px(48.0)).text_color(muted_text))
+                                                    .child(div().text_sm().text_color(muted_text).child("No documents shared yet"))
+                                                    .into_any_element()
+                                            } else {
+                                                // Web parity: tappable document rows that open the file.
+                                                let docs: Vec<(String, String)> = self
+                                                    .info_docs
+                                                    .iter()
+                                                    .map(|d| {
+                                                        let url = d
+                                                            .media_url
+                                                            .as_deref()
+                                                            .map(|u| resolve_media_url(u, &base_url))
+                                                            .unwrap_or_default();
+                                                        (url, Self::format_search_date(d.timestamp))
+                                                    })
+                                                    .collect();
+
+                                                v_flex()
+                                                    .gap_3()
+                                                    .children(docs.into_iter().map(|(url, date)| {
+                                                        h_flex()
+                                                            .gap_3()
+                                                            .p_3()
+                                                            .rounded_xl()
+                                                            .border_1()
+                                                            .border_color(border_color.opacity(0.4))
+                                                            .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                            .cursor_pointer()
+                                                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                                                let u = url.clone();
+                                                                move |_, _, _, cx| {
+                                                                    if !u.is_empty() {
+                                                                        cx.open_url(&u);
+                                                                    }
+                                                                }
+                                                            }))
+                                                            .child(
+                                                                div()
+                                                                    .w(px(40.0))
+                                                                    .h(px(40.0))
+                                                                    .rounded_lg()
+                                                                    .bg(rgb(0x3b82f6).opacity(0.1))
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_center()
+                                                                    .child(svg().data(FILE_TEXT_SVG).size(px(20.0)).text_color(rgb(0x2563eb))),
+                                                            )
+                                                            .child(
+                                                                v_flex()
+                                                                    .flex_1()
+                                                                    .overflow_hidden()
+                                                                    .child(
+                                                                        div()
+                                                                            .text_sm()
+                                                                            .font_weight(FontWeight::BOLD)
+                                                                            .text_color(text_color)
+                                                                            .overflow_hidden()
+                                                                            .child("Document"),
+                                                                    )
+                                                                    .child(div().text_xs().text_color(muted_text).child(date)),
+                                                            )
                                                             .into_any_element()
                                                     }))
                                                     .into_any_element()
@@ -3607,18 +3740,70 @@ impl Render for ChatView {
                                         }
                                         InfoSheetTab::Links => {
                                             if self.info_links.is_empty() {
-                                                div().py_8().text_xs().text_color(muted_text).text_center().child("No links found").into_any_element()
-                                            } else {
                                                 v_flex()
+                                                    .py_8()
+                                                    .items_center()
                                                     .gap_2()
-                                                    .children(self.info_links.iter().map(|l| {
-                                                        div()
-                                                            .p_2()
-                                                            .rounded_lg()
-                                                            .bg(bg_color)
-                                                            .text_xs()
-                                                            .text_color(text_color)
-                                                            .child(l.content.clone())
+                                                    .opacity(0.4)
+                                                    .child(svg().data(LINK_SVG).size(px(48.0)).text_color(muted_text))
+                                                    .child(div().text_sm().text_color(muted_text).child("No links shared yet"))
+                                                    .into_any_element()
+                                            } else {
+                                                // Web parity: extract every http(s) URL from the message body.
+                                                let links: Vec<(String, String)> = self
+                                                    .info_links
+                                                    .iter()
+                                                    .flat_map(|l| {
+                                                        let ts = l.timestamp;
+                                                        l.content
+                                                            .split_whitespace()
+                                                            .filter(|t| t.starts_with("http://") || t.starts_with("https://"))
+                                                            .map(move |t| (t.to_string(), Self::format_search_date(ts)))
+                                                            .collect::<Vec<_>>()
+                                                    })
+                                                    .collect();
+
+                                                v_flex()
+                                                    .gap_3()
+                                                    .children(links.into_iter().map(|(url, date)| {
+                                                        h_flex()
+                                                            .gap_3()
+                                                            .p_3()
+                                                            .rounded_xl()
+                                                            .border_1()
+                                                            .border_color(border_color.opacity(0.4))
+                                                            .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                            .cursor_pointer()
+                                                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                                                let u = url.clone();
+                                                                move |_, _, _, cx| {
+                                                                    cx.open_url(&u);
+                                                                }
+                                                            }))
+                                                            .child(
+                                                                div()
+                                                                    .w(px(40.0))
+                                                                    .h(px(40.0))
+                                                                    .rounded_lg()
+                                                                    .bg(rgb(0x22c55e).opacity(0.1))
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_center()
+                                                                    .child(svg().data(LINK_SVG).size(px(20.0)).text_color(rgb(0x16a34a))),
+                                                            )
+                                                            .child(
+                                                                v_flex()
+                                                                    .flex_1()
+                                                                    .overflow_hidden()
+                                                                    .child(
+                                                                        div()
+                                                                            .text_sm()
+                                                                            .text_color(rgb(0x3b82f6))
+                                                                            .overflow_hidden()
+                                                                            .child(url),
+                                                                    )
+                                                                    .child(div().text_xs().text_color(muted_text).child(date)),
+                                                            )
                                                             .into_any_element()
                                                     }))
                                                     .into_any_element()
