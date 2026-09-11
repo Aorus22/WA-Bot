@@ -6,6 +6,8 @@ pub enum MessageTicks {
     Sent,
     Delivered,
     Read,
+    /// Delivery failed (local pending attachment rejected by the backend).
+    Failed,
 }
 
 pub struct MessageBubbleHelper;
@@ -25,6 +27,7 @@ impl MessageBubbleHelper {
             "read" => MessageTicks::Read,
             "delivered" => MessageTicks::Delivered,
             "sent" | "pending" => MessageTicks::Sent,
+            "failed" => MessageTicks::Failed,
             _ => MessageTicks::Sent,
         }
     }
@@ -35,6 +38,7 @@ impl MessageBubbleHelper {
             MessageTicks::Sent => "✓",
             MessageTicks::Delivered => "✓✓",
             MessageTicks::Read => "✓✓",
+            MessageTicks::Failed => "!",
         }
     }
 
