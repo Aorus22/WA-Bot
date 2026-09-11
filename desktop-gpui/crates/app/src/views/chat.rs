@@ -3483,7 +3483,13 @@ impl ChatView {
                                 .overflow_hidden()
                                 .cursor_pointer()
                                 .bg(theme.muted.opacity(0.35))
-                                .child(img(url).w_full().h_full().object_fit(ObjectFit::Contain))
+                                .child(
+                                    img(url)
+                                        .id(format!("sticker-fav-{}", fav.media_url))
+                                        .w_full()
+                                        .h_full()
+                                        .object_fit(ObjectFit::Contain),
+                                )
                                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                                     this.send_sticker(send_url.clone(), is_animated, cx);
                                 }))
@@ -4827,7 +4833,11 @@ impl Render for ChatView {
                                                                                 }
                                                                             }))
                                                                             .child(
+                                                                                // The id is what lets gpui key frame state for
+                                                                                // multi-frame GIF/WebP; without it only the first
+                                                                                // frame ever renders.
                                                                                 img(full_url)
+                                                                                    .id(format!("msg-image-{}", r_msg.msg.id))
                                                                                     .max_w(px(340.0))
                                                                                     .max_h(px(360.0))
                                                                                     .rounded_xl()
@@ -4841,13 +4851,21 @@ impl Render for ChatView {
                                                             } else if is_sticker {
                                                                 if let Some(ref m_url) = r_msg.msg.media_url {
                                                                     let full_url = resolve_media_url(m_url, &base_url);
+                                                                    let click_url = full_url.clone();
                                                                     Some(
                                                                         div()
                                                                             .w(px(160.0))
                                                                             .h(px(160.0))
                                                                             .cursor_pointer()
+                                                                            // Web parity: tapping a sticker opens it in the
+                                                                            // full-screen viewer, animated.
+                                                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                                                this.preview_image_url = Some(click_url.clone());
+                                                                                cx.notify();
+                                                                            }))
                                                                             .child(
                                                                                 img(full_url)
+                                                                                    .id(format!("msg-sticker-{}", r_msg.msg.id))
                                                                                     .w(px(160.0))
                                                                                     .h(px(160.0))
                                                                                     .object_fit(ObjectFit::Contain)
@@ -5659,7 +5677,13 @@ impl Render for ChatView {
                                                                             cx.notify();
                                                                         }
                                                                     }))
-                                                                    .child(img(url).w_full().h_full().object_fit(ObjectFit::Cover))
+                                                                    .child(
+                                                                        img(url.clone())
+                                                                            .id(format!("info-media-{url}"))
+                                                                            .w_full()
+                                                                            .h_full()
+                                                                            .object_fit(ObjectFit::Cover),
+                                                                    )
                                                                     .into_any_element()
                                                                 } else if !url.is_empty() {
                                                                     cell.on_mouse_down(MouseButton::Left, cx.listener({
@@ -6733,6 +6757,7 @@ impl Render for ChatView {
                         }))
                         .child(
                             img(u)
+                                .id("preview-image-frame")
                                 .max_w(px(800.0))
                                 .max_h(px(700.0))
                                 .rounded_xl()
