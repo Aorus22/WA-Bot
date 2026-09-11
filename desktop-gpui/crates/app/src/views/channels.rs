@@ -6,6 +6,7 @@ use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{Channel, ChannelMessage, ChannelPreview};
 
+use crate::components::toast;
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::theme::manager::AppThemeExt;
@@ -103,7 +104,6 @@ pub struct ChannelsView {
     discover_focus: FocusHandle,
     is_discovering: bool,
 
-    toast_message: Option<String>,
 }
 
 impl ChannelsView {
@@ -126,7 +126,6 @@ impl ChannelsView {
             discover_focus,
             is_discovering: false,
 
-            toast_message: None,
         };
         this.load_channels(cx);
         this
@@ -310,7 +309,7 @@ impl ChannelsView {
         self.confirm_unfollow = false;
         self.posts.clear();
         self.posts_list_state.reset(0);
-        self.toast_message = Some("Unfollowed channel".to_string());
+        toast::success("Unfollowed channel", cx);
         cx.notify();
 
         TOKIO_RT.spawn(async move {
@@ -378,7 +377,7 @@ impl ChannelsView {
                                     this.discover_preview = Some(preview);
                                 }
                                 _ => {
-                                    this.toast_message = Some("Invalid channel link".to_string());
+                                    toast::error("Invalid channel link", cx);
                                 }
                             }
                             cx.notify();
@@ -420,14 +419,14 @@ impl ChannelsView {
                                     this.is_discover_open = false;
                                     this.discover_link.clear();
                                     this.discover_preview = None;
-                                    this.toast_message = Some("Channel followed".to_string());
+                                    toast::success("Channel followed", cx);
                                     this.load_channels(cx);
                                 }
                                 Ok(Err(e)) => {
-                                    this.toast_message = Some(format!("Failed to follow: {e}"));
+                                    toast::error(format!("Failed to follow: {e}"), cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some("Failed to follow channel".to_string());
+                                    toast::error("Failed to follow channel", cx);
                                 }
                             }
                             cx.notify();

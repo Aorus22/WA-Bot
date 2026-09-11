@@ -8,9 +8,12 @@ use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
-use wabot_backend_client::dto::{CallType, Chat, Message};
+use wabot_backend_client::dto::{CallType, Chat, Message, ReactionEntry};
 
-use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
+use crate::components::{
+    connection_banner::{ConnectionState, ConnectionStatus},
+    toast,
+};
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
 use crate::components::nav_sidebar::SIDEBAR_WIDTH;
 use crate::components::titlebar::TITLEBAR_HEIGHT;
@@ -253,11 +256,12 @@ pub struct ChatView {
     pub is_loading_newer: bool,
     pub has_more: bool,
     pub has_more_next: bool,
-    pub toast_message: Option<(String, bool)>, // (message, is_error)
 
     // Cached filtered chats for zero-allocation scrolling
     pub cached_filtered_chats: Vec<Chat>,
     pub last_filter_key: (u64, String, ChatFilter, bool),
+    // Last ChatStore::messages_version seen by the render cache
+    pub last_messages_version: u64,
 
     // Cached messages for 60fps scrolling
     pub cached_chat_id: Option<String>,
@@ -325,10 +329,10 @@ impl ChatView {
             is_loading_newer: false,
             has_more: true,
             has_more_next: false,
-            toast_message: None,
 
             cached_filtered_chats: Vec::new(),
             last_filter_key: (u64::MAX, String::new(), ChatFilter::All, false),
+            last_messages_version: u64::MAX,
 
             cached_chat_id: None,
             cached_render_messages: Vec::new(),
@@ -531,7 +535,15 @@ impl ChatView {
             .collect();
 
         let total_items = if self.cached_render_messages.is_empty() { 0 } else { self.cached_render_messages.len() + 1 };
-        self.messages_list_state.reset(total_items);
+
+        // Same item count (reaction, edit, status-tick update): remeasure in
+        // place so the scroll position is preserved exactly. `reset` clears
+        // the scroll offset, which snaps the list back to the bottom.
+        if self.messages_list_state.item_count() == total_items {
+            self.messages_list_state.remeasure();
+        } else {
+            self.messages_list_state.reset(total_items);
+        }
     }
 
     /// Fetch messages for a specific chat from GET /api/chats/:id/messages
@@ -872,7 +884,7 @@ impl ChatView {
 
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = view_weak.upgrade() {
-                        view.update(cx, |this, cx| {
+                        view.update(cx, |_this, cx| {
                             match res {
                                 Ok(Ok(call_state)) => {
                                     if cx.has_global::<CallManager>() {
@@ -883,13 +895,13 @@ impl ChatView {
                                     if cx.has_global::<CallManager>() {
                                         CallManager::global_mut(cx).end_local(None);
                                     }
-                                    this.toast_message = Some((format!("Failed to start call: {e}"), true));
+                                    toast::error(format!("Failed to start call: {e}"), cx);
                                 }
                                 Err(_) => {
                                     if cx.has_global::<CallManager>() {
                                         CallManager::global_mut(cx).end_local(None);
                                     }
-                                    this.toast_message = Some(("Failed to start call".to_string(), true));
+                                    toast::error("Failed to start call", cx);
                                 }
                             }
                             cx.notify();
@@ -1149,7 +1161,9 @@ impl ChatView {
         format!("{:02}:{:02}", hours, mins)
     }
 
-    /// React to message with emoji
+    /// React to message with emoji. Toggles like the web client: sending the
+    /// same emoji again removes "my" reaction (backend ApplyReaction treats
+    /// the sender list as authoritative).
     pub fn react_message(&mut self, chat_id: String, msg_id: String, emoji: String, cx: &mut Context<Self>) {
         self.context_menu = None;
         let base_url = if cx.has_global::<AuthState>() {
@@ -1158,21 +1172,73 @@ impl ChatView {
             "http://127.0.0.1:3000/api".to_string()
         };
 
+        // Optimistic local update, mirroring the web's applyReactionLocal:
+        // drop "me" from every entry, re-add under the new emoji.
+        let new_reactions = {
+            let mut out: Vec<ReactionEntry> = Vec::new();
+            let existing = cx
+                .has_global::<ChatStore>()
+                .then(|| {
+                    ChatStore::global(cx)
+                        .messages_by_chat
+                        .get(&chat_id)
+                        .and_then(|e| e.messages.iter().find(|m| m.id == msg_id))
+                        .and_then(|m| m.reactions.clone())
+                })
+                .flatten()
+                .unwrap_or_default();
+            for r in existing {
+                let mut kept: Vec<String> = r.senders.into_iter().filter(|s| s != "me").collect();
+                if r.emoji == emoji {
+                    kept.push("me".to_string());
+                }
+                if !kept.is_empty() {
+                    out.push(ReactionEntry { emoji: r.emoji, senders: kept });
+                }
+            }
+            if !out.iter().any(|r| r.emoji == emoji) {
+                out.push(ReactionEntry { emoji: emoji.clone(), senders: vec!["me".to_string()] });
+            }
+            out
+        };
+        if cx.has_global::<ChatStore>() {
+            let reactions_clone = new_reactions.clone();
+            ChatStore::global_mut(cx).patch_message(&chat_id, &msg_id, move |m| {
+                m.reactions = Some(reactions_clone);
+            });
+        }
+        if let Some(rm) = self.cached_render_messages.iter_mut().find(|m| m.msg.id == msg_id) {
+            rm.msg.reactions = Some(new_reactions.clone());
+            // The chips row changes the item's rendered height — keep the
+            // list's height summary in sync without moving the scroll.
+            self.messages_list_state.remeasure();
+        }
+
         let cid = chat_id.clone();
         let mid = msg_id.clone();
         let em = emoji.clone();
 
         cx.spawn(move |_this: WeakEntity<Self>, _cx: &mut AsyncApp| {
+            let cx_handle = _cx.clone();
             async move {
                 let client = HttpClient::new(&base_url);
-                let _ = TOKIO_RT
+                let res = TOKIO_RT
                     .spawn(async move { client.react_to_message(&cid, &mid, &em, None).await })
                     .await;
+
+                // On failure, revert is unnecessary: the authoritative
+                // `message_reaction` WS broadcast (sent on success only) won't
+                // arrive, and a fresh load restores server state. Surface the
+                // error like the web client does.
+                if !matches!(res, Ok(Ok(_))) {
+                    let _ = cx_handle.update(|cx: &mut App| {
+                        toast::error("Gagal mengirim reaksi", cx);
+                    });
+                }
             }
         })
         .detach();
 
-        self.toast_message = Some((format!("Reaksi {} terkirim", emoji), false));
         cx.notify();
     }
 
@@ -1212,7 +1278,7 @@ impl ChatView {
     pub fn copy_message_text(&mut self, text: String, cx: &mut Context<Self>) {
         self.context_menu = None;
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.toast_message = Some(("Pesan disalin ke clipboard".into(), false));
+        toast::success("Pesan disalin ke clipboard", cx);
         cx.notify();
     }
 
@@ -1244,13 +1310,13 @@ impl ChatView {
 
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = view_weak.upgrade() {
-                        view.update(cx, |this, cx| {
+                        view.update(cx, |_this, cx| {
                             match res {
                                 Ok(Ok(_)) => {
-                                    this.toast_message = Some(("Pesan berhasil dihapus".into(), false));
+                                    toast::success("Pesan berhasil dihapus", cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some(("Gagal menghapus pesan".into(), true));
+                                    toast::error("Gagal menghapus pesan", cx);
                                 }
                             }
                             cx.notify();
@@ -1312,10 +1378,10 @@ impl ChatView {
                                 this.is_sending = false;
                                 match res {
                                     Ok(Ok(_)) => {
-                                        this.toast_message = Some(("Pesan berhasil diedit".into(), false));
+                                        toast::success("Pesan berhasil diedit", cx);
                                     }
                                     _ => {
-                                        this.toast_message = Some(("Gagal mengedit pesan".into(), true));
+                                        toast::error("Gagal mengedit pesan", cx);
                                     }
                                 }
                                 cx.notify();
@@ -1437,7 +1503,7 @@ impl ChatView {
                                             },
                                         );
                                     }
-                                    this.toast_message = Some(("Failed to send message".into(), true));
+                                    toast::error("Failed to send message", cx);
                                 }
                             }
                             cx.notify();
@@ -1564,7 +1630,7 @@ impl ChatView {
     pub fn submit_create_group(&mut self, cx: &mut Context<Self>) {
         let name = self.new_group_name.trim().to_string();
         if name.is_empty() {
-            self.toast_message = Some(("Nama grup wajib diisi".into(), true));
+            toast::error("Nama grup wajib diisi", cx);
             cx.notify();
             return;
         }
@@ -1596,11 +1662,11 @@ impl ChatView {
                                     this.is_new_group_open = false;
                                     this.new_group_name.clear();
                                     this.new_group_selected.clear();
-                                    this.toast_message = Some(("Grup berhasil dibuat".into(), false));
+                                    toast::success("Grup berhasil dibuat", cx);
                                     this.load_chats(cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some(("Gagal membuat grup".into(), true));
+                                    toast::error("Gagal membuat grup", cx);
                                 }
                             }
                             cx.notify();
@@ -1616,7 +1682,7 @@ impl ChatView {
     pub fn submit_join_group(&mut self, cx: &mut Context<Self>) {
         let link = self.join_group_link.trim().to_string();
         if link.is_empty() {
-            self.toast_message = Some(("Tautan undangan wajib diisi".into(), true));
+            toast::error("Tautan undangan wajib diisi", cx);
             cx.notify();
             return;
         }
@@ -1645,11 +1711,11 @@ impl ChatView {
                                 Ok(Ok(_)) => {
                                     this.is_join_group_open = false;
                                     this.join_group_link.clear();
-                                    this.toast_message = Some(("Berhasil bergabung ke grup".into(), false));
+                                    toast::success("Berhasil bergabung ke grup", cx);
                                     this.load_chats(cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some(("Gagal bergabung ke grup".into(), true));
+                                    toast::error("Gagal bergabung ke grup", cx);
                                 }
                             }
                             cx.notify();
@@ -2092,7 +2158,14 @@ impl Render for ChatView {
         let is_loading_chats = self.is_loading_chats;
         let is_loading_messages = self.is_loading_messages;
 
-        // Ensure cached messages match currently selected chat
+        // Ensure cached messages match currently selected chat, and rebuild
+        // when the store reports any change (new/edited/deleted messages,
+        // status ticks, reactions) so live WS updates repaint the bubbles.
+        let messages_version = if cx.has_global::<ChatStore>() {
+            ChatStore::global(cx).messages_version
+        } else {
+            0
+        };
         if let Some(ref sc) = selected_chat {
             if self.cached_chat_id.as_deref() != Some(&sc.id) {
                 if cx.has_global::<ChatStore>() {
@@ -2100,8 +2173,15 @@ impl Render for ChatView {
                         self.rebuild_message_cache(&sc.id, &entry.messages);
                     }
                 }
+            } else if self.last_messages_version != messages_version {
+                if cx.has_global::<ChatStore>() {
+                    if let Some(entry) = ChatStore::global(cx).messages_by_chat.get(&sc.id) {
+                        self.rebuild_message_cache_preserve_scroll(&sc.id, &entry.messages);
+                    }
+                }
             }
         }
+        self.last_messages_version = messages_version;
 
         h_flex()
             .size_full()
@@ -3069,12 +3149,66 @@ impl Render for ChatView {
                                                                     }),
                                                             );
 
+                                                        // Reaction chips row (like web's ReactionChips):
+                                                        // floats above the bubble, tap toggles own reaction.
+                                                        let reactions_chips = {
+                                                            let reactions_list = r_msg.msg.reactions.clone().unwrap_or_default();
+                                                            if reactions_list.is_empty() {
+                                                                None
+                                                            } else {
+                                                                let cid_for_chips = this.selected_chat_id.clone().unwrap_or_default();
+                                                                Some(
+                                                                    h_flex()
+                                                                        .flex_wrap()
+                                                                        .gap_1()
+                                                                        .mb(px(-2.0))
+                                                                        .relative()
+                                                                        .children(reactions_list.iter().map(|r| {
+                                                                            let em = r.emoji.clone();
+                                                                            let cid = cid_for_chips.clone();
+                                                                            let mid = r_msg.msg.id.clone();
+                                                                            let count_label = if r.senders.len() > 1 {
+                                                                                format!("{}", r.senders.len())
+                                                                            } else {
+                                                                                String::new()
+                                                                            };
+                                                                            div()
+                                                                                .cursor_pointer()
+                                                                                .px_1p5()
+                                                                                .py(px(2.0))
+                                                                                .rounded_full()
+                                                                                .border_1()
+                                                                                .border_color(theme.border.opacity(0.5))
+                                                                                .bg(if is_dark_bg { rgba(0xffffff1a) } else { rgba(0x0000000d) })
+                                                                                .text_size(px(12.0))
+                                                                                .hover(|s| s.bg(if is_dark_bg { rgba(0xffffff33) } else { rgba(0x0000001a) }))
+                                                                                .child(h_flex()
+                                                                                    .items_center()
+                                                                                    .gap(px(2.0))
+                                                                                    .child(r.emoji.clone())
+                                                                                    .children(if count_label.is_empty() { None } else { Some(
+                                                                                        div()
+                                                                                            .text_size(px(10.0))
+                                                                                            .font_weight(FontWeight::BOLD)
+                                                                                            .opacity(0.7)
+                                                                                            .child(count_label),
+                                                                                    ) }))
+                                                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                                                    this.react_message(cid.clone(), mid.clone(), em.clone(), cx);
+                                                                                }))
+                                                                                .into_any_element()
+                                                                        })),
+                                                                )
+                                                            }
+                                                        };
+
                                                         if is_from_me {
-                                                            h_flex()
+                                                            v_flex()
                                                                 .w_full()
-                                                                .justify_end()
+                                                                .items_end()
                                                                 .px_6()
                                                                 .pb_2()
+                                                                .children(reactions_chips)
                                                                 .child(bubble)
                                                                 .into_any_element()
                                                         } else if is_group_chat {
@@ -3110,6 +3244,7 @@ impl Render for ChatView {
                                                                 } else {
                                                                     None
                                                                 })
+                                                                .children(reactions_chips)
                                                                 .child(bubble);
 
                                                             h_flex()
@@ -3128,7 +3263,12 @@ impl Render for ChatView {
                                                                 .justify_start()
                                                                 .px_6()
                                                                 .pb_2()
-                                                                .child(bubble)
+                                                                .child(
+                                                                    v_flex()
+                                                                        .items_start()
+                                                                        .children(reactions_chips)
+                                                                        .child(bubble),
+                                                                )
                                                                 .into_any_element()
                                                         }
                                                     } else {
@@ -4619,26 +4759,6 @@ impl Render for ChatView {
                                         ),
                                 ),
                         ),
-                )
-            } else {
-                None
-            })
-            // Floating Toast Notification
-            .children(if let Some((ref msg, is_error)) = self.toast_message {
-                Some(
-                    div()
-                        .absolute()
-                        .bottom(px(80.0))
-                        .right(px(24.0))
-                        .px_4()
-                        .py_2()
-                        .rounded_xl()
-                        .bg(if is_error { rgb(0xef4444) } else { rgb(0x00a884) })
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(0xffffff))
-                        .shadow_lg()
-                        .child(msg.clone()),
                 )
             } else {
                 None

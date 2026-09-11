@@ -9,7 +9,7 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 
-use crate::dto::{ChatState, Message};
+use crate::dto::{ChatState, Message, ReactionEntry};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WsMessage {
@@ -41,8 +41,9 @@ pub enum WsEvent {
     MessageReaction {
         chat_id: String,
         id: String,
-        emoji: String,
-        from: Option<String>,
+        /// The full, authoritative reaction list after the change
+        /// (matches the backend's `message_reaction` broadcast).
+        reactions: Vec<ReactionEntry>,
     },
     PollUpdate {
         chat_id: String,
@@ -174,17 +175,11 @@ impl WsMessage {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
-                emoji: self
+                reactions: self
                     .payload
-                    .get("emoji")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                from: self
-                    .payload
-                    .get("from")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                    .get("reactions")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default(),
             },
             "poll_update" => WsEvent::PollUpdate {
                 chat_id: self

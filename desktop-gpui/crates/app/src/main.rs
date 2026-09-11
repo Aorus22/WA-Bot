@@ -8,7 +8,7 @@ use gpui::{
 };
 use gpui_reqwest_client::ReqwestClient;
 use wabot_app::{
-    components::connection_banner::ConnectionState,
+    components::{connection_banner::ConnectionState, toast::ToastBus},
     router::Router,
     state::auth::{AuthState, AuthStatus},
     state::call::CallManager,
@@ -52,6 +52,14 @@ fn main() {
                 gpui_component::ThemeMode::Light
             };
             gpui_component::Theme::change(gpui_mode, None, cx);
+
+            // Toasts appear top-center like the web app's
+            // `<Toaster position="top-center" />` (sonner).
+            gpui_component::Theme::global_mut(cx).notification.placement =
+                gpui::Anchor::TopCenter;
+
+            // Global toast bus so any view/task can raise toasts with just `&mut App`.
+            cx.set_global(ToastBus::default());
 
             // Initialize globals
             cx.set_global(Router::default());
@@ -132,8 +140,9 @@ fn main() {
                 cx.new(|cx| gpui_component::Root::new(gate_view, window, cx))
             });
 
-            match &window_res {
-                Ok(_) => {
+            match window_res.as_ref() {
+                Ok(window) => {
+                    cx.global_mut::<ToastBus>().set_window((*window).into());
                     eprintln!("[UI] Window opened successfully!");
                 }
                 Err(e) => {
