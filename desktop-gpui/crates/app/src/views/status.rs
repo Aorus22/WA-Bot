@@ -5,6 +5,7 @@ use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::StatusGroup;
 
+use crate::components::toast;
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::theme::manager::AppThemeExt;
@@ -111,7 +112,6 @@ pub struct StatusView {
     composer_bg: u32,
     composer_focus: FocusHandle,
     is_posting: bool,
-    toast_message: Option<String>,
 }
 
 impl StatusView {
@@ -127,7 +127,6 @@ impl StatusView {
             composer_bg: BACKGROUNDS[0],
             composer_focus,
             is_posting: false,
-            toast_message: None,
         };
         this.load_statuses(cx);
         this
@@ -253,14 +252,14 @@ impl StatusView {
                                 Ok(Ok(_)) => {
                                     this.composer_open = false;
                                     this.composer_text.clear();
-                                    this.toast_message = Some("Status posted".to_string());
+                                    toast::success("Status posted", cx);
                                     this.load_statuses(cx);
                                 }
                                 Ok(Err(e)) => {
-                                    this.toast_message = Some(format!("Failed to post: {e}"));
+                                    toast::error(format!("Failed to post: {e}"), cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some("Failed to post status".to_string());
+                                    toast::error("Failed to post status", cx);
                                 }
                             }
                             cx.notify();

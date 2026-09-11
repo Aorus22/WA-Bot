@@ -29,6 +29,7 @@ use wabot_backend_client::dto::HistorySyncStatus;
 use wabot_settings::{DesktopSettings, ThemeMode as SettingsThemeMode};
 
 use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
+use crate::components::toast;
 use crate::components::dialogs::logout::open_logout_dialog;
 use crate::router::{AppRoute, Router};
 use crate::state::auth::{AuthState, AuthStatus};
@@ -86,7 +87,6 @@ pub struct SettingsView {
     pub is_saving_ai: bool,
     pub is_saving_tts: bool,
     pub is_saving_receipts: bool,
-    pub toast_message: Option<(String, bool)>, // (text, is_error)
 
     // Modal editing state
     pub edit_modal: Option<EditModalState>,
@@ -133,7 +133,6 @@ impl SettingsView {
             is_saving_ai: false,
             is_saving_tts: false,
             is_saving_receipts: false,
-            toast_message: None,
 
             edit_modal: None,
             modal_focus_handle,
@@ -247,11 +246,11 @@ impl SettingsView {
                                 Ok(Ok(status)) => {
                                     this.is_syncing_history = status.state == "running";
                                     this.history_status = Some(status);
-                                    this.toast_message = Some(("History sync started".into(), false));
+                                    toast::success("History sync started", cx);
                                 }
                                 _ => {
                                     this.is_syncing_history = false;
-                                    this.toast_message = Some(("Failed to start history sync".into(), true));
+                                    toast::error("Failed to start history sync", cx);
                                 }
                             }
                             cx.notify();
@@ -297,10 +296,10 @@ impl SettingsView {
                                 Ok(Ok(resp)) => {
                                     this.has_gemini_key = resp.has_gemini_key.unwrap_or(this.has_gemini_key);
                                     this.gemini_api_key_input.clear();
-                                    this.toast_message = Some(("AI configuration saved".into(), false));
+                                    toast::success("AI configuration saved", cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some(("Failed to save AI configuration".into(), true));
+                                    toast::error("Failed to save AI configuration", cx);
                                 }
                             }
                             cx.notify();
@@ -345,10 +344,10 @@ impl SettingsView {
                                 Ok(Ok(resp)) => {
                                     this.read_receipts = resp.read_receipts();
                                     let msg = if this.read_receipts { "Read receipts enabled" } else { "Read receipts disabled" };
-                                    this.toast_message = Some((msg.into(), false));
+                                    toast::success(msg, cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some(("Failed to update read receipts".into(), true));
+                                    toast::error("Failed to update read receipts", cx);
                                 }
                             }
                             cx.notify();
@@ -397,10 +396,10 @@ impl SettingsView {
                                 Ok(Ok(resp)) => {
                                     this.has_fish_key = resp.has_fish_key.unwrap_or(this.has_fish_key);
                                     this.fish_audio_key_input.clear();
-                                    this.toast_message = Some(("Call TTS settings saved".into(), false));
+                                    toast::success("Call TTS settings saved", cx);
                                 }
                                 _ => {
-                                    this.toast_message = Some(("Failed to save TTS settings".into(), true));
+                                    toast::error("Failed to save TTS settings", cx);
                                 }
                             }
                             cx.notify();
@@ -616,38 +615,6 @@ impl Render for SettingsView {
                                     .child("Customize your application appearance, credentials, and bot configurations"),
                             ),
                     )
-                    // Toast message notification
-                    .children(self.toast_message.as_ref().map(|(msg, is_err)| {
-                        div()
-                            .px_4()
-                            .py_2p5()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(if *is_err { rgb(0xef4444).into() } else { primary_color })
-                            .bg(if *is_err { rgba(0xef444420) } else { rgba(0x10b98120) })
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(if *is_err { rgb(0xef4444).into() } else { text_color })
-                                    .child(msg.clone()),
-                            )
-                            .child(
-                                div()
-                                    .cursor_pointer()
-                                    .text_xs()
-                                    .text_color(muted_text)
-                                    .child("✕")
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                        this.toast_message = None;
-                                        cx.notify();
-                                    })),
-                            )
-                    }))
                     // ====================================================
                     // 1. APPEARANCE SECTION
                     // ====================================================

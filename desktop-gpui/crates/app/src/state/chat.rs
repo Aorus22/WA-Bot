@@ -40,6 +40,10 @@ pub struct ChatStore {
     pub messages_by_chat: HashMap<String, ChatMessagesEntry>,
     pub active_chat_id: Option<String>,
     pub peer_presence: HashMap<String, String>, // chat_id -> presence string (e.g. "available", "composing")
+    /// Bumped on every message mutation (status, reaction, new/deleted/edited
+    /// message) so views can rebuild their render caches even when the chat
+    /// id is unchanged.
+    pub messages_version: u64,
 }
 
 use gpui::{App, Global};
@@ -132,6 +136,7 @@ impl ChatStore {
         entry.has_more_next = false;
         entry.loaded = true;
         entry.loading = false;
+        self.messages_version = self.messages_version.wrapping_add(1);
     }
 
     pub fn prepend_messages(&mut self, chat_id: &str, msgs: Vec<Message>, has_more: bool) {
@@ -173,6 +178,7 @@ impl ChatStore {
 
             if let Some(p_idx) = pending_index {
                 entry.messages[p_idx] = msg;
+                self.messages_version = self.messages_version.wrapping_add(1);
                 return;
             }
         }
@@ -184,6 +190,7 @@ impl ChatStore {
             msgs.push(msg);
             entry.messages = sort_asc(msgs);
         }
+        self.messages_version = self.messages_version.wrapping_add(1);
     }
 
     pub fn patch_message<F>(&mut self, chat_id: &str, msg_id: &str, patch_fn: F)
@@ -193,13 +200,18 @@ impl ChatStore {
         if let Some(entry) = self.messages_by_chat.get_mut(chat_id) {
             if let Some(msg) = entry.messages.iter_mut().find(|m| m.id == msg_id) {
                 patch_fn(msg);
+                self.messages_version = self.messages_version.wrapping_add(1);
             }
         }
     }
 
     pub fn delete_message(&mut self, chat_id: &str, msg_id: &str) {
         if let Some(entry) = self.messages_by_chat.get_mut(chat_id) {
+            let before = entry.messages.len();
             entry.messages.retain(|m| m.id != msg_id);
+            if entry.messages.len() != before {
+                self.messages_version = self.messages_version.wrapping_add(1);
+            }
         }
     }
 
@@ -220,6 +232,30 @@ impl ChatStore {
 
     pub fn handle_ws_event(&mut self, event: &WsEvent) -> bool {
         match event {
+            WsEvent::MessageStatus { chat_id, id, status } => {
+                if let Some(cid) = chat_id {
+                    self.patch_message(cid, id, |m| m.status = status.clone());
+                } else {
+                    for entry in self.messages_by_chat.values_mut() {
+                        if let Some(m) = entry.messages.iter_mut().find(|m| m.id == *id) {
+                            m.status = status.clone();
+                        }
+                    }
+                }
+                true
+            }
+            WsEvent::MessageDeleted { chat_id, id } => {
+                self.delete_message(chat_id, id);
+                true
+            }
+            WsEvent::MessageEdited { chat_id, id, content } => {
+                self.patch_message(chat_id, id, |m| m.content = content.clone());
+                true
+            }
+            WsEvent::MessageReaction { chat_id, id, reactions } => {
+                self.patch_message(chat_id, id, |m| m.reactions = Some(reactions.clone()));
+                true
+            }
             WsEvent::NewMessage(msg) => {
                 let chat_id = msg.chat_id.clone();
                 self.upsert_message(&chat_id, *msg.clone());
@@ -250,26 +286,6 @@ impl ChatStore {
                     self.chats.insert(0, new_chat);
                 }
                 self.chats_version = self.chats_version.wrapping_add(1);
-                true
-            }
-            WsEvent::MessageStatus { chat_id, id, status } => {
-                if let Some(cid) = chat_id {
-                    self.patch_message(cid, id, |m| m.status = status.clone());
-                } else {
-                    for entry in self.messages_by_chat.values_mut() {
-                        if let Some(m) = entry.messages.iter_mut().find(|m| m.id == *id) {
-                            m.status = status.clone();
-                        }
-                    }
-                }
-                true
-            }
-            WsEvent::MessageDeleted { chat_id, id } => {
-                self.delete_message(chat_id, id);
-                true
-            }
-            WsEvent::MessageEdited { chat_id, id, content } => {
-                self.patch_message(chat_id, id, |m| m.content = content.clone());
                 true
             }
             WsEvent::ChatState(state) => {

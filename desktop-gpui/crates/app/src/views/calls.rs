@@ -5,6 +5,7 @@ use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{CallDirection, CallHistoryFilter, CallLog, CallStatus, CallType};
 
+use crate::components::toast;
 use crate::icons::*;
 use crate::router::{AppRoute, Router};
 use crate::state::auth::AuthState;
@@ -152,7 +153,6 @@ pub struct CallsView {
     search_focus: FocusHandle,
     selected_log: Option<CallLog>,
     error_message: Option<String>,
-    toast_message: Option<String>,
 }
 
 impl CallsView {
@@ -168,7 +168,6 @@ impl CallsView {
             search_focus,
             selected_log: None,
             error_message: None,
-            toast_message: None,
         };
         this.load_calls(true, cx);
         this
@@ -282,7 +281,7 @@ impl CallsView {
             "http://127.0.0.1:3000/api".to_string()
         };
 
-        self.toast_message = Some(format!("Calling {}…", display_name(log)));
+        toast::info(format!("Calling {}…", display_name(log)), cx);
 
         // Show the full-screen call overlay right away, then adopt the state the
         // backend returns (mirrors the Web `call_back` flow).
