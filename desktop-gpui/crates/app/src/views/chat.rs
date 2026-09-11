@@ -16,6 +16,7 @@ use crate::components::nav_sidebar::SIDEBAR_WIDTH;
 use crate::components::titlebar::TITLEBAR_HEIGHT;
 use crate::icons::*;
 use crate::state::auth::AuthState;
+use crate::state::call::CallManager;
 use crate::state::chat::ChatStore;
 use crate::theme::manager::{ActiveTokens, AppThemeExt};
 use crate::TOKIO_RT;
@@ -839,8 +840,14 @@ impl ChatView {
             (false, false) => CallType::Audio,
         };
 
-        let call_label = if is_video { "video call" } else { "voice call" };
-        self.toast_message = Some((format!("Starting {} with {}…", call_label, chat_name), false));
+        // Show the full-screen call overlay immediately (Web does the same with
+        // its optimistic `setActiveCall`); the API response then replaces it
+        // with the authoritative backend state.
+        let group_jid = if is_group { Some(chat_id.clone()) } else { None };
+        if cx.has_global::<CallManager>() {
+            CallManager::global_mut(cx).initiate_call(&chat_id, call_type.clone(), group_jid);
+        }
+        let _ = chat_name;
         cx.notify();
 
         let base_url = if cx.has_global::<AuthState>() {
@@ -868,12 +875,20 @@ impl ChatView {
                         view.update(cx, |this, cx| {
                             match res {
                                 Ok(Ok(call_state)) => {
-                                    this.toast_message = Some((format!("Call initiated ({})", call_state.id), false));
+                                    if cx.has_global::<CallManager>() {
+                                        CallManager::global_mut(cx).adopt(call_state);
+                                    }
                                 }
                                 Ok(Err(e)) => {
+                                    if cx.has_global::<CallManager>() {
+                                        CallManager::global_mut(cx).end_local(None);
+                                    }
                                     this.toast_message = Some((format!("Failed to start call: {e}"), true));
                                 }
                                 Err(_) => {
+                                    if cx.has_global::<CallManager>() {
+                                        CallManager::global_mut(cx).end_local(None);
+                                    }
                                     this.toast_message = Some(("Failed to start call".to_string(), true));
                                 }
                             }

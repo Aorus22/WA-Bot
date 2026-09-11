@@ -8,6 +8,7 @@ use wabot_backend_client::dto::{CallDirection, CallHistoryFilter, CallLog, CallS
 use crate::icons::*;
 use crate::router::{AppRoute, Router};
 use crate::state::auth::AuthState;
+use crate::state::call::CallManager;
 use crate::theme::manager::AppThemeExt;
 use crate::TOKIO_RT;
 
@@ -282,10 +283,46 @@ impl CallsView {
         };
 
         self.toast_message = Some(format!("Calling {}…", display_name(log)));
-        TOKIO_RT.spawn(async move {
-            let client = HttpClient::new(&base_url);
-            let _ = client.create_call(&target, call_type).await;
-        });
+
+        // Show the full-screen call overlay right away, then adopt the state the
+        // backend returns (mirrors the Web `call_back` flow).
+        if cx.has_global::<CallManager>() {
+            CallManager::global_mut(cx).initiate_call(&target, call_type.clone(), None);
+            cx.notify();
+        }
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let call_target = target.clone();
+                let request_type = call_type.clone();
+                let res = TOKIO_RT
+                    .spawn(async move {
+                        let client = HttpClient::new(&base_url);
+                        client.create_call(&call_target, request_type).await
+                    })
+                    .await;
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if cx.has_global::<CallManager>() {
+                                match res {
+                                    Ok(Ok(call_state)) => CallManager::global_mut(cx).adopt(call_state),
+                                    _ => {
+                                        CallManager::global_mut(cx).end_local(None);
+                                        this.error_message = Some("Failed to start call".to_string());
+                                    }
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
     }
 
     pub fn view_chat(&mut self, target: &str, cx: &mut Context<Self>) {

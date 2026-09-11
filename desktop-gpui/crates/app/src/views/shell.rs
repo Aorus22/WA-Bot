@@ -5,6 +5,7 @@ use gpui::{
 };
 use gpui_component::{h_flex, v_flex};
 
+use crate::components::call_overlay::CallOverlayView;
 use crate::components::connection_banner::{ConnectionBanner, ConnectionState};
 use crate::components::nav_sidebar::NavigationSidebar;
 use crate::components::titlebar::AppTitleBar;
@@ -24,6 +25,7 @@ pub struct AppShellView {
     status_view: Entity<StatusView>,
     channels_view: Entity<ChannelsView>,
     calls_view: Entity<CallsView>,
+    call_overlay: Entity<CallOverlayView>,
 }
 
 impl AppShellView {
@@ -39,6 +41,9 @@ impl AppShellView {
         let status_view = cx.new(|cx| StatusView::new(cx));
         let channels_view = cx.new(|cx| ChannelsView::new(cx));
         let calls_view = cx.new(|cx| CallsView::new(cx));
+        // Mounted last so an active call paints above every route, like the
+        // Web client's `fixed inset-0 z-[90]` overlay.
+        let call_overlay = cx.new(|cx| CallOverlayView::new(cx));
         Self {
             _router_sub: router_sub,
             _conn_sub: conn_sub,
@@ -47,6 +52,7 @@ impl AppShellView {
             status_view,
             channels_view,
             calls_view,
+            call_overlay,
         }
     }
 }
@@ -62,6 +68,7 @@ impl Render for AppShellView {
 
         v_flex()
             .id("app-shell")
+            .relative()
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
@@ -86,6 +93,7 @@ impl Render for AppShellView {
                             ),
                     ),
             )
+            .child(self.call_overlay.clone())
     }
 }
 
