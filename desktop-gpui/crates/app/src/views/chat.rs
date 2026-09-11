@@ -30,6 +30,22 @@ use crate::state::chat::ChatStore;
 use crate::theme::manager::{ActiveTokens, AppThemeExt};
 use crate::TOKIO_RT;
 
+/// Conversation sidebar sizing: the desktop opens at 360 like before, and
+/// drags within the web client's bounds (`ChatPage.tsx` clamps 280–600).
+const SIDEBAR_DEFAULT_WIDTH: f32 = 360.0;
+const SIDEBAR_MIN_WIDTH: f32 = 280.0;
+const SIDEBAR_MAX_WIDTH: f32 = 600.0;
+/// Width of the divider's grab area, straddling the sidebar's right edge.
+const SIDEBAR_HANDLE_WIDTH: f32 = 6.0;
+/// Unread count badge: square minimum + fixed height keeps a single digit a
+/// circle while two digits grow into a pill, like WhatsApp.
+const UNREAD_BADGE_SIZE: f32 = 20.0;
+/// Width of the right-hand drawers (search + chat info); the entrance
+/// animation slides across exactly this distance.
+const SHEET_WIDTH: f32 = 320.0;
+/// Entrance duration for the right-hand drawers, in ms.
+const SHEET_ANIM_MS: u64 = 240;
+
 /// Deterministic color palette for contact avatars
 const AVATAR_COLORS: &[u32] = &[
     0x00a884, // WhatsApp Emerald
@@ -277,6 +293,11 @@ pub struct ChatView {
     pub chat_list_scroll_handle: UniformListScrollHandle,
     pub messages_list_state: ListState,
 
+    // Conversation sidebar width and its live resize drag (web parity)
+    pub sidebar_width: f32,
+    /// `(pointer x, sidebar width)` captured when the divider drag started.
+    pub sidebar_resize_drag: Option<(f32, f32)>,
+
     // Context menu popup on message right click
     pub context_menu: Option<MessageContextMenu>,
 
@@ -297,6 +318,10 @@ pub struct ChatView {
     pub search_sheet_focus: FocusHandle,
     pub search_sheet_results: Vec<Message>,
     pub is_searching_messages: bool,
+
+    // Right-hand drawers play an exit animation before they unmount
+    pub info_sheet_closing: bool,
+    pub search_sheet_closing: bool,
     pub highlighted_message_id: Option<String>,
 
     // New Group modal
@@ -361,6 +386,9 @@ impl ChatView {
             chat_list_scroll_handle: UniformListScrollHandle::new(),
             messages_list_state: ListState::new(0, ListAlignment::Top, px(200.0)),
 
+            sidebar_width: SIDEBAR_DEFAULT_WIDTH,
+            sidebar_resize_drag: None,
+
             context_menu: None,
             chat_context_menu: None,
 
@@ -376,6 +404,9 @@ impl ChatView {
             search_sheet_focus: cx.focus_handle(),
             search_sheet_results: Vec::new(),
             is_searching_messages: false,
+
+            info_sheet_closing: false,
+            search_sheet_closing: false,
             highlighted_message_id: None,
 
             is_new_group_open: false,
@@ -452,8 +483,12 @@ impl ChatView {
         self.editing_message = None;
         self.context_menu = None;
         self.chat_context_menu = None;
+        // Switching conversations cuts both drawers immediately — a lingering
+        // exit animation would sit over the wrong thread.
         self.is_info_sheet_open = false;
         self.is_search_sheet_open = false;
+        self.info_sheet_closing = false;
+        self.search_sheet_closing = false;
         self.search_sheet_query.clear();
         self.search_sheet_results.clear();
         self.is_searching_messages = false;
@@ -742,15 +777,66 @@ impl ChatView {
         .detach();
     }
 
+    /// Play the Chat Info drawer's exit animation, then unmount it.
+    pub fn close_info_sheet(&mut self, cx: &mut Context<Self>) {
+        if !self.is_info_sheet_open || self.info_sheet_closing {
+            return;
+        }
+        self.info_sheet_closing = true;
+        Self::after_sheet_exit(cx, |this| {
+            // Re-opening during the exit cancels the pending unmount.
+            if this.info_sheet_closing {
+                this.is_info_sheet_open = false;
+                this.info_sheet_closing = false;
+            }
+        });
+        cx.notify();
+    }
+
+    /// Play the Search drawer's exit animation, then unmount it.
+    pub fn close_search_sheet(&mut self, cx: &mut Context<Self>) {
+        if !self.is_search_sheet_open || self.search_sheet_closing {
+            return;
+        }
+        self.search_sheet_closing = true;
+        Self::after_sheet_exit(cx, |this| {
+            // Re-opening during the exit cancels the pending unmount.
+            if this.search_sheet_closing {
+                this.is_search_sheet_open = false;
+                this.search_sheet_closing = false;
+            }
+        });
+        cx.notify();
+    }
+
+    /// Run `done` once a drawer's exit animation has finished playing.
+    fn after_sheet_exit(cx: &mut Context<Self>, done: impl FnOnce(&mut Self) + 'static) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(SHEET_ANIM_MS + 40))
+                .await;
+            this.update(cx, |this, cx| {
+                done(this);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Toggle Chat Info Sheet drawer
     pub fn toggle_info_sheet(&mut self, cx: &mut Context<Self>) {
-        self.is_info_sheet_open = !self.is_info_sheet_open;
-        if self.is_info_sheet_open {
-            self.is_search_sheet_open = false;
-            self.load_info_media(cx);
-            self.load_info_docs(cx);
-            self.load_info_links(cx);
+        if self.is_info_sheet_open && !self.info_sheet_closing {
+            self.close_info_sheet(cx);
+            return;
         }
+        self.info_sheet_closing = false;
+        self.is_info_sheet_open = true;
+        self.is_search_sheet_open = false;
+        self.search_sheet_closing = false;
+        self.load_info_media(cx);
+        self.load_info_docs(cx);
+        self.load_info_links(cx);
         cx.notify();
     }
 
@@ -948,13 +1034,17 @@ impl ChatView {
 
     /// Toggle Chat Search Sheet drawer (Right side)
     pub fn toggle_search_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_search_sheet_open = !self.is_search_sheet_open;
-        if self.is_search_sheet_open {
-            self.is_info_sheet_open = false;
-            self.search_sheet_focus.focus(window, cx);
-            if !self.search_sheet_query.is_empty() {
-                self.run_search_messages(cx);
-            }
+        if self.is_search_sheet_open && !self.search_sheet_closing {
+            self.close_search_sheet(cx);
+            return;
+        }
+        self.search_sheet_closing = false;
+        self.is_search_sheet_open = true;
+        self.is_info_sheet_open = false;
+        self.info_sheet_closing = false;
+        self.search_sheet_focus.focus(window, cx);
+        if !self.search_sheet_query.is_empty() {
+            self.run_search_messages(cx);
         }
         cx.notify();
     }
@@ -1053,7 +1143,9 @@ impl ChatView {
 
     /// Jump/teleport directly to a specific message in the conversation
     pub fn navigate_to_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        // Jumping away needs the drawer gone now, not sliding out of the way.
         self.is_search_sheet_open = false;
+        self.search_sheet_closing = false;
         self.highlighted_message_id = Some(message_id.to_string());
         let mid_flash = message_id.to_string();
 
@@ -2379,9 +2471,9 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         v_flex()
-            .w(px(320.0))
-            .min_w(px(320.0))
-            .max_w(px(320.0))
+            .w(px(SHEET_WIDTH))
+            .min_w(px(SHEET_WIDTH))
+            .max_w(px(SHEET_WIDTH))
             .h_full()
             .overflow_hidden()
             .border_l_1()
@@ -2424,11 +2516,9 @@ impl ChatView {
                                     .tooltip(move |window, cx| {
                                         Tooltip::new("Close").build(window, cx)
                                     })
-                                    .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                        this.is_search_sheet_open = false;
-                                        cx.notify();
-                                    })),
+                                    .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                         this.close_search_sheet(cx);
+                                     })),
                             ),
                     )
                     // Search Input Box
@@ -2463,7 +2553,7 @@ impl ChatView {
                                                     this.search_sheet_results.clear();
                                                     this.is_searching_messages = false;
                                                 } else {
-                                                    this.is_search_sheet_open = false;
+                                                    this.close_search_sheet(cx);
                                                 }
                                                 cx.notify();
                                             }
@@ -2696,6 +2786,36 @@ impl ChatView {
             .into_any_element()
     }
 
+    /// Wraps a right-hand drawer so it plays the web's sheet motion in both
+    /// directions: the slot's width animates while the drawer keeps its full
+    /// size and is clipped, so the conversation beside it narrows smoothly
+    /// instead of snapping and leaving an empty gutter.
+    ///
+    /// The open and close ids differ so mounting the closing element restarts
+    /// the animation at 0, which the exit reads as "still fully open" before
+    /// shrinking it away.
+    fn animated_sheet(
+        open_id: &'static str,
+        close_id: &'static str,
+        closing: bool,
+        sheet: AnyElement,
+    ) -> AnyElement {
+        let animation = Animation::new(std::time::Duration::from_millis(SHEET_ANIM_MS))
+            .with_easing(|d| 1.0 - (1.0 - d).powi(5));
+        let slot = div().h_full().flex_shrink_0().overflow_hidden().child(sheet);
+        if closing {
+            slot.with_animation(close_id, animation, |el, delta| {
+                el.w(px(SHEET_WIDTH * (1.0 - delta).clamp(0.0, 1.0)))
+            })
+            .into_any_element()
+        } else {
+            slot.with_animation(open_id, animation, |el, delta| {
+                el.w(px(SHEET_WIDTH * delta.clamp(0.0, 1.0)))
+            })
+            .into_any_element()
+        }
+    }
+
     /// One row of the attach (+) menu: tinted lucide icon + label, matching
     /// the web's plus popover.
     fn attach_menu_row(
@@ -2822,6 +2942,80 @@ impl ChatView {
             .child(label)
             .on_mouse_down(MouseButton::Left, handler)
             .into_any_element()
+    }
+
+    /// Centered date pill, shared by the in-flow day separators and the
+    /// sticky header at the top of the message list.
+    fn day_pill(label: String, bg: Hsla, border_color: Hsla, text: Hsla) -> AnyElement {
+        div()
+            .px_3()
+            .py_1()
+            .rounded_full()
+            .bg(bg)
+            .border_1()
+            .border_color(border_color)
+            .text_xs()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(text)
+            .child(label)
+            .into_any_element()
+    }
+
+    /// Date label of the message at `index` in the cached list (clamped).
+    fn date_label_at(&self, index: usize) -> Option<String> {
+        let len = self.cached_render_messages.len();
+        if len == 0 {
+            return None;
+        }
+        let msg_idx = index.saturating_sub(1).min(len - 1);
+        self.cached_render_messages
+            .get(msg_idx)
+            .map(|m| MessageBubbleHelper::format_date_label(m.msg.timestamp).to_uppercase())
+    }
+
+    /// Label for the floating day header — the web's `sticky top-0` date pill:
+    /// the day group occupying the top of the message list. `None` while that
+    /// group's own in-flow pill is still on screen (it *is* the header), and
+    /// while the next group's pill has scrolled up to take its place.
+    fn sticky_day_label(&self) -> Option<String> {
+        let len = self.cached_render_messages.len();
+        if len == 0 {
+            return None;
+        }
+        let state = &self.messages_list_state;
+        let msg_idx = state
+            .logical_scroll_top()
+            .item_ix
+            .saturating_sub(1)
+            .min(len - 1);
+
+        let timestamps: Vec<i64> = self
+            .cached_render_messages
+            .iter()
+            .map(|m| m.msg.timestamp)
+            .collect();
+
+        // The in-flow pill for this day is still visible → the real pill wins.
+        // Unknown (no layout yet) counts as "not above" so the header never
+        // doubles up with the pill it mirrors.
+        let pill_ix = MessageBubbleHelper::day_group_pill_index(&timestamps, msg_idx);
+        if !state.item_is_above_viewport(pill_ix).unwrap_or(false) {
+            return None;
+        }
+
+        // The next day's pill has reached the top → it takes over from here.
+        if let Some(next_ix) = MessageBubbleHelper::next_day_group_pill_index(&timestamps, msg_idx) {
+            if let Some(bounds) = state.bounds_for_item(next_ix) {
+                // Header inset (8px) plus the pill's own height (~24px).
+                if bounds.top() <= state.viewport_bounds().top() + px(32.0) {
+                    return None;
+                }
+            }
+        }
+
+        self.cached_render_messages
+            .get(msg_idx)
+            .map(|m| MessageBubbleHelper::format_date_label(m.msg.timestamp).to_uppercase())
     }
 
     /// Document attachment card, mirroring the web's document bubble: file
@@ -3762,7 +3956,7 @@ impl Render for ChatView {
             // ====================================================
             .child(
                 v_flex()
-                    .w(px(360.0))
+                    .w(px(self.sidebar_width))
                     .h_full()
                     .border_r_1()
                     .border_color(border_color.opacity(0.4))
@@ -4235,9 +4429,9 @@ impl Render for ChatView {
                                                             .children(if unread > 0 {
                                                                 Some(
                                                                     div()
-                                                                        .px_1p5()
-                                                                        .py_0p5()
-                                                                        .min_w(px(18.0))
+                                                                        .px_1()
+                                                                        .h(px(UNREAD_BADGE_SIZE))
+                                                                        .min_w(px(UNREAD_BADGE_SIZE))
                                                                         .rounded_full()
                                                                         .bg(rgb(0x00a884))
                                                                         .text_xs()
@@ -4483,22 +4677,20 @@ impl Render for ChatView {
                                                         this.load_newer_messages(cx);
                                                     }
 
-                                                    if index == 0 {
+                                                    let body: AnyElement = if index == 0 {
+                                                        let first_label = this
+                                                            .date_label_at(1)
+                                                            .unwrap_or_else(|| "TODAY".to_string());
                                                         h_flex()
                                                             .w_full()
                                                             .justify_center()
                                                             .py_3()
-                                                            .child(
-                                                                div()
-                                                                    .px_3()
-                                                                    .py_1()
-                                                                    .rounded_full()
-                                                                    .bg(theme.muted.opacity(0.4))
-                                                                    .text_xs()
-                                                                    .font_weight(FontWeight::MEDIUM)
-                                                                    .text_color(muted_text)
-                                                                    .child("TODAY"),
-                                                            )
+                                                            .child(Self::day_pill(
+                                                                first_label,
+                                                                theme.muted.opacity(0.4),
+                                                                rgba(0x00000000).into(),
+                                                                muted_text,
+                                                            ))
                                                             .into_any_element()
                                                     } else if let Some(r_msg) = this.cached_render_messages.get(index - 1) {
                                                         let msg_idx = index - 1;
@@ -4866,7 +5058,46 @@ impl Render for ChatView {
                                                         }
                                                     } else {
                                                         div().into_any_element()
-                                                    }
+                                                    };
+
+                                                    // Day separator: shown above the first message of
+                                                    // each day, like the web's date pill.
+                                                    let day_separator: Option<AnyElement> = if index > 1 {
+                                                        let current = this
+                                                            .cached_render_messages
+                                                            .get(index - 1)
+                                                            .map(|m| MessageBubbleHelper::day_index(m.msg.timestamp));
+                                                        let previous = this
+                                                            .cached_render_messages
+                                                            .get(index - 2)
+                                                            .map(|m| MessageBubbleHelper::day_index(m.msg.timestamp));
+                                                        match (current, previous) {
+                                                            (Some(cur), Some(prev)) if cur != prev => this
+                                                                .date_label_at(index)
+                                                                .map(|label| {
+                                                                    h_flex()
+                                                                        .w_full()
+                                                                        .justify_center()
+                                                                        .py_3()
+                                                                        .child(Self::day_pill(
+                                                                            label,
+                                                                            theme.muted.opacity(0.4),
+                                                                            rgba(0x00000000).into(),
+                                                                            muted_text,
+                                                                        ))
+                                                                        .into_any_element()
+                                                                }),
+                                                            _ => None,
+                                                        }
+                                                    } else {
+                                                        None
+                                                    };
+
+                                                    v_flex()
+                                                        .w_full()
+                                                        .children(day_separator)
+                                                        .child(body)
+                                                        .into_any_element()
                                                 }),
                                             )
                                             .size_full()
@@ -4881,7 +5112,25 @@ impl Render for ChatView {
                                                         .thumb_hover(|th| th.bg(theme.muted_foreground.opacity(0.65)).radius(px(4.0)).width(px(8.0)))
                                                         .thumb_active(|th| th.bg(theme.primary.opacity(0.8)).radius(px(4.0)).width(px(8.0)))
                                                 }),
-                                        ),
+                                        )
+                                        // Floating day header, mirroring the web's sticky date pill.
+                                        .children(self.sticky_day_label().map(|label| {
+                                            div()
+                                                .absolute()
+                                                .top_2()
+                                                .left_0()
+                                                .right_0()
+                                                .flex()
+                                                .justify_center()
+                                                .child(Self::day_pill(
+                                                    label,
+                                                    theme.muted.opacity(0.9),
+                                                    border_color.opacity(0.4),
+                                                    muted_text,
+                                                ))
+                                                .into_any_element()
+                                        })),
+
                                 )
                                 // Bottom Compose Container (Banner + Input Field + Integrated Send Icon)
                                 .child(
@@ -5198,14 +5447,19 @@ impl Render for ChatView {
             // ====================================================
             // RIGHT DRAWER: CHAT INFO SHEET
             // ====================================================
-            .children(if self.is_info_sheet_open && selected_chat.is_some() {
+            .children(if (self.is_info_sheet_open || self.info_sheet_closing)
+                && selected_chat.is_some()
+            {
                 let chat = selected_chat.clone().unwrap();
 
-                Some(
+                Some(Self::animated_sheet(
+                    "chat-info-sheet-in",
+                    "chat-info-sheet-out",
+                    self.info_sheet_closing,
                     v_flex()
-                        .w(px(320.0))
-                        .min_w(px(320.0))
-                        .max_w(px(320.0))
+                        .w(px(SHEET_WIDTH))
+                        .min_w(px(SHEET_WIDTH))
+                        .max_w(px(SHEET_WIDTH))
                         .h_full()
                         .overflow_hidden()
                         .border_l_1()
@@ -5241,8 +5495,7 @@ impl Render for ChatView {
                                         })
                                         .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                            this.is_info_sheet_open = false;
-                                            cx.notify();
+                                            this.close_info_sheet(cx);
                                         })),
                                 ),
                         )
@@ -5583,10 +5836,17 @@ impl Render for ChatView {
                                 ),
                         )
                         .into_any_element(),
-                )
-            } else if self.is_search_sheet_open && selected_chat.is_some() {
+                ))
+            } else if (self.is_search_sheet_open || self.search_sheet_closing)
+                && selected_chat.is_some()
+            {
                 let chat = selected_chat.clone().unwrap();
-                Some(self.render_search_sheet(&chat, theme, border_color, bg_color, card_bg, primary_color, text_color, muted_text, cx))
+                Some(Self::animated_sheet(
+                    "chat-search-sheet-in",
+                    "chat-search-sheet-out",
+                    self.search_sheet_closing,
+                    self.render_search_sheet(&chat, theme, border_color, bg_color, card_bg, primary_color, text_color, muted_text, cx),
+                ))
             } else {
                 None
             })
@@ -5602,8 +5862,8 @@ impl Render for ChatView {
 
                 let win_w = f32::from(window.viewport_size().width);
                 let win_h = f32::from(window.viewport_size().height);
-                let menu_w = 230.0;
-                let menu_h = 160.0;
+                let menu_w = 248.0;
+                let menu_h = 210.0;
 
                 let banner_h = if cx.has_global::<ConnectionState>() {
                     match ConnectionState::global(cx).status {
@@ -5648,7 +5908,7 @@ impl Render for ChatView {
                                 .absolute()
                                 .left(px(pos_x))
                                 .top(px(pos_y))
-                                .w(px(220.0))
+                                .w(px(248.0))
                                 .p_2()
                                 .gap_1()
                                 .rounded_2xl()
@@ -5657,10 +5917,14 @@ impl Render for ChatView {
                                 .border_color(border_color)
                                 .shadow_xl()
                                 .on_mouse_down(MouseButton::Left, |_, _, _| {})
-                                // Quick Reactions Row matching Web
+                                // Quick Reactions Row matching Web. Each emoji gets a
+                                // fixed square hit area so the row can never overflow
+                                // the menu and butt against its right border.
                                 .child(
                                     h_flex()
-                                        .p_1()
+                                        .px_1()
+                                        .py_1()
+                                        .gap_0p5()
                                         .border_b_1()
                                         .border_color(border_color)
                                         .justify_between()
@@ -5671,8 +5935,12 @@ impl Render for ChatView {
                                             let mid = msg_id.clone();
                                             div()
                                                 .cursor_pointer()
-                                                .p_1()
-                                                .rounded_md()
+                                                .w(px(28.0))
+                                                .h(px(28.0))
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .rounded_full()
                                                 .hover(|s| s.bg(theme.muted.opacity(0.5)))
                                                 .text_base()
                                                 .child(emoji)
@@ -5766,7 +6034,16 @@ impl Render for ChatView {
                                     )
                                 } else {
                                     None
-                                }),
+                                })
+                                // Subtle entrance: fade up over the last few px.
+                                .with_animation(
+                                    "message-context-menu-in",
+                                    Animation::new(std::time::Duration::from_millis(140))
+                                        .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
+                                    move |el, delta| {
+                                        el.opacity(delta).top(px(pos_y + 6.0 * (1.0 - delta)))
+                                    },
+                                ),
                         ),
                 )
             } else {
@@ -6082,7 +6359,16 @@ impl Render for ChatView {
                             )
                         } else {
                             None
-                        }),
+                        })
+                        // Subtle entrance, same as the message menu.
+                        .with_animation(
+                            "chat-context-menu-in",
+                            Animation::new(std::time::Duration::from_millis(140))
+                                .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
+                            move |el, delta| {
+                                el.opacity(delta).top(px(pos_y + 6.0 * (1.0 - delta)))
+                            },
+                        ),
                 )
             } else {
                 None
@@ -6389,6 +6675,45 @@ impl Render for ChatView {
             } else {
                 None
             })
+            // ====================================================
+            // CONVERSATION SIDEBAR RESIZE HANDLE (web parity)
+            // ====================================================
+            .child(
+                div()
+                    .id("sidebar-resize-handle")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(self.sidebar_width - SIDEBAR_HANDLE_WIDTH / 2.0))
+                    .w(px(SIDEBAR_HANDLE_WIDTH))
+                    .cursor_col_resize()
+                    .hover(|s| s.bg(primary_color.opacity(0.18)))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                        this.sidebar_resize_drag = Some((f32::from(ev.position.x), this.sidebar_width));
+                        cx.notify();
+                    })),
+            )
+            // While dragging, a full-screen catcher keeps the pointer glued to
+            // the divider however fast it moves (and off the chat underneath).
+            .children(self.sidebar_resize_drag.is_some().then(|| {
+                div()
+                    .id("sidebar-resize-overlay")
+                    .absolute()
+                    .inset_0()
+                    .cursor_col_resize()
+                    .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
+                        if let Some((start_x, start_width)) = this.sidebar_resize_drag {
+                            let moved = f32::from(ev.position.x) - start_x;
+                            this.sidebar_width = (start_width + moved)
+                                .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+                            cx.notify();
+                        }
+                    }))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        this.sidebar_resize_drag = None;
+                        cx.notify();
+                    }))
+            }))
             // Full-screen Image Preview Overlay (click anywhere to close)
             .children(if let Some(ref img_url) = self.preview_image_url {
                 let u = img_url.clone();
