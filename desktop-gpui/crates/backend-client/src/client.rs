@@ -49,6 +49,25 @@ impl HttpClient {
         &self.client
     }
 
+    /// Download raw bytes from an absolute media URL. Used by the document
+    /// bubble's "Save As" action, which writes the file to a chosen path.
+    pub async fn download_bytes(&self, url: &str) -> Result<Vec<u8>> {
+        let target = if url.starts_with("http://") || url.starts_with("https://") {
+            url.to_string()
+        } else {
+            let root = self.base_url.trim_end_matches("/api");
+            format!("{root}/{}", url.trim_start_matches('/'))
+        };
+        let resp = self.client.get(&target).send().await?;
+        if !resp.status().is_success() {
+            return Err(ClientError::Api {
+                status: resp.status(),
+                message: format!("failed to download media ({})", resp.status()),
+            });
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
     pub fn media_url(&self, value: Option<&str>) -> Option<String> {
         let value = value?;
         if value.is_empty() {
