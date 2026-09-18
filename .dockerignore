@@ -1,5 +1,39 @@
 .env
+.env.*
+*.db
 wa-bot
-wa-bot-session.db
+wa-bot-*
+*.exe
+*.bat
+
+# Version control & CI
+.git
+.github
+
+# Build / runtime junk
+tmp/
+compiled/
+frontend/
+database/
+media/
+mockup/
+bin/*.exe~
+
+# Frontend
 web/node_modules
 web/dist
+
+# Desktop apps (not needed for backend image)
+desktop/
+desktop-gtk/
+desktop-gpui/
+
+# Tooling / workspace state
+.opencode/
+.planning/
+.serena/
+.slim/
+.claude/
+.zcode/
+.air.toml
+.deploy-confirm
