@@ -10,7 +10,7 @@ use gpui::{
 use gpui_reqwest_client::ReqwestClient;
 use wabot_app::{
     components::{connection_banner::ConnectionState, toast::ToastBus},
-    popover,
+    backend, popover,
     router::Router,
     state::auth::{AuthState, AuthStatus},
     state::call::CallManager,
@@ -27,7 +27,8 @@ fn main() {
     // `--toggle` / `--popover`: resident panel-popover instance (see popover.rs).
     let args: Vec<String> = std::env::args().collect();
     let want_toggle = args.iter().any(|a| a == "--toggle");
-    let popover_mode = want_toggle || args.iter().any(|a| a == "--popover");
+    let popover_mode = want_toggle
+        || args.iter().any(|a| a == "--popover" || a == "--background");
     if want_toggle && popover::signal_running() {
         return;
     }
@@ -66,6 +67,12 @@ fn main() {
             let theme_manager = ThemeManager::init_from_settings(&settings);
             let is_dark = theme_manager.is_dark();
             cx.set_global(theme_manager);
+
+            // Stop the bundled backend (if this process started it) on quit.
+            cx.on_app_quit(|_| async {
+                let _ = TOKIO_RT.spawn(backend::shutdown()).await;
+            })
+            .detach();
 
             // Follow the desktop theme live: poll the GTK config for changes.
             cx.spawn(async move |cx| loop {
@@ -388,32 +395,6 @@ fn main() {
         });
 }
 
-/// True when `port` answers `GET /api/status` like the WA Bot backend does
-/// (`{"isLoggedIn": ...}`). An open port alone is not enough: other local
-/// servers (a Caddy on 8080, say) accept connections and answer with HTML.
-fn is_wabot_backend(port: u16) -> bool {
-    use std::io::{Read, Write};
-    use std::time::Duration;
-
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(400)));
-    let request = format!("GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
-    let mut response = Vec::new();
-    let _ = stream.take(8192).read_to_end(&mut response);
-    looks_like_wabot_status(&String::from_utf8_lossy(&response))
-}
-
-fn looks_like_wabot_status(response: &str) -> bool {
-    response.starts_with("HTTP/1.1 200") && response.contains("\"isLoggedIn\"")
-}
-
 /// Detects the backend URL using CLI flags, env vars, active port probes, settings, or .env fallback.
 fn detect_backend_url(settings: &DesktopSettings) -> String {
     let args: Vec<String> = std::env::args().collect();
@@ -445,10 +426,21 @@ fn detect_backend_url(settings: &DesktopSettings) -> String {
     }
 
     // Probe running loopback listeners: 3090 (.env default), 3000 (compiled default), 8080 (external)
-    for &port in &[3090, 3000, 8080] {
-        if is_wabot_backend(port) {
-            return format!("http://127.0.0.1:{port}/api");
+    // A backend that is already up (validated), else start the bundled one with
+    // its data in ~/.wa-bot. Only if that fails do the unvalidated fallbacks
+    // below apply.
+    if let Some(url) = backend::find_running(settings.last_backend_url.as_deref()) {
+        return url;
+    }
+    match backend::start_bundled() {
+        Ok(url) => {
+            if let Ok(mut saved) = DesktopSettings::load() {
+                saved.last_backend_url = Some(url.clone());
+                let _ = saved.save();
+            }
+            return url;
         }
+        Err(e) => eprintln!("[backend] could not start the bundled backend: {e}"),
     }
 
     if let Some(ref url) = settings.last_backend_url {
@@ -474,22 +466,3 @@ fn detect_backend_url(settings: &DesktopSettings) -> String {
 }
 
 
-#[cfg(test)]
-mod tests {
-    use super::looks_like_wabot_status;
-
-    #[test]
-    fn accepts_the_backend_status_json() {
-        assert!(looks_like_wabot_status(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"isLoggedIn\":false}"
-        ));
-    }
-
-    #[test]
-    fn rejects_other_servers() {
-        // Caddy serving an SPA answers 200 with HTML for every path.
-        assert!(!looks_like_wabot_status("HTTP/1.1 200 OK\r\nServer: Caddy\r\n\r\n<!doctype html>"));
-        assert!(!looks_like_wabot_status("HTTP/1.1 404 Not Found\r\n\r\n{\"isLoggedIn\":false}"));
-        assert!(!looks_like_wabot_status(""));
-    }
-}

@@ -9,6 +9,7 @@ pub static TOKIO_RT: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
         .expect("Failed to initialize Tokio runtime")
 });
 
+pub mod backend;
 pub mod components;
 pub mod icons;
 pub mod popover;
