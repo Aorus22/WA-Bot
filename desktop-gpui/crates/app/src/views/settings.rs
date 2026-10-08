@@ -35,6 +35,8 @@ use crate::router::{AppRoute, Router};
 use crate::state::auth::{AuthState, AuthStatus};
 use crate::theme::color::parse_hex_hsla;
 use crate::theme::manager::{AppThemeExt, ThemeManager};
+use std::borrow::Cow;
+
 use crate::theme::preset::{all_presets, ThemePreset};
 use crate::TOKIO_RT;
 
@@ -547,14 +549,24 @@ impl Render for SettingsView {
 
         // Filter theme presets
         let mode_filter = self.theme_mode_filter.clone();
-        let filtered_presets: Vec<&'static ThemePreset> = all_presets()
+        // "Desktop (GTK)" comes first and ignores the dark/light filter: it
+        // follows whatever the desktop is currently using.
+        let mut filtered_presets: Vec<Cow<'static, ThemePreset>> = theme_mgr
+            .gtk_preset
             .iter()
-            .filter(|p| match mode_filter.as_str() {
-                "dark" => p.is_dark(),
-                "light" => !p.is_dark(),
-                _ => true,
-            })
+            .cloned()
+            .map(Cow::Owned)
             .collect();
+        filtered_presets.extend(
+            all_presets()
+                .iter()
+                .filter(|p| match mode_filter.as_str() {
+                    "dark" => p.is_dark(),
+                    "light" => !p.is_dark(),
+                    _ => true,
+                })
+                .map(Cow::Borrowed),
+        );
 
         let is_connected = cx.has_global::<ConnectionState>()
             && ConnectionState::global(cx).status == ConnectionStatus::Connected;

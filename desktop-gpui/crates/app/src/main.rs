@@ -67,6 +67,15 @@ fn main() {
             let is_dark = theme_manager.is_dark();
             cx.set_global(theme_manager);
 
+            // Follow the desktop theme live: poll the GTK config for changes.
+            cx.spawn(async move |cx| loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(2))
+                    .await;
+                cx.update(|cx| ThemeManager::sync_gtk(cx));
+            })
+            .detach();
+
             let gpui_mode = if is_dark {
                 gpui_component::ThemeMode::Dark
             } else {
@@ -379,6 +388,32 @@ fn main() {
         });
 }
 
+/// True when `port` answers `GET /api/status` like the WA Bot backend does
+/// (`{"isLoggedIn": ...}`). An open port alone is not enough: other local
+/// servers (a Caddy on 8080, say) accept connections and answer with HTML.
+fn is_wabot_backend(port: u16) -> bool {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(400)));
+    let request = format!("GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = Vec::new();
+    let _ = stream.take(8192).read_to_end(&mut response);
+    looks_like_wabot_status(&String::from_utf8_lossy(&response))
+}
+
+fn looks_like_wabot_status(response: &str) -> bool {
+    response.starts_with("HTTP/1.1 200") && response.contains("\"isLoggedIn\"")
+}
+
 /// Detects the backend URL using CLI flags, env vars, active port probes, settings, or .env fallback.
 fn detect_backend_url(settings: &DesktopSettings) -> String {
     let args: Vec<String> = std::env::args().collect();
@@ -411,8 +446,7 @@ fn detect_backend_url(settings: &DesktopSettings) -> String {
 
     // Probe running loopback listeners: 3090 (.env default), 3000 (compiled default), 8080 (external)
     for &port in &[3090, 3000, 8080] {
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(50)).is_ok() {
+        if is_wabot_backend(port) {
             return format!("http://127.0.0.1:{port}/api");
         }
     }
@@ -439,3 +473,23 @@ fn detect_backend_url(settings: &DesktopSettings) -> String {
     "http://127.0.0.1:3090/api".to_string()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_wabot_status;
+
+    #[test]
+    fn accepts_the_backend_status_json() {
+        assert!(looks_like_wabot_status(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"isLoggedIn\":false}"
+        ));
+    }
+
+    #[test]
+    fn rejects_other_servers() {
+        // Caddy serving an SPA answers 200 with HTML for every path.
+        assert!(!looks_like_wabot_status("HTTP/1.1 200 OK\r\nServer: Caddy\r\n\r\n<!doctype html>"));
+        assert!(!looks_like_wabot_status("HTTP/1.1 404 Not Found\r\n\r\n{\"isLoggedIn\":false}"));
+        assert!(!looks_like_wabot_status(""));
+    }
+}

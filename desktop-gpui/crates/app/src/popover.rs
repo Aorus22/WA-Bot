@@ -26,7 +26,6 @@ use crate::theme::manager::AppThemeExt;
 /// Popover content size in logical pixels.
 pub const POPOVER_WIDTH: f32 = 880.0;
 pub const POPOVER_HEIGHT: f32 = 620.0;
-const EDGE_MARGIN: f32 = 8.0;
 
 /// Marker global: set when the UI runs as a panel popover (no title bar).
 pub struct PopoverMode;

@@ -1,6 +1,7 @@
 //! WA Bot theme engine and presets.
 
 pub mod color;
+pub mod gtk;
 pub mod manager;
 pub mod preset;
 
