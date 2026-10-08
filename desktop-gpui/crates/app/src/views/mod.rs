@@ -9,6 +9,7 @@ pub mod root;
 pub mod settings;
 pub mod shell;
 pub mod status;
+pub mod viewer_math;
 
 pub use auth::*;
 pub use calls::*;
