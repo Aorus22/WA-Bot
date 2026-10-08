@@ -28,6 +28,21 @@ pub struct ActiveTokens {
     pub border: Hsla,
     pub input: Hsla,
     pub ring: Hsla,
+    /// Chat-specific colours of presets that restyle the conversation.
+    pub chat: Option<ChatTokens>,
+}
+
+/// Parsed [`super::preset::ThemeExtras`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatTokens {
+    pub chat_bg: Hsla,
+    pub header: Hsla,
+    pub bubble_out: Hsla,
+    pub bubble_out_text: Hsla,
+    pub bubble_in: Hsla,
+    pub bubble_in_text: Hsla,
+    pub list_selected: Hsla,
+    pub list_hover: Hsla,
 }
 
 impl ActiveTokens {
@@ -51,6 +66,16 @@ impl ActiveTokens {
             border: parse_hex_hsla(&c.border),
             input: parse_hex_hsla(&c.input),
             ring: parse_hex_hsla(&c.ring),
+            chat: preset.extras.as_ref().map(|e| ChatTokens {
+                chat_bg: parse_hex_hsla(&e.chat_bg),
+                header: parse_hex_hsla(&e.header),
+                bubble_out: parse_hex_hsla(&e.bubble_out),
+                bubble_out_text: parse_hex_hsla(&e.bubble_out_text),
+                bubble_in: parse_hex_hsla(&e.bubble_in),
+                bubble_in_text: parse_hex_hsla(&e.bubble_in_text),
+                list_selected: parse_hex_hsla(&e.list_selected),
+                list_hover: parse_hex_hsla(&e.list_hover),
+            }),
         }
     }
 }

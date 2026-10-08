@@ -330,6 +330,10 @@ pub struct ChatView {
 
     // Context menu popup on message right click
     pub context_menu: Option<MessageContextMenu>,
+    /// Message being forwarded: (source chat id, message).
+    pub forward_msg: Option<(String, Message)>,
+    pub forward_selected: HashSet<String>,
+    pub is_forwarding: bool,
 
     // Context menu popup on sidebar chat right click
     pub chat_context_menu: Option<ChatContextMenu>,
@@ -420,6 +424,9 @@ impl ChatView {
             sidebar_resize_drag: None,
 
             context_menu: None,
+            forward_msg: None,
+            forward_selected: HashSet::new(),
+            is_forwarding: false,
             chat_context_menu: None,
 
             is_info_sheet_open: false,
@@ -2300,6 +2307,103 @@ impl ChatView {
         .detach();
     }
 
+    /// Open the "Forward to…" dialog for a message.
+    pub fn open_forward(&mut self, chat_id: String, msg: Message, cx: &mut Context<Self>) {
+        self.context_menu = None;
+        self.forward_selected.clear();
+        self.is_forwarding = false;
+        self.forward_msg = Some((chat_id, msg));
+        cx.notify();
+    }
+
+    /// Send the pending forward to every selected chat.
+    pub fn submit_forward(&mut self, cx: &mut Context<Self>) {
+        let Some((chat_id, msg)) = self.forward_msg.clone() else { return };
+        if self.forward_selected.is_empty() || self.is_forwarding {
+            return;
+        }
+        let targets: Vec<String> = self.forward_selected.iter().cloned().collect();
+        let base_url = Self::compose_base_url(cx);
+        self.is_forwarding = true;
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.forward_message(&chat_id, &msg.id, &targets).await })
+                    .await;
+                let ok = matches!(res, Ok(Ok(_)));
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_forwarding = false;
+                            if ok {
+                                this.forward_msg = None;
+                                this.forward_selected.clear();
+                                toast::success("Pesan diteruskan", cx);
+                            } else {
+                                toast::error("Gagal meneruskan pesan", cx);
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Save a message's media to disk (image, video, sticker, audio, file).
+    pub fn save_message_media(&mut self, msg: &Message, cx: &mut Context<Self>) {
+        self.context_menu = None;
+        let Some(media) = msg.media_url.as_deref() else { return };
+        let url = resolve_media_url(media, &Self::compose_base_url(cx));
+        let name = media
+            .split(['?', '#'])
+            .next()
+            .and_then(|path| path.rsplit('/').next())
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}.bin", msg.id));
+        let what = match msg.message_type.as_str() {
+            "image" => "Gambar",
+            "video" => "Video",
+            "sticker" => "Stiker",
+            "audio" => "Audio",
+            _ => "File",
+        };
+        Self::save_file(url, name, what, cx);
+        cx.notify();
+    }
+
+    /// Add a sticker message to the favourite stickers.
+    pub fn favorite_message_sticker(&mut self, msg: &Message, cx: &mut Context<Self>) {
+        self.context_menu = None;
+        let Some(media) = msg.media_url.clone() else { return };
+        let message_id = msg.id.clone();
+        let base_url = Self::compose_base_url(cx);
+        cx.spawn(move |_this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.favorite_sticker(&message_id, &media, false).await })
+                    .await;
+                let ok = matches!(res, Ok(Ok(_)));
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if ok {
+                        toast::success("Stiker ditambahkan ke favorit", cx);
+                    } else {
+                        toast::error("Gagal menambahkan stiker", cx);
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
     /// Mark a chat as read from the context menu (server + local unread badge).
     pub fn mark_chat_read_action(&mut self, chat_id: String, cx: &mut Context<Self>) {
         let base_url = if cx.has_global::<AuthState>() {
@@ -3237,6 +3341,11 @@ impl ChatView {
 
     /// "Save As" for a document: ask for a destination, download, write it.
     fn save_document(url: String, file_name: String, cx: &mut Context<Self>) {
+        Self::save_file(url, file_name, "Dokumen", cx);
+    }
+
+    /// Save any downloaded file (`what` names it in the toasts).
+    fn save_file(url: String, file_name: String, what: &'static str, cx: &mut Context<Self>) {
         let directory = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let base_url = Self::compose_base_url(cx);
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -3273,11 +3382,11 @@ impl ChatView {
                     if let Some(view) = this.upgrade() {
                         view.update(cx, |_this, cx| {
                             if saved {
-                                toast::success("Dokumen disimpan", cx);
+                                toast::success(&format!("{what} disimpan"), cx);
                             } else if downloaded {
-                                toast::error("Gagal menyimpan dokumen", cx);
+                                toast::error(&format!("Gagal menyimpan {}", what.to_lowercase()), cx);
                             } else {
-                                toast::error("Gagal mengunduh dokumen", cx);
+                                toast::error(&format!("Gagal mengunduh {}", what.to_lowercase()), cx);
                             }
                             cx.notify();
                         });
@@ -4363,15 +4472,15 @@ impl Render for ChatView {
                                                     .cursor_pointer()
                                                     .relative()
                                                     .bg(if is_selected {
-                                                        theme.primary.opacity(0.14)
+                                                        theme.chat.map(|c| c.list_selected).unwrap_or(theme.primary.opacity(0.14))
                                                     } else {
                                                         rgba(0x00000000).into()
                                                     })
                                                     .hover(|s| {
                                                         if is_selected {
-                                                            s.bg(theme.primary.opacity(0.22))
+                                                            s.bg(theme.chat.map(|c| c.list_selected).unwrap_or(theme.primary.opacity(0.22)))
                                                         } else {
-                                                            s.bg(theme.muted.opacity(0.65))
+                                                            s.bg(theme.chat.map(|c| c.list_hover).unwrap_or(theme.muted.opacity(0.65)))
                                                         }
                                                     })
                                                     .on_mouse_down(
@@ -4572,7 +4681,7 @@ impl Render for ChatView {
                     .min_w(px(0.0))
                     .h_full()
                     .overflow_hidden()
-                    .bg(bg_color)
+                    .bg(theme.chat.map(|c| c.chat_bg).unwrap_or(bg_color))
                     .children(if let Some(ref active_chat) = selected_chat {
                         let chat_name = active_chat.name.clone();
                         let chat_jid = active_chat.id.clone();
@@ -4587,7 +4696,7 @@ impl Render for ChatView {
                                         .py_3()
                                         .border_b_1()
                                         .border_color(border_color.opacity(0.4))
-                                        .bg(bg_color)
+                                        .bg(theme.chat.map(|c| c.header).unwrap_or(bg_color))
                                         .items_center()
                                         .justify_between()
                                         // Left Profile Area (Clicking opens Info Sheet)
@@ -4824,6 +4933,13 @@ impl Render for ChatView {
                                                         let is_dark_bg = theme.background.l < 0.5;
                                                         let (bubble_bg, bubble_text) = if is_sticker {
                                                             (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
+                                                        } else if let Some(c) = theme.chat {
+                                                            // Preset-defined bubbles (WhatsApp theme).
+                                                            if is_from_me {
+                                                                (c.bubble_out.into(), c.bubble_out_text.into())
+                                                            } else {
+                                                                (c.bubble_in.into(), c.bubble_in_text.into())
+                                                            }
                                                         } else if is_dark_bg {
                                                             if is_from_me {
                                                                 (rgb(0x005c4b), rgb(0xe9edef))
@@ -5971,6 +6087,135 @@ impl Render for ChatView {
                 let msg_content = MessageBubbleHelper::decode_content(&ctx.msg.content);
                 let msg_obj = ctx.msg.clone();
                 let menu_pos = ctx.position;
+                let has_media = ctx.msg.media_url.is_some();
+                let is_sticker = ctx.msg.message_type == "sticker" || msg_content == "[Sticker]";
+                let copyable = !msg_content.trim().is_empty()
+                    && !matches!(
+                        msg_content.as_str(),
+                        "[Image]" | "[Sticker]" | "[Video]" | "[Audio]" | "[Document]"
+                    );
+                let hover_bg: Hsla = theme.muted.opacity(0.4);
+                let danger: Hsla = rgb(0xef4444).into();
+
+                let mut menu = v_flex()
+                    .w(px(248.0))
+                    .p_2()
+                    .gap_0p5()
+                    .rounded_2xl()
+                    .bg(card_bg)
+                    .border_1()
+                    .border_color(border_color)
+                    .shadow_xl()
+                    .on_mouse_down(MouseButton::Left, |_, _, _| {});
+
+                // Quick reactions. Each emoji gets a fixed square hit area so the
+                // row can never overflow the menu.
+                menu = menu.child(
+                    h_flex()
+                        .px_1()
+                        .py_1()
+                        .mb_1()
+                        .gap_0p5()
+                        .border_b_1()
+                        .border_color(border_color)
+                        .justify_between()
+                        .items_center()
+                        .children(["👍", "❤️", "😂", "😮", "😢", "🙏", "👎"].into_iter().map(|emoji| {
+                            let em = emoji.to_string();
+                            let cid = chat_id.clone();
+                            let mid = msg_id.clone();
+                            div()
+                                .cursor_pointer()
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                .text_base()
+                                .child(emoji)
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                    this.react_message(cid.clone(), mid.clone(), em.clone(), cx);
+                                }))
+                                .into_any_element()
+                        })),
+                );
+
+                // Reply
+                menu = menu.child(
+                    menu_row("mm-reply", REPLY_SVG, "Reply", primary_color, text_color, hover_bg)
+                        .on_mouse_down(MouseButton::Left, cx.listener({
+                            let m = msg_obj.clone();
+                            move |this, _, window, cx| this.start_reply(m.clone(), window, cx)
+                        })),
+                );
+
+                // Forward
+                menu = menu.child(
+                    menu_row("mm-forward", FORWARD_SVG, "Forward", muted_text, text_color, hover_bg)
+                        .on_mouse_down(MouseButton::Left, cx.listener({
+                            let m = msg_obj.clone();
+                            let cid = chat_id.clone();
+                            move |this, _, _, cx| this.open_forward(cid.clone(), m.clone(), cx)
+                        })),
+                );
+
+                // Copy (text only)
+                if copyable {
+                    menu = menu.child(
+                        menu_row("mm-copy", COPY_SVG, "Copy", muted_text, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let text = msg_content.clone();
+                                move |this, _, _, cx| this.copy_message_text(text.clone(), cx)
+                            })),
+                    );
+                }
+
+                // Save media / favourite sticker
+                if has_media {
+                    menu = menu.child(
+                        menu_row("mm-save", DOWNLOAD_SVG, "Save as…", muted_text, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let m = msg_obj.clone();
+                                move |this, _, _, cx| this.save_message_media(&m, cx)
+                            })),
+                    );
+                }
+                if is_sticker && has_media {
+                    menu = menu.child(
+                        menu_row("mm-fav", STICKER_SVG, "Add to favourites", muted_text, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let m = msg_obj.clone();
+                                move |this, _, _, cx| this.favorite_message_sticker(&m, cx)
+                            })),
+                    );
+                }
+
+                // Edit (own text messages)
+                if is_from_me && !has_media {
+                    menu = menu.child(
+                        menu_row("mm-edit", EDIT_SVG, "Edit", rgb(0xf97316).into(), text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let m = msg_obj.clone();
+                                move |this, _, window, cx| this.start_edit(m.clone(), window, cx)
+                            })),
+                    );
+                }
+
+                // Delete (own messages)
+                if is_from_me {
+                    menu = menu
+                        .child(div().h(px(1.0)).mx_2().my_1().bg(border_color))
+                        .child(
+                            menu_row("mm-delete", TRASH_SVG, "Delete for everyone", danger, danger, hover_bg)
+                                .on_mouse_down(MouseButton::Left, cx.listener({
+                                    let cid = chat_id.clone();
+                                    let mid = msg_id.clone();
+                                    move |this, _, _, cx| this.delete_message(cid.clone(), mid.clone(), cx)
+                                })),
+                        );
+                }
 
                 Some(
                     div()
@@ -5982,143 +6227,15 @@ impl Render for ChatView {
                             cx.notify();
                         }))
                         .child(
-                            anchored().position(menu_pos).snap_to_window_with_margin(px(8.0)).child(
-                            v_flex()
-                                .w(px(248.0))
-                                .p_2()
-                                .gap_1()
-                                .rounded_2xl()
-                                .bg(card_bg)
-                                .border_1()
-                                .border_color(border_color)
-                                .shadow_xl()
-                                .on_mouse_down(MouseButton::Left, |_, _, _| {})
-                                // Quick Reactions Row matching Web. Each emoji gets a
-                                // fixed square hit area so the row can never overflow
-                                // the menu and butt against its right border.
-                                .child(
-                                    h_flex()
-                                        .px_1()
-                                        .py_1()
-                                        .gap_0p5()
-                                        .border_b_1()
-                                        .border_color(border_color)
-                                        .justify_between()
-                                        .items_center()
-                                        .children(["👍", "❤️", "😂", "😮", "😢", "🙏", "👎"].into_iter().map(|emoji| {
-                                            let em = emoji.to_string();
-                                            let cid = chat_id.clone();
-                                            let mid = msg_id.clone();
-                                            div()
-                                                .cursor_pointer()
-                                                .w(px(28.0))
-                                                .h(px(28.0))
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .rounded_full()
-                                                .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                                .text_base()
-                                                .child(emoji)
-                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                    this.react_message(cid.clone(), mid.clone(), em.clone(), cx);
-                                                }))
-                                                .into_any_element()
-                                        }))
-                                )
-                                // Reply Action
-                                .child(
-                                    h_flex()
-                                        .cursor_pointer()
-                                        .px_3()
-                                        .py_2()
-                                        .rounded_lg()
-                                        .gap_2p5()
-                                        .items_center()
-                                        .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                        .child(svg().data(REPLY_SVG).size(px(14.0)).text_color(primary_color))
-                                        .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child("Reply"))
-                                        .on_mouse_down(MouseButton::Left, cx.listener({
-                                            let m = msg_obj.clone();
-                                            move |this, _, window, cx| {
-                                                this.start_reply(m.clone(), window, cx);
-                                            }
-                                        })),
-                                )
-                                // Copy Action
-                                .child(
-                                    h_flex()
-                                        .cursor_pointer()
-                                        .px_3()
-                                        .py_2()
-                                        .rounded_lg()
-                                        .gap_2p5()
-                                        .items_center()
-                                        .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                        .child(svg().data(COPY_SVG).size(px(14.0)).text_color(muted_text))
-                                        .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child("Copy text"))
-                                        .on_mouse_down(MouseButton::Left, cx.listener({
-                                            let text = msg_content.clone();
-                                            move |this, _, _, cx| {
-                                                this.copy_message_text(text.clone(), cx);
-                                            }
-                                        })),
-                                )
-                                // Edit Action (Outgoing only)
-                                .children(if is_from_me {
-                                    Some(
-                                        h_flex()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_2()
-                                            .rounded_lg()
-                                            .gap_2p5()
-                                            .items_center()
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                            .child(svg().data(EDIT_SVG).size(px(14.0)).text_color(rgb(0xf97316)))
-                                            .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child("Edit"))
-                                            .on_mouse_down(MouseButton::Left, cx.listener({
-                                                let m = msg_obj.clone();
-                                                move |this, _, window, cx| {
-                                                    this.start_edit(m.clone(), window, cx);
-                                                }
-                                            })),
-                                    )
-                                } else {
-                                    None
-                                })
-                                // Delete Action (Outgoing only)
-                                .children(if is_from_me {
-                                    Some(
-                                        h_flex()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_2()
-                                            .rounded_lg()
-                                            .gap_2p5()
-                                            .items_center()
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                            .child(svg().data(TRASH_SVG).size(px(14.0)).text_color(rgb(0xef4444)))
-                                            .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(rgb(0xef4444)).child("Delete for everyone"))
-                                            .on_mouse_down(MouseButton::Left, cx.listener({
-                                                let cid = chat_id.clone();
-                                                let mid = msg_id.clone();
-                                                move |this, _, _, cx| {
-                                                    this.delete_message(cid.clone(), mid.clone(), cx);
-                                                }
-                                            })),
-                                    )
-                                } else {
-                                    None
-                                })
-                                // Subtle entrance: fade up over the last few px.
-                                .with_animation(
+                            anchored()
+                                .position(menu_pos)
+                                .snap_to_window_with_margin(px(8.0))
+                                .child(menu.with_animation(
                                     "message-context-menu-in",
                                     Animation::new(std::time::Duration::from_millis(140))
                                         .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
                                     move |el, delta| el.opacity(delta),
-                                ),
-                            ),
+                                )),
                         ),
                 )
             } else {
@@ -6482,6 +6599,150 @@ impl Render for ChatView {
                                                 .child(if self.is_creating_group { "Creating..." } else { "Create Group" })
                                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                     this.submit_create_group(cx);
+                                                })),
+                                        ),
+                                ),
+                        ),
+                )
+            } else {
+                None
+            })
+            // ====================================================
+            // MODAL: FORWARD MESSAGE
+            // ====================================================
+            .children(if self.forward_msg.is_some() {
+                let targets: Vec<Chat> = if cx.has_global::<ChatStore>() {
+                    ChatStore::global(cx).chats.iter().filter(|c| !c.archived).cloned().collect()
+                } else {
+                    Vec::new()
+                };
+                let selected_count = self.forward_selected.len();
+                let can_send = selected_count > 0 && !self.is_forwarding;
+                Some(
+                    div()
+                        .id("forward-backdrop")
+                        .absolute()
+                        .inset_0()
+                        .bg(rgba(0x00000088))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .on_mouse_down(MouseButton::Left, |_, _, _| {})
+                        .child(
+                            v_flex()
+                                .w(px(400.0))
+                                .p_5()
+                                .rounded_2xl()
+                                .bg(card_bg)
+                                .border_1()
+                                .border_color(border_color)
+                                .shadow_2xl()
+                                .gap_4()
+                                .child(
+                                    h_flex()
+                                        .justify_between()
+                                        .items_center()
+                                        .child(div().text_lg().font_weight(FontWeight::BOLD).text_color(text_color).child("Forward message to"))
+                                        .child(
+                                            div()
+                                                .cursor_pointer()
+                                                .p_1()
+                                                .rounded_full()
+                                                .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                    this.forward_msg = None;
+                                                    this.forward_selected.clear();
+                                                    cx.notify();
+                                                })),
+                                        ),
+                                )
+                                .child(
+                                    v_flex()
+                                        .id("forward-chats-scroll")
+                                        .max_h(px(280.0))
+                                        .overflow_y_scroll()
+                                        .gap_1()
+                                        .children(targets.into_iter().map(|c| {
+                                            let is_checked = self.forward_selected.contains(&c.id);
+                                            let cid = c.id.clone();
+                                            h_flex()
+                                                .cursor_pointer()
+                                                .p_2()
+                                                .rounded_lg()
+                                                .items_center()
+                                                .justify_between()
+                                                .bg(if is_checked { theme.primary.opacity(0.12) } else { rgba(0x00000000).into() })
+                                                .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                    if !this.forward_selected.remove(&cid) {
+                                                        this.forward_selected.insert(cid.clone());
+                                                    }
+                                                    cx.notify();
+                                                }))
+                                                .child(div().text_sm().text_color(text_color).child(c.name.clone()))
+                                                .child(
+                                                    div()
+                                                        .w(px(20.0))
+                                                        .h(px(20.0))
+                                                        .rounded_md()
+                                                        .border_1()
+                                                        .border_color(primary_color)
+                                                        .bg(if is_checked { primary_color } else { rgba(0x00000000).into() })
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .children(if is_checked {
+                                                            Some(svg().data(CHECK_SVG).size(px(12.0)).text_color(rgb(0xffffff)))
+                                                        } else {
+                                                            None
+                                                        }),
+                                                )
+                                                .into_any_element()
+                                        })),
+                                )
+                                .child(
+                                    h_flex()
+                                        .justify_end()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .cursor_pointer()
+                                                .px_4()
+                                                .py_2()
+                                                .rounded_xl()
+                                                .border_1()
+                                                .border_color(border_color)
+                                                .text_xs()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(text_color)
+                                                .child("Cancel")
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                    this.forward_msg = None;
+                                                    this.forward_selected.clear();
+                                                    cx.notify();
+                                                })),
+                                        )
+                                        .child(
+                                            div()
+                                                .px_4()
+                                                .py_2()
+                                                .rounded_xl()
+                                                .bg(primary_color)
+                                                .opacity(if can_send { 1.0 } else { 0.5 })
+                                                .cursor_pointer()
+                                                .text_xs()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(rgb(0xffffff))
+                                                .child(if self.is_forwarding {
+                                                    "Sending...".to_string()
+                                                } else if selected_count > 0 {
+                                                    format!("Forward ({selected_count})")
+                                                } else {
+                                                    "Forward".to_string()
+                                                })
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                    this.submit_forward(cx);
                                                 })),
                                         ),
                                 ),

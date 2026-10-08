@@ -46,6 +46,72 @@
     }
   },
   {
+    "name": "whatsapp-dark",
+    "label": "WhatsApp",
+    "colors": {
+      "background": "#111B21",
+      "foreground": "#E9EDEF",
+      "card": "#202C33",
+      "cardForeground": "#E9EDEF",
+      "primary": "#00A884",
+      "primaryForeground": "#111B21",
+      "secondary": "#202C33",
+      "secondaryForeground": "#E9EDEF",
+      "muted": "#202C33",
+      "mutedForeground": "#8696A0",
+      "accent": "#2A3942",
+      "accentForeground": "#E9EDEF",
+      "destructive": "#F15C6D",
+      "destructiveForeground": "#FFFFFF",
+      "border": "#222D34",
+      "input": "#2A3942",
+      "ring": "#00A884"
+    },
+    "extras": {
+      "chatBg": "#0B141A",
+      "header": "#202C33",
+      "bubbleOut": "#005C4B",
+      "bubbleOutText": "#E9EDEF",
+      "bubbleIn": "#202C33",
+      "bubbleInText": "#E9EDEF",
+      "listSelected": "#2A3942",
+      "listHover": "#202C33"
+    }
+  },
+  {
+    "name": "whatsapp-light",
+    "label": "WhatsApp",
+    "colors": {
+      "background": "#FFFFFF",
+      "foreground": "#111B21",
+      "card": "#F0F2F5",
+      "cardForeground": "#111B21",
+      "primary": "#00A884",
+      "primaryForeground": "#FFFFFF",
+      "secondary": "#F0F2F5",
+      "secondaryForeground": "#111B21",
+      "muted": "#F5F6F6",
+      "mutedForeground": "#667781",
+      "accent": "#D9FDD3",
+      "accentForeground": "#111B21",
+      "destructive": "#EA0038",
+      "destructiveForeground": "#FFFFFF",
+      "border": "#E9EDEF",
+      "input": "#E9EDEF",
+      "ring": "#00A884"
+    },
+    "extras": {
+      "chatBg": "#EFEAE2",
+      "header": "#F0F2F5",
+      "bubbleOut": "#D9FDD3",
+      "bubbleOutText": "#111B21",
+      "bubbleIn": "#FFFFFF",
+      "bubbleInText": "#111B21",
+      "listSelected": "#F0F2F5",
+      "listHover": "#F5F6F6"
+    }
+  },
+  {
     "name": "ocean-dark",
     "label": "Ocean",
     "colors": {

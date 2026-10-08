@@ -28,12 +28,32 @@ pub struct ThemeColors {
     pub ring: String,
 }
 
+/// Optional chat-specific colors for presets that restyle the conversation
+/// itself (the WhatsApp theme). Presets without it keep the default look.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeExtras {
+    /// Conversation pane background (WhatsApp's wallpaper colour).
+    pub chat_bg: String,
+    /// Conversation header surface.
+    pub header: String,
+    pub bubble_out: String,
+    pub bubble_out_text: String,
+    pub bubble_in: String,
+    pub bubble_in_text: String,
+    /// Selected / hovered row in the chat list.
+    pub list_selected: String,
+    pub list_hover: String,
+}
+
 /// A theme preset defining a name, user-facing label, and 17 semantic colors.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemePreset {
     pub name: String,
     pub label: String,
     pub colors: ThemeColors,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<ThemeExtras>,
 }
 
 impl ThemePreset {
@@ -48,7 +68,7 @@ static THEMES_DATA: LazyLock<Vec<ThemePreset>> = LazyLock::new(|| {
     serde_json::from_slice(json_bytes).expect("themes_data.json must be valid")
 });
 
-/// Returns all 81 loaded presets from web client catalog.
+/// Returns all loaded presets (web catalog + WhatsApp).
 pub fn all_presets() -> &'static [ThemePreset] {
     &THEMES_DATA
 }
@@ -70,7 +90,7 @@ mod tests {
     #[test]
     fn test_all_presets_loaded() {
         let presets = all_presets();
-        assert_eq!(presets.len(), 81, "Must contain all 81 web presets");
+        assert_eq!(presets.len(), 83, "81 web presets + WhatsApp dark/light");
 
         let default_dark = find_preset("default-dark").expect("default-dark must exist");
         assert_eq!(default_dark.label, "Default");
@@ -79,5 +99,19 @@ mod tests {
         let default_light = find_preset("default-light").expect("default-light must exist");
         assert_eq!(default_light.label, "Default");
         assert!(!default_light.is_dark());
+    }
+
+    #[test]
+    fn test_whatsapp_presets() {
+        let dark = find_preset("whatsapp-dark").expect("whatsapp-dark must exist");
+        let light = find_preset("whatsapp-light").expect("whatsapp-light must exist");
+        assert!(dark.is_dark());
+        assert!(!light.is_dark());
+        assert_eq!(dark.label, "WhatsApp");
+        assert_eq!(dark.extras.as_ref().unwrap().bubble_out, "#005C4B");
+        assert_eq!(light.extras.as_ref().unwrap().bubble_out, "#D9FDD3");
+        // Every other preset keeps the stock chat look.
+        let with_extras = all_presets().iter().filter(|p| p.extras.is_some()).count();
+        assert_eq!(with_extras, 2);
     }
 }

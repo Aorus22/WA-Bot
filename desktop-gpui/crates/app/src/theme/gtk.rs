@@ -427,6 +427,7 @@ impl GtkPalette {
                 input: hex(self.border),
                 ring: hex(self.accent),
             },
+            extras: None,
         }
     }
 }
