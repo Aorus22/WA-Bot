@@ -1,14 +1,17 @@
 //! WA Bot desktop shell (GPUI) - Main Entry Point.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use gpui::{
-    point, px, size, App, AppContext, Application, Bounds, TitlebarOptions, WindowBounds,
-    WindowOptions,
+    point, px, size, AnyWindowHandle, App, AppContext, Application, Bounds, TitlebarOptions,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
 use gpui_reqwest_client::ReqwestClient;
 use wabot_app::{
     components::{connection_banner::ConnectionState, toast::ToastBus},
+    popover,
     router::Router,
     state::auth::{AuthState, AuthStatus},
     state::call::CallManager,
@@ -22,6 +25,25 @@ use wabot_backend_client::ws::WsClient;
 use wabot_settings::DesktopSettings;
 
 fn main() {
+    // `--toggle` / `--popover`: resident panel-popover instance (see popover.rs).
+    let args: Vec<String> = std::env::args().collect();
+    let want_toggle = args.iter().any(|a| a == "--toggle");
+    let popover_mode = want_toggle || args.iter().any(|a| a == "--popover");
+    if want_toggle && popover::signal_running() {
+        return;
+    }
+    let toggle_rx = if popover_mode {
+        match popover::listen() {
+            Some(rx) => Some(rx),
+            None => {
+                eprintln!("[popover] another instance is already running");
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
     let _tokio_guard = TOKIO_RT.enter();
 
     let http_client = Arc::new(ReqwestClient::user_agent("wabot/1.0").expect("Failed to create HTTP client"));
@@ -73,6 +95,10 @@ fn main() {
             auth_state.base_url = base_url.clone();
             cx.set_global(auth_state);
 
+            if popover_mode {
+                cx.set_global(popover::PopoverMode);
+            }
+
             // Configure window bounds
             let window_bounds = settings
                 .window_state
@@ -94,19 +120,35 @@ fn main() {
                     })
                 });
 
-            let window_options = WindowOptions {
-                window_bounds: Some(window_bounds),
-                window_min_size: Some(size(px(800.0), px(540.0))),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("WA Bot Desktop".into()),
-                    appears_transparent: true,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            };
+            // Opens the UI window: a normal window, or (popover mode) a
+            // layer-shell surface next to the panel button.
+            let open_ui = move |cx: &mut App| -> Option<AnyWindowHandle> {
+                let window_options = if popover::is_popover(cx) {
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds {
+                            origin: point(px(0.), px(0.)),
+                            size: size(px(popover::POPOVER_WIDTH), px(popover::POPOVER_HEIGHT)),
+                        })),
+                        titlebar: None,
+                        app_id: Some("dev.wabot.popover".to_string()),
+                        window_background: WindowBackgroundAppearance::Opaque,
+                        kind: WindowKind::LayerShell(popover::layer_options()),
+                        ..Default::default()
+                    }
+                } else {
+                    WindowOptions {
+                        window_bounds: Some(window_bounds),
+                        window_min_size: Some(size(px(800.0), px(540.0))),
+                        titlebar: Some(TitlebarOptions {
+                            title: Some("WA Bot Desktop".into()),
+                            appears_transparent: true,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }
+                };
 
-            // Open application window with Root wrapper and RootGateView
-            let window_res = cx.open_window(window_options, |window, cx| {
+                let window_res = cx.open_window(window_options, |window, cx| {
                 #[cfg(target_os = "windows")]
                 {
                     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -136,19 +178,68 @@ fn main() {
                     }
                 }
 
-                let gate_view = cx.new(|cx| RootGateView::new(cx));
+                let popover_ui = popover::is_popover(cx);
+                let gate_view = cx.new(|cx| {
+                    let view = RootGateView::new(cx);
+                    if popover_ui {
+                        // Close when focus moves elsewhere, but only after the
+                        // surface has actually been focused once.
+                        let was_active = Rc::new(std::cell::Cell::new(false));
+                        cx.observe_window_activation(window, move |_, window, _| {
+                            if window.is_window_active() {
+                                was_active.set(true);
+                            } else if was_active.get() {
+                                window.remove_window();
+                            }
+                        })
+                        .detach();
+                    }
+                    view
+                });
                 cx.new(|cx| gpui_component::Root::new(gate_view, window, cx))
-            });
+                });
 
-            match window_res.as_ref() {
-                Ok(window) => {
-                    cx.global_mut::<ToastBus>().set_window((*window).into());
-                    eprintln!("[UI] Window opened successfully!");
+                match window_res {
+                    Ok(window) => {
+                        cx.global_mut::<ToastBus>().set_window(window.into());
+                        eprintln!("[UI] Window opened successfully!");
+                        Some(window.into())
+                    }
+                    Err(e) => {
+                        eprintln!("[UI ERROR] Failed to open window: {e:?}");
+                        None
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[UI ERROR] Failed to open window: {e:?}");
-                    std::process::exit(1);
+            };
+
+            if let Some(rx) = toggle_rx {
+                // Resident popover instance: show/hide on every `--toggle`.
+                let open_ui = Rc::new(open_ui);
+                let current: Rc<RefCell<Option<AnyWindowHandle>>> = Rc::new(RefCell::new(None));
+                let toggle = {
+                    let open_ui = open_ui.clone();
+                    let current = current.clone();
+                    move |cx: &mut App| {
+                        let previous = current.borrow_mut().take();
+                        if let Some(handle) = previous {
+                            if handle.update(cx, |_, window, _| window.remove_window()).is_ok() {
+                                return;
+                            }
+                        }
+                        *current.borrow_mut() = open_ui(cx);
+                    }
+                };
+                if want_toggle {
+                    toggle(cx);
                 }
+                cx.spawn(async move |cx| {
+                    while rx.recv_async().await.is_ok() {
+                        let _ = cx.update(|cx| toggle(cx));
+                    }
+                })
+                .detach();
+            } else if open_ui(cx).is_none() {
+                std::process::exit(1);
             }
 
             // WebSocket client for live updates (QR codes, auth success, messages)

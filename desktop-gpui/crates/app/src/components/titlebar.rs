@@ -106,6 +106,10 @@ impl AppTitleBar {
 
 impl RenderOnce for AppTitleBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // A panel popover has no window chrome.
+        if crate::popover::is_popover(cx) {
+            return div().into_any_element();
+        }
         let theme = cx.app_theme();
         let is_max = is_window_maximized(window);
 
@@ -211,5 +215,6 @@ impl RenderOnce for AppTitleBar {
                             }),
                     ),
             )
+            .into_any_element()
     }
 }

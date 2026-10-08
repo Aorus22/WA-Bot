@@ -22,7 +22,6 @@ use crate::components::{
 };
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
 use crate::components::nav_sidebar::SIDEBAR_WIDTH;
-use crate::components::titlebar::TITLEBAR_HEIGHT;
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::state::call::CallManager;
@@ -5898,7 +5897,7 @@ impl Render for ChatView {
                     0.0
                 };
                 let offset_x = SIDEBAR_WIDTH;
-                let offset_y = TITLEBAR_HEIGHT + banner_h;
+                let offset_y = crate::popover::titlebar_height(cx) + banner_h;
 
                 let view_w = (win_w - offset_x).max(100.0);
                 let view_h = (win_h - offset_y).max(100.0);
@@ -6097,7 +6096,7 @@ impl Render for ChatView {
                     0.0
                 };
                 let offset_x = SIDEBAR_WIDTH;
-                let offset_y = TITLEBAR_HEIGHT + banner_h;
+                let offset_y = crate::popover::titlebar_height(cx) + banner_h;
 
                 let view_w = (win_w - offset_x).max(100.0);
                 let view_h = (win_h - offset_y).max(100.0);

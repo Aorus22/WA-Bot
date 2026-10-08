@@ -42,10 +42,14 @@ impl Render for LoginView {
             .size_full()
             .bg(theme.background)
             .items_center()
-            .justify_center()
             .p_4()
+            // Scrolls when the column is taller than the window (popover,
+            // small windows). The inner `my_auto` keeps it vertically centered
+            // when it fits, and lets scrolling reach the top when it doesn't.
+            .overflow_y_scroll()
             .child(
                 v_flex()
+                    .my_auto()
                     .w_full()
                     .max_w(px(512.))
                     .items_center()
