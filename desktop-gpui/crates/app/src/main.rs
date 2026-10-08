@@ -1,11 +1,10 @@
 //! WA Bot desktop shell (GPUI) - Main Entry Point.
 
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use gpui::{
-    point, px, size, AnyWindowHandle, App, AppContext, Application, Bounds, TitlebarOptions,
+    point, px, size, AnyWindowHandle, App, AppContext, Application, Bounds, Styled, TitlebarOptions,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
 use gpui_reqwest_client::ReqwestClient;
@@ -97,6 +96,8 @@ fn main() {
 
             if popover_mode {
                 cx.set_global(popover::PopoverMode);
+                // The resident instance outlives its (hidden) windows.
+                cx.set_quit_mode(gpui::QuitMode::Explicit);
             }
 
             // Configure window bounds
@@ -122,8 +123,8 @@ fn main() {
 
             // Opens the UI window: a normal window, or (popover mode) a
             // layer-shell surface next to the panel button.
-            let open_ui = move |cx: &mut App| -> Option<AnyWindowHandle> {
-                let window_options = if popover::is_popover(cx) {
+            let open_ui = move |cx: &mut App, placement: Option<popover::Placement>| -> Option<AnyWindowHandle> {
+                let window_options = if let Some(placement) = placement {
                     WindowOptions {
                         window_bounds: Some(WindowBounds::Windowed(Bounds {
                             origin: point(px(0.), px(0.)),
@@ -131,8 +132,8 @@ fn main() {
                         })),
                         titlebar: None,
                         app_id: Some("dev.wabot.popover".to_string()),
-                        window_background: WindowBackgroundAppearance::Opaque,
-                        kind: WindowKind::LayerShell(popover::layer_options()),
+                        window_background: WindowBackgroundAppearance::Transparent,
+                        kind: WindowKind::LayerShell(popover::card_layer_options(&placement)),
                         ..Default::default()
                     }
                 } else {
@@ -178,25 +179,36 @@ fn main() {
                     }
                 }
 
-                let popover_ui = popover::is_popover(cx);
+                let popover_ui = placement.is_some();
                 let gate_view = cx.new(|cx| {
                     let view = RootGateView::new(cx);
                     if popover_ui {
                         // Close when focus moves elsewhere, but only after the
                         // surface has actually been focused once.
                         let was_active = Rc::new(std::cell::Cell::new(false));
-                        cx.observe_window_activation(window, move |_, window, _| {
+                        cx.observe_window_activation(window, move |_, window, cx| {
                             if window.is_window_active() {
                                 was_active.set(true);
                             } else if was_active.get() {
-                                window.remove_window();
+                                window.defer(cx, |_, cx| popover::close_all(cx));
                             }
                         })
                         .detach();
                     }
                     view
                 });
-                cx.new(|cx| gpui_component::Root::new(gate_view, window, cx))
+                if popover_ui {
+                    // The popover draws its own rounded frame on a transparent
+                    // surface; no CSD border/shadow inset and no root fill.
+                    let framed = cx.new(|_| popover::PopoverFrame { child: gate_view.into() });
+                    cx.new(|cx| {
+                        gpui_component::Root::new(framed, window, cx)
+                            .bordered(false)
+                            .bg(gpui::transparent_black())
+                    })
+                } else {
+                    cx.new(|cx| gpui_component::Root::new(gate_view, window, cx))
+                }
                 });
 
                 match window_res {
@@ -215,18 +227,21 @@ fn main() {
             if let Some(rx) = toggle_rx {
                 // Resident popover instance: show/hide on every `--toggle`.
                 let open_ui = Rc::new(open_ui);
-                let current: Rc<RefCell<Option<AnyWindowHandle>>> = Rc::new(RefCell::new(None));
                 let toggle = {
                     let open_ui = open_ui.clone();
-                    let current = current.clone();
                     move |cx: &mut App| {
-                        let previous = current.borrow_mut().take();
-                        if let Some(handle) = previous {
-                            if handle.update(cx, |_, window, _| window.remove_window()).is_ok() {
-                                return;
-                            }
+                        if popover::is_open(cx) {
+                            popover::close_all(cx);
+                            return;
                         }
-                        *current.borrow_mut() = open_ui(cx);
+                        let open_ui = open_ui.clone();
+                        popover::open(
+                            cx,
+                            Rc::new(move |cx, placement| match open_ui(cx, Some(placement)) {
+                                Some(handle) => popover::set_card(cx, handle),
+                                None => popover::close_all(cx),
+                            }),
+                        );
                     }
                 };
                 if want_toggle {
@@ -238,7 +253,7 @@ fn main() {
                     }
                 })
                 .detach();
-            } else if open_ui(cx).is_none() {
+            } else if open_ui(cx, None).is_none() {
                 std::process::exit(1);
             }
 
