@@ -170,7 +170,7 @@ DESK
     APPLET_INSTALLER="${POPOVER_APPLET_DIR:-$HOME/Project/popover-applet}/scripts/install-cosmic.sh"
     if [[ -x "$APPLET_INSTALLER" ]]; then
         SKIP_BUILD=1 "$APPLET_INSTALLER" dev.local.WabotPopover "WA Bot" \
-            chat-message-new-symbolic -- "$INSTALLED" --toggle | head -1
+            chat-message-new-symbolic -- "$INSTALLED" --toggle >/dev/null
     else
         log "No popover-applet installer at $APPLET_INSTALLER; panel button not updated"
     fi
