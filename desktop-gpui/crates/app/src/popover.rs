@@ -12,7 +12,8 @@ use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use gpui::layer_shell::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions};
 use gpui::{
@@ -176,17 +177,50 @@ pub fn backdrop_layer_options() -> LayerShellOptions {
 pub struct PopoverState {
     backdrop: Option<AnyWindowHandle>,
     card: Option<AnyWindowHandle>,
-    /// A card was already requested (pointer arrived or the timeout fired).
+    /// A card was already requested (cached position, pointer, or timeout).
     card_requested: bool,
+    /// The first pointer event of this session (the panel button) was stored.
+    pointer_saved: bool,
+    /// Which `open()` this state belongs to, so stale timers do nothing.
+    generation: u64,
+    started: Option<Instant>,
 }
 impl Global for PopoverState {}
+
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Safety net: a backdrop without a card must never outlive this.
+const CARD_DEADLINE: Duration = Duration::from_secs(3);
+/// Wait for the first pointer event only when the button position is unknown.
+const POINTER_TIMEOUT: Duration = Duration::from_millis(120);
 
 pub fn is_open(cx: &App) -> bool {
     cx.has_global::<PopoverState>() && cx.global::<PopoverState>().backdrop.is_some()
 }
 
 pub fn set_card(cx: &mut App, handle: AnyWindowHandle) {
-    cx.global_mut::<PopoverState>().card = Some(handle);
+    let state = cx.global_mut::<PopoverState>();
+    if state.backdrop.is_none() {
+        // The session was closed while the card was being created.
+        remove(cx, handle);
+        return;
+    }
+    state.card = Some(handle);
+    if let Some(t) = state.started {
+        log(&format!("card ready after {} ms", t.elapsed().as_millis()));
+    }
+}
+
+/// Remove a window; if it is busy (re-entrant update), retry once the current
+/// effect cycle is done so a surface is never leaked.
+fn remove(cx: &mut App, handle: AnyWindowHandle) {
+    if handle.update(cx, |_, window, _| window.remove_window()).is_err() {
+        cx.defer(move |cx| {
+            if let Err(e) = handle.update(cx, |_, window, _| window.remove_window()) {
+                log(&format!("failed to remove window: {e:?}"));
+            }
+        });
+    }
 }
 
 /// Close the card and the backdrop.
@@ -196,8 +230,50 @@ pub fn close_all(cx: &mut App) {
     }
     let state = std::mem::take(cx.global_mut::<PopoverState>());
     for handle in [state.card, state.backdrop].into_iter().flatten() {
-        let _ = handle.update(cx, |_, window, _| window.remove_window());
+        remove(cx, handle);
     }
+}
+
+fn log(msg: &str) {
+    use std::io::Write as _;
+    eprintln!("[popover] {msg}");
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("wabot-popover.log"))
+    {
+        let _ = writeln!(f, "{msg}");
+    }
+}
+
+/// The panel button does not move between toggles, so remember where the
+/// pointer was on the first event of a session and open the next card there
+/// immediately instead of waiting for a pointer event.
+fn pointer_cache_path() -> PathBuf {
+    let dir = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    dir.join("wabot-popover-pointer")
+}
+
+fn load_pointer() -> Option<(f32, f32)> {
+    let text = std::fs::read_to_string(pointer_cache_path()).ok()?;
+    let mut it = text.split_whitespace();
+    let x: f32 = it.next()?.parse().ok()?;
+    let y: f32 = it.next()?.parse().ok()?;
+    (x.is_finite() && y.is_finite()).then_some((x, y))
+}
+
+fn save_pointer(pointer: (f32, f32)) {
+    let path = pointer_cache_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, format!("{} {}\n", pointer.0, pointer.1));
 }
 
 type OpenCard = Rc<dyn Fn(&mut App, Placement)>;
@@ -208,7 +284,8 @@ fn request_card(cx: &mut App, open_card: &OpenCard, pointer: Option<(f32, f32)>,
         return;
     }
     state.card_requested = true;
-    eprintln!("[popover] card placement: pointer={pointer:?} screen={screen:?}");
+    let waited = state.started.map(|t| t.elapsed().as_millis()).unwrap_or(0);
+    log(&format!("card placement after {waited} ms: pointer={pointer:?} screen={screen:?}"));
     open_card(cx, Placement { edge: Edge::from_env(), pointer, screen });
 }
 
@@ -218,6 +295,9 @@ pub fn open(cx: &mut App, open_card: OpenCard) {
     if !cx.has_global::<PopoverState>() {
         cx.set_global(PopoverState::default());
     }
+    // Never stack a second backdrop on top of a leftover one.
+    close_all(cx);
+    let generation = GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
     let screen = cx
         .primary_display()
         .map(|d| {
@@ -244,21 +324,48 @@ pub fn open(cx: &mut App, open_card: OpenCard) {
         Ok(handle) => {
             *cx.global_mut::<PopoverState>() = PopoverState {
                 backdrop: Some(handle.into()),
-                card: None,
-                card_requested: false,
+                generation,
+                started: Some(Instant::now()),
+                ..Default::default()
             };
         }
         Err(e) => {
-            eprintln!("[popover] backdrop failed: {e:?}");
+            log(&format!("backdrop failed: {e:?}"));
             return;
         }
     }
 
-    // No pointer event (e.g. the compositor only reports one on motion):
-    // open anyway, hugging the far end of the panel.
+    // Known button position: open the card right away.
+    if let Some(cached) = load_pointer() {
+        request_card(cx, &open_card, Some(cached), screen);
+    }
+
+    // Otherwise (first run, or no pointer event): open anyway after a short
+    // wait, hugging the far end of the panel.
+    let fallback = open_card.clone();
     cx.spawn(async move |cx| {
-        cx.background_executor().timer(Duration::from_millis(350)).await;
-        let _ = cx.update(|cx| request_card(cx, &open_card, None, screen));
+        cx.background_executor().timer(POINTER_TIMEOUT).await;
+        let _ = cx.update(|cx| {
+            if cx.has_global::<PopoverState>() && cx.global::<PopoverState>().generation == generation {
+                request_card(cx, &fallback, None, screen);
+            }
+        });
+    })
+    .detach();
+
+    // Safety net: if no card shows up, drop the full-screen backdrop so it
+    // can never keep swallowing clicks.
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(CARD_DEADLINE).await;
+        let _ = cx.update(|cx| {
+            if cx.has_global::<PopoverState>() {
+                let s = cx.global::<PopoverState>();
+                if s.generation == generation && s.backdrop.is_some() && s.card.is_none() {
+                    log("no card within deadline, closing backdrop");
+                    close_all(cx);
+                }
+            }
+        });
     })
     .detach();
 }
@@ -277,7 +384,18 @@ impl Render for Backdrop {
                 let screen = (f32::from(size.width), f32::from(size.height));
                 let pointer = (f32::from(ev.position.x), f32::from(ev.position.y));
                 let open_card = this.open_card.clone();
-                window.defer(cx, move |_, cx| request_card(cx, &open_card, Some(pointer), screen));
+                window.defer(cx, move |_, cx| {
+                    if !cx.has_global::<PopoverState>() {
+                        return;
+                    }
+                    let state = cx.global_mut::<PopoverState>();
+                    if !state.pointer_saved {
+                        // First event of the session: the pointer is on the panel button.
+                        state.pointer_saved = true;
+                        save_pointer(pointer);
+                    }
+                    request_card(cx, &open_card, Some(pointer), screen);
+                });
             }))
             .on_mouse_down(
                 MouseButton::Left,
