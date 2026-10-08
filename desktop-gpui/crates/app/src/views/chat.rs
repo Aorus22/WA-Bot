@@ -17,17 +17,44 @@ use crate::components::{
         LocationDraft, MediaKind, PollDraft, StickerPickerState,
     },
     emoji_picker::{EmojiPickerState, EMOJI_CATEGORIES},
-    connection_banner::{ConnectionState, ConnectionStatus},
     toast,
 };
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
-use crate::components::nav_sidebar::SIDEBAR_WIDTH;
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::state::call::CallManager;
 use crate::state::chat::ChatStore;
 use crate::theme::manager::{ActiveTokens, AppThemeExt};
 use crate::TOKIO_RT;
+
+/// One row of a context menu: icon + label, hover highlight. The caller adds
+/// the click handler.
+fn menu_row(
+    id: &'static str,
+    icon: &'static [u8],
+    label: &'static str,
+    icon_color: Hsla,
+    text_color: Hsla,
+    hover_bg: Hsla,
+) -> Stateful<Div> {
+    h_flex()
+        .id(id)
+        .cursor_pointer()
+        .px_3()
+        .py_2()
+        .rounded_xl()
+        .gap_2p5()
+        .items_center()
+        .hover(move |s| s.bg(hover_bg))
+        .child(svg().data(icon).size(px(15.0)).text_color(icon_color))
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(text_color)
+                .child(label),
+        )
+}
 
 /// Conversation sidebar sizing: the desktop opens at 360 like before, and
 /// drags within the web client's bounds (`ChatPage.tsx` clamps 280–600).
@@ -247,6 +274,10 @@ pub struct ChatContextMenu {
     pub is_muted: bool,
     pub position: Point<Pixels>,
     pub show_mute_submenu: bool,
+    pub is_group: bool,
+    pub unread: u32,
+    /// First "Exit group" click arms it; the second one leaves.
+    pub confirm_leave: bool,
 }
 
 /// Pre-computed, cached renderable message to guarantee silky smooth 60fps scrolling
@@ -2269,6 +2300,58 @@ impl ChatView {
         .detach();
     }
 
+    /// Mark a chat as read from the context menu (server + local unread badge).
+    pub fn mark_chat_read_action(&mut self, chat_id: String, cx: &mut Context<Self>) {
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        if cx.has_global::<ChatStore>() {
+            ChatStore::global_mut(cx).mark_chat_read(&chat_id);
+        }
+        let target = chat_id;
+        cx.spawn(move |_this: WeakEntity<Self>, _cx: &mut AsyncApp| async move {
+            let client = HttpClient::new(&base_url);
+            let _ = TOKIO_RT
+                .spawn(async move { client.mark_as_read(&target).await })
+                .await;
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Leave a group, then reload the chat list.
+    pub fn leave_group_action(&mut self, chat_id: String, cx: &mut Context<Self>) {
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        let target = chat_id;
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.leave_group(&target).await })
+                    .await;
+                let ok = matches!(res, Ok(Ok(_)));
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if ok {
+                                this.load_chats(cx);
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Toggle archive state for a chat
     pub fn toggle_archive(&mut self, chat_id: String, is_archived: bool, cx: &mut Context<Self>) {
         let base_url = if cx.has_global::<AuthState>() {
@@ -3840,7 +3923,7 @@ impl ChatView {
 }
 
 impl Render for ChatView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.app_theme();
         let border_color = theme.border;
         let bg_color = theme.background;
@@ -4309,6 +4392,8 @@ impl Render for ChatView {
                                                             let pinned = is_pinned;
                                                             let archived = chat.archived;
                                                             let muted = is_muted;
+                                                            let group = chat.is_group;
+                                                            let unread_count = chat.unread as u32;
                                                             move |this, ev: &MouseDownEvent, _, cx| {
                                                                 this.context_menu = None;
                                                                 this.chat_context_menu = Some(ChatContextMenu {
@@ -4319,6 +4404,9 @@ impl Render for ChatView {
                                                                     is_muted: muted,
                                                                     position: ev.position,
                                                                     show_mute_submenu: false,
+                                                                    is_group: group,
+                                                                    unread: unread_count,
+                                                                    confirm_leave: false,
                                                                 });
                                                                 cx.notify();
                                                             }
@@ -5882,40 +5970,7 @@ impl Render for ChatView {
                 let is_from_me = ctx.is_from_me;
                 let msg_content = MessageBubbleHelper::decode_content(&ctx.msg.content);
                 let msg_obj = ctx.msg.clone();
-
-                let win_w = f32::from(window.viewport_size().width);
-                let win_h = f32::from(window.viewport_size().height);
-                let menu_w = 248.0;
-                let menu_h = 210.0;
-
-                let banner_h = if cx.has_global::<ConnectionState>() {
-                    match ConnectionState::global(cx).status {
-                        ConnectionStatus::Connected => 0.0,
-                        _ => 36.0,
-                    }
-                } else {
-                    0.0
-                };
-                let offset_x = SIDEBAR_WIDTH;
-                let offset_y = crate::popover::titlebar_height(cx) + banner_h;
-
-                let view_w = (win_w - offset_x).max(100.0);
-                let view_h = (win_h - offset_y).max(100.0);
-
-                let rel_x = f32::from(ctx.position.x) - offset_x;
-                let rel_y = f32::from(ctx.position.y) - offset_y;
-
-                let pos_x = if rel_x + menu_w > view_w - 15.0 {
-                    (rel_x - menu_w).max(8.0)
-                } else {
-                    rel_x.max(8.0)
-                };
-
-                let pos_y = if rel_y + menu_h > view_h - 15.0 {
-                    (rel_y - menu_h).max(8.0)
-                } else {
-                    rel_y.max(8.0)
-                };
+                let menu_pos = ctx.position;
 
                 Some(
                     div()
@@ -5927,10 +5982,8 @@ impl Render for ChatView {
                             cx.notify();
                         }))
                         .child(
+                            anchored().position(menu_pos).snap_to_window_with_margin(px(8.0)).child(
                             v_flex()
-                                .absolute()
-                                .left(px(pos_x))
-                                .top(px(pos_y))
                                 .w(px(248.0))
                                 .p_2()
                                 .gap_1()
@@ -6063,10 +6116,9 @@ impl Render for ChatView {
                                     "message-context-menu-in",
                                     Animation::new(std::time::Duration::from_millis(140))
                                         .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
-                                    move |el, delta| {
-                                        el.opacity(delta).top(px(pos_y + 6.0 * (1.0 - delta)))
-                                    },
+                                    move |el, delta| el.opacity(delta),
                                 ),
+                            ),
                         ),
                 )
             } else {
@@ -6080,56 +6132,159 @@ impl Render for ChatView {
                 let is_pinned = ctx.is_pinned;
                 let is_archived = ctx.is_archived;
                 let is_muted = ctx.is_muted;
+                let is_group = ctx.is_group;
+                let unread = ctx.unread;
+                let confirm_leave = ctx.confirm_leave;
                 let show_mute_submenu = ctx.show_mute_submenu;
+                let menu_pos = ctx.position;
+                let hover_bg: Hsla = theme.muted.opacity(0.4);
+                let danger: Hsla = rgb(0xef4444).into();
 
-                let win_w = f32::from(window.viewport_size().width);
-                let win_h = f32::from(window.viewport_size().height);
-                let menu_w = 175.0;
-                let menu_h = 135.0;
+                let mut menu = v_flex()
+                    .w(px(232.0))
+                    .p_1p5()
+                    .gap_0p5()
+                    .rounded_2xl()
+                    .bg(card_bg)
+                    .border_1()
+                    .border_color(border_color)
+                    .shadow_xl()
+                    .on_mouse_down(MouseButton::Left, |_, _, _| {});
 
-                let banner_h = if cx.has_global::<ConnectionState>() {
-                    match ConnectionState::global(cx).status {
-                        ConnectionStatus::Connected => 0.0,
-                        _ => 36.0,
+                // Mark as read (only while there is something unread)
+                if unread > 0 {
+                    let cid = chat_id.clone();
+                    menu = menu.child(
+                        menu_row("cm-read", CHECK_CHECK_SVG, "Mark as read", primary_color, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                this.mark_chat_read_action(cid.clone(), cx);
+                                this.chat_context_menu = None;
+                                cx.notify();
+                            })),
+                    );
+                }
+
+                // Archive / Unarchive
+                {
+                    let cid = chat_id.clone();
+                    menu = menu.child(
+                        menu_row(
+                            "cm-archive",
+                            ARCHIVE_SVG,
+                            if is_archived { "Unarchive chat" } else { "Archive chat" },
+                            muted_text,
+                            text_color,
+                            hover_bg,
+                        )
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                            this.toggle_archive(cid.clone(), is_archived, cx);
+                            this.chat_context_menu = None;
+                            cx.notify();
+                        })),
+                    );
+                }
+
+                // Mute notifications (durations expand inline) / Unmute
+                if is_muted {
+                    let cid = chat_id.clone();
+                    menu = menu.child(
+                        menu_row("cm-unmute", VOLUME_X_SVG, "Unmute notifications", muted_text, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                this.set_mute(cid.clone(), "off".to_string(), cx);
+                                this.chat_context_menu = None;
+                                cx.notify();
+                            })),
+                    );
+                } else {
+                    menu = menu.child(
+                        menu_row("cm-mute", VOLUME_X_SVG, "Mute notifications", muted_text, text_color, hover_bg)
+                            .child(div().flex_1())
+                            .child(svg().data(CHEVRON_RIGHT_SVG).size(px(13.0)).text_color(muted_text))
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                if let Some(m) = this.chat_context_menu.as_mut() {
+                                    m.show_mute_submenu = !m.show_mute_submenu;
+                                    cx.notify();
+                                }
+                            })),
+                    );
+                    if show_mute_submenu {
+                        for (id, label, mode) in [
+                            ("cm-mute-8h", "8 hours", "8h"),
+                            ("cm-mute-1w", "1 week", "1w"),
+                            ("cm-mute-all", "Always", "forever"),
+                        ] {
+                            let cid = chat_id.clone();
+                            menu = menu.child(
+                                h_flex()
+                                    .id(id)
+                                    .cursor_pointer()
+                                    .pl_10()
+                                    .pr_3()
+                                    .py_1p5()
+                                    .rounded_xl()
+                                    .items_center()
+                                    .hover(move |s| s.bg(hover_bg))
+                                    .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child(label))
+                                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                        this.set_mute(cid.clone(), mode.to_string(), cx);
+                                        this.chat_context_menu = None;
+                                        cx.notify();
+                                    })),
+                            );
+                        }
                     }
-                } else {
-                    0.0
-                };
-                let offset_x = SIDEBAR_WIDTH;
-                let offset_y = crate::popover::titlebar_height(cx) + banner_h;
+                }
 
-                let view_w = (win_w - offset_x).max(100.0);
-                let view_h = (win_h - offset_y).max(100.0);
+                // Pin / Unpin
+                {
+                    let cid = chat_id.clone();
+                    menu = menu.child(
+                        menu_row(
+                            "cm-pin",
+                            PIN_SVG,
+                            if is_pinned { "Unpin chat" } else { "Pin chat" },
+                            muted_text,
+                            text_color,
+                            hover_bg,
+                        )
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                            this.toggle_pin(cid.clone(), is_pinned, cx);
+                            this.chat_context_menu = None;
+                            cx.notify();
+                        })),
+                    );
+                }
 
-                let rel_x = f32::from(ctx.position.x) - offset_x;
-                let rel_y = f32::from(ctx.position.y) - offset_y;
-
-                let pos_x = if rel_x + menu_w > view_w - 15.0 {
-                    (rel_x - menu_w).max(8.0)
-                } else {
-                    rel_x.max(8.0)
-                };
-
-                let pos_y = if rel_y + menu_h > view_h - 15.0 {
-                    (rel_y - menu_h).max(8.0)
-                } else {
-                    rel_y.max(8.0)
-                };
-
-                let sub_w = 130.0;
-                let sub_h = 120.0;
-                let sub_x = if pos_x + menu_w + sub_w > view_w - 15.0 {
-                    (pos_x - sub_w - 4.0).max(8.0)
-                } else {
-                    pos_x + menu_w + 4.0
-                };
-                let sub_y = (pos_y + 70.0).min(view_h - sub_h - 15.0).max(8.0);
-
-                let mute_bg = if show_mute_submenu {
-                    theme.primary.opacity(0.25)
-                } else {
-                    rgba(0x00000000).into()
-                };
+                // Exit group (destructive: needs a second click)
+                if is_group {
+                    let cid = chat_id.clone();
+                    menu = menu
+                        .child(div().h(px(1.0)).mx_2().my_1().bg(border_color))
+                        .child(
+                            menu_row(
+                                "cm-exit",
+                                USER_MINUS_SVG,
+                                if confirm_leave { "Click again to exit group" } else { "Exit group" },
+                                danger,
+                                danger,
+                                hover_bg,
+                            )
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                let armed = this
+                                    .chat_context_menu
+                                    .as_ref()
+                                    .map(|m| m.confirm_leave)
+                                    .unwrap_or(false);
+                                if armed {
+                                    this.leave_group_action(cid.clone(), cx);
+                                    this.chat_context_menu = None;
+                                } else if let Some(m) = this.chat_context_menu.as_mut() {
+                                    m.confirm_leave = true;
+                                }
+                                cx.notify();
+                            })),
+                        );
+                }
 
                 Some(
                     div()
@@ -6145,252 +6300,15 @@ impl Render for ChatView {
                             cx.notify();
                         }))
                         .child(
-                            v_flex()
-                                .absolute()
-                                .left(px(pos_x))
-                                .top(px(pos_y))
-                                .w(px(menu_w))
-                                .p_1p5()
-                                .gap_0p5()
-                                .rounded_2xl()
-                                .bg(card_bg)
-                                .border_1()
-                                .border_color(border_color)
-                                .shadow_xl()
-                                .on_mouse_down(MouseButton::Left, |_, _, _| {})
-                                // Pin / Unpin Action
-                                .child({
-                                    let cid = chat_id.clone();
-                                    h_flex()
-                                        .cursor_pointer()
-                                        .px_3()
-                                        .py_2()
-                                        .rounded_xl()
-                                        .gap_2p5()
-                                        .items_center()
-                                        .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                        .on_mouse_move(cx.listener(|this, _, _, cx| {
-                                            if let Some(m) = this.chat_context_menu.as_mut() {
-                                                if m.show_mute_submenu {
-                                                    m.show_mute_submenu = false;
-                                                    cx.notify();
-                                                }
-                                            }
-                                        }))
-                                        .child(svg().data(PIN_SVG).size(px(15.0)).text_color(muted_text))
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(text_color)
-                                                .child(if is_pinned { "Unpin" } else { "Pin" }),
-                                        )
-                                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                            this.toggle_pin(cid.clone(), is_pinned, cx);
-                                            this.chat_context_menu = None;
-                                            cx.notify();
-                                        }))
-                                })
-                                // Archive / Unarchive Action
-                                .child({
-                                    let cid = chat_id.clone();
-                                    h_flex()
-                                        .cursor_pointer()
-                                        .px_3()
-                                        .py_2()
-                                        .rounded_xl()
-                                        .gap_2p5()
-                                        .items_center()
-                                        .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                        .on_mouse_move(cx.listener(|this, _, _, cx| {
-                                            if let Some(m) = this.chat_context_menu.as_mut() {
-                                                if m.show_mute_submenu {
-                                                    m.show_mute_submenu = false;
-                                                    cx.notify();
-                                                }
-                                            }
-                                        }))
-                                        .child(svg().data(ARCHIVE_SVG).size(px(15.0)).text_color(muted_text))
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(text_color)
-                                                .child(if is_archived { "Unarchive" } else { "Archive" }),
-                                        )
-                                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                            this.toggle_archive(cid.clone(), is_archived, cx);
-                                            this.chat_context_menu = None;
-                                            cx.notify();
-                                        }))
-                                })
-                                // Mute / Unmute Action
-                                .child({
-                                    let cid = chat_id.clone();
-                                    if is_muted {
-                                        // Directly unmute if already muted
-                                        h_flex()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_2()
-                                            .rounded_xl()
-                                            .gap_2p5()
-                                            .items_center()
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                            .child(svg().data(VOLUME_X_SVG).size(px(15.0)).text_color(muted_text))
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(text_color)
-                                                    .child("Unmute"),
-                                            )
-                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                this.set_mute(cid.clone(), "off".to_string(), cx);
-                                                this.chat_context_menu = None;
-                                                cx.notify();
-                                            }))
-                                    } else {
-                                        // Flyout submenu on hover / click
-                                        h_flex()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_2()
-                                            .rounded_xl()
-                                            .justify_between()
-                                            .items_center()
-                                            .bg(mute_bg)
-                                            .hover(|s| s.bg(theme.primary.opacity(0.25)))
-                                            .on_mouse_move(cx.listener(|this, _, _, cx| {
-                                                if let Some(m) = this.chat_context_menu.as_mut() {
-                                                    if !m.show_mute_submenu {
-                                                        m.show_mute_submenu = true;
-                                                        cx.notify();
-                                                    }
-                                                }
-                                            }))
-                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                if let Some(m) = this.chat_context_menu.as_mut() {
-                                                    m.show_mute_submenu = !m.show_mute_submenu;
-                                                    cx.notify();
-                                                }
-                                            }))
-                                            .child(
-                                                h_flex()
-                                                    .gap_2p5()
-                                                    .items_center()
-                                                    .child(svg().data(VOLUME_X_SVG).size(px(15.0)).text_color(muted_text))
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(text_color)
-                                                            .child("Mute"),
-                                                    ),
-                                            )
-                                            .child(
-                                                svg()
-                                                    .data(CHEVRON_RIGHT_SVG)
-                                                    .size(px(13.0))
-                                                    .text_color(muted_text),
-                                            )
-                                    }
-                                }),
-                        )
-                        // Flyout Submenu for Mute Durations
-                        .children(if show_mute_submenu && !is_muted {
-                            let cid_8h = chat_id.clone();
-                            let cid_1w = chat_id.clone();
-                            let cid_always = chat_id.clone();
-                            Some(
-                                v_flex()
-                                    .absolute()
-                                    .left(px(sub_x))
-                                    .top(px(sub_y))
-                                    .w(px(sub_w))
-                                    .p_1p5()
-                                    .gap_0p5()
-                                    .rounded_2xl()
-                                    .bg(card_bg)
-                                    .border_1()
-                                    .border_color(border_color)
-                                    .shadow_xl()
-                                    .on_mouse_down(MouseButton::Left, |_, _, _| {})
-                                    .child(
-                                        h_flex()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_2()
-                                            .rounded_xl()
-                                            .items_center()
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(text_color)
-                                                    .child("8 hours"),
-                                            )
-                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                this.set_mute(cid_8h.clone(), "8h".to_string(), cx);
-                                                this.chat_context_menu = None;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        h_flex()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_2()
-                                            .rounded_xl()
-                                            .items_center()
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(text_color)
-                                                    .child("1 week"),
-                                            )
-                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                this.set_mute(cid_1w.clone(), "1w".to_string(), cx);
-                                                this.chat_context_menu = None;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        h_flex()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_2()
-                                            .rounded_xl()
-                                            .items_center()
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(text_color)
-                                                    .child("Always"),
-                                            )
-                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                this.set_mute(cid_always.clone(), "forever".to_string(), cx);
-                                                this.chat_context_menu = None;
-                                                cx.notify();
-                                            })),
-                                    ),
-                            )
-                        } else {
-                            None
-                        })
-                        // Subtle entrance, same as the message menu.
-                        .with_animation(
-                            "chat-context-menu-in",
-                            Animation::new(std::time::Duration::from_millis(140))
-                                .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
-                            move |el, delta| {
-                                el.opacity(delta).top(px(pos_y + 6.0 * (1.0 - delta)))
-                            },
+                            anchored()
+                                .position(menu_pos)
+                                .snap_to_window_with_margin(px(8.0))
+                                .child(menu.with_animation(
+                                    "chat-context-menu-in",
+                                    Animation::new(std::time::Duration::from_millis(140))
+                                        .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
+                                    move |el, delta| el.opacity(delta),
+                                )),
                         ),
                 )
             } else {
