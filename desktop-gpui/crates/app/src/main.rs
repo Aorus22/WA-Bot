@@ -57,6 +57,15 @@ fn main() {
                 include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
             let _ = cx.text_system().add_fonts(vec![Cow::Borrowed(font_bytes)]);
 
+            // Color emoji: gpui's Linux text stack (swash) rasterizes CBDT bitmap
+            // emoji but not the COLRv1 font most distros ship, which renders as
+            // blank glyphs. Bundle the CBDT build of Noto Color Emoji.
+            if let Err(e) = cx.text_system().add_fonts(vec![Cow::Borrowed(
+                include_bytes!("../assets/fonts/NotoColorEmoji-CBDT.ttf") as &'static [u8],
+            )]) {
+                eprintln!("[fonts] bundled emoji font failed to load: {e:?}");
+            }
+
             // Initialize gpui-component subsystem
             gpui_component::init(cx);
 
@@ -218,12 +227,18 @@ fn main() {
                     // surface; no CSD border/shadow inset and no root fill.
                     let framed = cx.new(|_| popover::PopoverFrame { child: gate_view.into() });
                     cx.new(|cx| {
-                        gpui_component::Root::new(framed, window, cx)
+                        let mut root = gpui_component::Root::new(framed, window, cx)
                             .bordered(false)
-                            .bg(gpui::transparent_black())
+                            .bg(gpui::transparent_black());
+                        root.text_style().font_fallbacks = Some(emoji_fallbacks());
+                        root
                     })
                 } else {
-                    cx.new(|cx| gpui_component::Root::new(gate_view, window, cx))
+                    cx.new(|cx| {
+                        let mut root = gpui_component::Root::new(gate_view, window, cx);
+                        root.text_style().font_fallbacks = Some(emoji_fallbacks());
+                        root
+                    })
                 }
                 });
 
@@ -393,6 +408,15 @@ fn main() {
             })
             .detach();
         });
+}
+
+/// Text-style fallback so any glyph missing from the UI font (emoji in message
+/// text, the compose box, reaction chips) renders from the bundled color-emoji
+/// font instead of a COLRv1 system font gpui cannot rasterize.
+fn emoji_fallbacks() -> gpui::FontFallbacks {
+    gpui::FontFallbacks::from_fonts(vec![
+        wabot_app::components::emoji_picker::EMOJI_FONT_FAMILY.to_string(),
+    ])
 }
 
 /// Detects the backend URL using CLI flags, env vars, active port probes, settings, or .env fallback.

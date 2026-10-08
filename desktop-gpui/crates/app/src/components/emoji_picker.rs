@@ -82,3 +82,7 @@ mod tests {
         assert_eq!(gestures[0], "👍");
     }
 }
+
+/// Family of the bundled CBDT color-emoji font (see `main.rs`). Emoji glyph
+/// runs select it explicitly so they never fall back to a COLRv1 system font.
+pub const EMOJI_FONT_FAMILY: &str = "ClipboardEmoji";
