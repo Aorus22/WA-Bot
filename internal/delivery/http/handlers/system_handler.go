@@ -21,8 +21,14 @@ func (sh *SystemHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		isLoggedIn = sh.handler.client.IsLoggedIn()
 	}
 
+	phone := ""
+	if isLoggedIn {
+		phone = sh.handler.client.Phone()
+	}
+
 	sh.handler.sendJSON(w, map[string]interface{}{
 		"isLoggedIn": isLoggedIn,
+		"phone":      phone,
 	})
 }
 
@@ -39,7 +45,12 @@ func (sh *SystemHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := sh.handler.client.Logout()
+	var err error
+	if sh.handler.accounts != nil {
+		err = sh.handler.accounts.Logout()
+	} else {
+		err = sh.handler.client.Logout()
+	}
 	if err != nil {
 		sh.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return

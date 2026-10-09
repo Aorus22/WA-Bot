@@ -63,6 +63,17 @@ type CallService struct {
 	ringTimeout time.Duration
 }
 
+// SetClient rebinds the service to a new meowcaller client (after the
+// WhatsApp account was logged out and a fresh client was created).
+func (s *CallService) SetClient(client *meowcaller.Client) {
+	s.mu.Lock()
+	s.client = client
+	s.mu.Unlock()
+	if client != nil {
+		client.OnIncomingCall(s.onIncomingCall)
+	}
+}
+
 // NewCallService builds the call service and wires the incoming-call handler.
 func NewCallService(client *meowcaller.Client, connected func() bool, logs repository.CallRepository, hub EventPublisher) *CallService {
 	svc := &CallService{

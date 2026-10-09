@@ -27,7 +27,15 @@ type HTTPServer interface {
 	UpdateMessageStatus(msgID, status string)
 }
 
+// AccountEvents is notified about account link changes so per-account data
+// can follow the linked phone number.
+type AccountEvents interface {
+	HandlePaired(phone string)
+	HandleLoggedOut()
+}
+
 type WhatsAppEventHandler struct {
+	accounts    AccountEvents
 	handlerUC   HandlerUseCaseInterface
 	waService   *WhatsAppService
 	stateRepo   repository.UserStateRepository
@@ -77,12 +85,27 @@ func (h *WhatsAppEventHandler) SetAIClient(client *ai.AIClient) {
 	h.aiClient = client
 }
 
+func (h *WhatsAppEventHandler) SetAccountEvents(a AccountEvents) {
+	h.accounts = a
+}
+
 func (h *WhatsAppEventHandler) SetHistorySyncService(service *HistorySyncService) {
 	h.historySync = service
 }
 
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 	switch v := evt.(type) {
+	case *events.PairSuccess:
+		// Must run synchronously: the account data dir has to be bound before
+		// the first history sync / messages of the new account are stored.
+		if h.accounts != nil {
+			h.accounts.HandlePaired(v.ID.User)
+		}
+	case *events.LoggedOut:
+		// Unlinked from the phone. Reset off the receive loop: it disconnects.
+		if h.accounts != nil {
+			go h.accounts.HandleLoggedOut()
+		}
 	case *events.Message:
 		if h.historySync != nil {
 			if notif := v.Message.GetProtocolMessage().GetHistorySyncNotification(); notif != nil {

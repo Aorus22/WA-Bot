@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"wa-bot/internal/domain/repository"
 )
 
 type LocalStorage struct {
+	mu       sync.RWMutex
 	basePath string
 }
 
@@ -22,6 +24,23 @@ func NewLocalStorage(basePath string) repository.StorageRepository {
 	return &LocalStorage{
 		basePath: basePath,
 	}
+}
+
+// SetBasePath moves storage to another directory (one per WhatsApp account).
+func (l *LocalStorage) SetBasePath(basePath string) error {
+	if err := os.MkdirAll(basePath, 0755); err != nil {
+		return err
+	}
+	l.mu.Lock()
+	l.basePath = basePath
+	l.mu.Unlock()
+	return nil
+}
+
+func (l *LocalStorage) base() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.basePath
 }
 
 func (l *LocalStorage) Save(ctx context.Context, path string, reader io.Reader) (string, error) {
@@ -69,7 +88,8 @@ func (l *LocalStorage) Delete(ctx context.Context, path string) error {
 
 func (l *LocalStorage) GetPath(path string) string {
 	// 1. Get absolute paths for comparison
-	absBase, _ := filepath.Abs(l.basePath)
+	base := l.base()
+	absBase, _ := filepath.Abs(base)
 
 	// Try to see if the path is already absolute or relative to the current working directory
 	var absTarget string
@@ -88,13 +108,15 @@ func (l *LocalStorage) GetPath(path string) string {
 		return filepath.Clean(absTarget)
 	}
 
-	// 3. Otherwise, join it with basePath
-	fullPath := filepath.Join(l.basePath, path)
+	// 3. Otherwise, join it with basePath. Legacy callers pass paths prefixed
+	// with the old fixed "media/" directory; the base is now per account.
+	path = strings.TrimPrefix(filepath.ToSlash(path), "media/")
+	fullPath := filepath.Join(base, path)
 
 	// 4. Verify the final result is still inside for security
-	rel, err = filepath.Rel(l.basePath, fullPath)
+	rel, err = filepath.Rel(base, fullPath)
 	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return filepath.Join(l.basePath, filepath.Base(path))
+		return filepath.Join(base, filepath.Base(path))
 	}
 
 	return fullPath

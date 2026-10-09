@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -14,6 +15,7 @@ import (
 	"wa-bot/internal/delivery/http"
 	"wa-bot/internal/delivery/whatsapp"
 	"wa-bot/internal/domain/repository"
+	"wa-bot/internal/infrastructure/account"
 	"wa-bot/internal/infrastructure/ai"
 	"wa-bot/internal/infrastructure/call"
 	infrastructureConfig "wa-bot/internal/infrastructure/config"
@@ -24,12 +26,16 @@ import (
 	"wa-bot/internal/usecase"
 )
 
+// accountsRoot holds one folder per linked phone number (message DB + media).
+const accountsRoot = "accounts"
+
 type App struct {
 	waClient      *whatsappInfra.WhatsAppClient
 	eventHandler  *whatsapp.WhatsAppEventHandler
 	httpServer    *http.HTTPServer
 	cronScheduler *cron.CronScheduler
 	callSvc       *call.CallService
+	accounts      *account.Manager
 	config        *infrastructureConfig.EnvConfig
 }
 
@@ -92,7 +98,7 @@ func (a *App) HandleSession() {
 				})
 			} else if evt.Event == "success" {
 				fmt.Println("\n[AUTH] Successfully authenticated!")
-				a.httpServer.BroadcastMessage("auth_success", nil)
+				a.httpServer.BroadcastMessage("auth_success", map[string]string{"phone": a.waClient.Phone()})
 				break
 			} else {
 				fmt.Println("Login event:", evt.Event)
@@ -105,7 +111,7 @@ func (a *App) HandleSession() {
 			return
 		}
 		fmt.Println("[AUTH] Successfully authenticated!")
-		a.httpServer.BroadcastMessage("auth_success", nil)
+		a.httpServer.BroadcastMessage("auth_success", map[string]string{"phone": a.waClient.Phone()})
 	}
 }
 
@@ -113,12 +119,13 @@ func InitializeApp() (*App, error) {
 	// Load .env if available; optional for desktop mode
 	_ = godotenv.Load()
 
-	// Ensure database and media directories exist
+	// Ensure database directory exists (session DB). Message data and media
+	// live per account under accounts/<phone>/.
 	_ = os.MkdirAll("database", 0755)
-	_ = os.MkdirAll("media", 0755)
+	_ = os.MkdirAll(accountsRoot, 0755)
 
 	cfg := infrastructureConfig.NewEnvConfig()
-	storageRepo := storage.NewLocalStorage("media")
+	storageRepo := storage.NewLocalStorage(filepath.Join(accountsRoot, "_pending", "media"))
 	stateRepo := storage.NewInMemoryUserState()
 
 	logLevel := cfg.Get("LOG_LEVEL")
@@ -142,7 +149,10 @@ func InitializeApp() (*App, error) {
 
 	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
 
-	msgStore, err := repository.NewMessageStore("file:database/wa-bot-messages.db?_foreign_keys=on")
+	// Opened on a throwaway path; the account manager switches it to the
+	// linked account's folder (or an empty pending one) right below.
+	_ = os.MkdirAll(filepath.Join(accountsRoot, "_pending", "database"), 0755)
+	msgStore, err := repository.NewMessageStore("file:" + filepath.Join(accountsRoot, "_pending", "database", "wa-bot-messages.db") + "?_foreign_keys=on")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create message store: %w", err)
 	}
@@ -239,6 +249,23 @@ func InitializeApp() (*App, error) {
 	cronScheduler := cron.NewCronScheduler(appStore, luaService)
 	httpServer.SetCronScheduler(cronScheduler)
 
+	mediaDirs, ok := storageRepo.(interface{ SetBasePath(string) error })
+	if !ok {
+		return nil, fmt.Errorf("storage does not support per-account directories")
+	}
+	accounts := account.NewManager(accountsRoot, msgStore, mediaDirs, waClient, httpServer, callSvc)
+	accounts.OnSwitch(historySyncService.Reload)
+	httpServer.SetAccountController(accounts)
+	eventHandler.SetAccountEvents(accounts)
+	if waClient.IsLoggedIn() {
+		err = accounts.BindAccount(waClient.Phone())
+	} else {
+		err = accounts.BindPending()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to bind account data: %w", err)
+	}
+
 	waClient.SetLogger(httpServer)
 	eventHandler.SetMessageStore(msgStore)
 	eventHandler.SetHTTPServer(httpServer)
@@ -285,14 +312,17 @@ func InitializeApp() (*App, error) {
 	aiClient := ai.NewAIClient(aiServerURL)
 	eventHandler.SetAIClient(aiClient)
 
-	return &App{
+	app := &App{
 		waClient:      waClient,
+		accounts:      accounts,
 		eventHandler:  eventHandler,
 		httpServer:    httpServer,
 		cronScheduler: cronScheduler,
 		callSvc:       callSvc,
 		config:        cfg,
-	}, nil
+	}
+	accounts.SetPairingStarter(app.HandleSession)
+	return app, nil
 }
 
 func main() {

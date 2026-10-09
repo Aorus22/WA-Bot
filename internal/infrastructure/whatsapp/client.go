@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -38,6 +39,11 @@ type WhatsAppClient struct {
 	dbLog      waLog.Logger
 	container  *sqlstore.Container
 	logger     MessageLogger
+
+	// handlers are re-attached to the fresh whatsmeow client created by
+	// ResetSession after a logout.
+	handlersMu sync.Mutex
+	handlers   []func(event interface{})
 }
 
 func NewWhatsAppClient(dbURL string, logLevel string, dbLog waLog.Logger) (*WhatsAppClient, error) {
@@ -529,7 +535,40 @@ func (w *WhatsAppClient) GetCallClient() *meowcaller.Client {
 }
 
 func (w *WhatsAppClient) AddEventHandler(handler func(event interface{})) {
+	w.handlersMu.Lock()
+	w.handlers = append(w.handlers, handler)
+	w.handlersMu.Unlock()
 	w.client.AddEventHandler(handler)
+}
+
+// Phone returns the phone number (JID user part) of the paired account, or ""
+// when nobody is logged in.
+func (w *WhatsAppClient) Phone() string {
+	if w.client == nil || w.client.Store == nil || w.client.Store.ID == nil {
+		return ""
+	}
+	return w.client.Store.ID.User
+}
+
+// ResetSession replaces the underlying whatsmeow client with one on a brand new
+// (unpaired) device, so a different account can be linked without restarting
+// the process. The WhatsAppClient pointer, registered event handlers and the
+// call client wiring stay valid. Call it after Logout / events.LoggedOut.
+func (w *WhatsAppClient) ResetSession() {
+	old := w.client
+	if old != nil {
+		old.Disconnect()
+	}
+	client := whatsmeow.NewClient(w.container.NewDevice(), waLog.Stdout("Client", w.logLevel, true))
+	client.ManualHistorySyncDownload = true
+	w.callClient = meowcaller.NewClient(client)
+	w.client = client
+
+	w.handlersMu.Lock()
+	for _, h := range w.handlers {
+		client.AddEventHandler(h)
+	}
+	w.handlersMu.Unlock()
 }
 
 func (w *WhatsAppClient) GetQRChannel(ctx context.Context) (<-chan QREvent, error) {

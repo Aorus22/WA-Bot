@@ -46,6 +46,16 @@ type Handler struct {
 		Start() (repository.HistorySyncStatus, error)
 		Status() repository.HistorySyncStatus
 	}
+	accounts AccountController
+}
+
+// AccountController owns the logout -> new QR flow and per-account data.
+type AccountController interface {
+	Logout() error
+}
+
+func (h *Handler) SetAccountController(a AccountController) {
+	h.accounts = a
 }
 
 func NewHandler(

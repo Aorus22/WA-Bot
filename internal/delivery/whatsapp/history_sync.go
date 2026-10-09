@@ -54,6 +54,18 @@ func NewHistorySyncService(client *whatsappInfra.WhatsAppClient, store *reposito
 	return s
 }
 
+// Reload re-reads the persisted status after the message database was switched
+// to another account.
+func (s *HistorySyncService) Reload() {
+	status, err := s.store.GetHistorySyncStatus()
+	if err != nil {
+		status = repository.HistorySyncStatus{State: "idle", Errors: []repository.HistorySyncError{}}
+	}
+	s.mu.Lock()
+	s.status = status
+	s.mu.Unlock()
+}
+
 func (s *HistorySyncService) SetBroadcaster(server HTTPServer) { s.broadcaster = server }
 
 func (s *HistorySyncService) StageNotification(messageID string, notif *waE2E.HistorySyncNotification) {

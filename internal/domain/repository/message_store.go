@@ -1,9 +1,12 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -14,9 +17,46 @@ import (
 )
 
 type MessageStore struct {
-	db *sql.DB
+	db swapDB
 	mu sync.RWMutex
 }
+
+// swapDB forwards to a *sql.DB that can be replaced at runtime, so one
+// MessageStore pointer can follow the logged-in WhatsApp account while every
+// holder of that pointer stays valid.
+type swapDB struct {
+	mu sync.RWMutex
+	db *sql.DB
+}
+
+func (d *swapDB) cur() *sql.DB {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.db
+}
+
+func (d *swapDB) swap(next *sql.DB) *sql.DB {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	prev := d.db
+	d.db = next
+	return prev
+}
+
+func (d *swapDB) Exec(q string, args ...any) (sql.Result, error) { return d.cur().Exec(q, args...) }
+func (d *swapDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return d.cur().ExecContext(ctx, q, args...)
+}
+func (d *swapDB) Query(q string, args ...any) (*sql.Rows, error) { return d.cur().Query(q, args...) }
+func (d *swapDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return d.cur().QueryContext(ctx, q, args...)
+}
+func (d *swapDB) QueryRow(q string, args ...any) *sql.Row { return d.cur().QueryRow(q, args...) }
+func (d *swapDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return d.cur().QueryRowContext(ctx, q, args...)
+}
+func (d *swapDB) Begin() (*sql.Tx, error) { return d.cur().Begin() }
+func (d *swapDB) Close() error            { return d.cur().Close() }
 
 // ReactionEntry aggregates everyone who reacted with one emoji.
 type ReactionEntry struct {
@@ -128,7 +168,8 @@ func NewMessageStore(dbPath string) (*MessageStore, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	store := &MessageStore{db: db}
+	store := &MessageStore{}
+	store.db.db = db
 
 	if err := store.init(); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
@@ -137,10 +178,42 @@ func NewMessageStore(dbPath string) (*MessageStore, error) {
 	return store, nil
 }
 
+// Switch points the store at another database file (one per WhatsApp account),
+// creating its parent directory and schema when needed. Callers keep using the
+// same *MessageStore. On error the current database stays active.
+func (s *MessageStore) Switch(dbPath string) error {
+	if dir := filepath.Dir(dbPath); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("failed to create database directory: %w", err)
+		}
+	}
+	next, err := sql.Open("sqlite3", "file:"+dbPath+"?_foreign_keys=on")
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev := s.db.swap(next)
+	if err := s.initLocked(); err != nil {
+		s.db.swap(prev)
+		_ = next.Close()
+		return fmt.Errorf("failed to initialize database: %w", err)
+	}
+	if prev != nil {
+		_ = prev.Close()
+	}
+	return nil
+}
+
 func (s *MessageStore) init() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.initLocked()
+}
 
+// initLocked creates/migrates the schema; the caller holds s.mu.
+func (s *MessageStore) initLocked() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS contacts (
                         id TEXT PRIMARY KEY,

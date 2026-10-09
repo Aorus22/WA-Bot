@@ -51,6 +51,10 @@ func NewHTTPServer(client *whatsappInfra.WhatsAppClient, config repository.Confi
 	}
 }
 
+func (s *HTTPServer) SetAccountController(a handlers.AccountController) {
+	s.handler.SetAccountController(a)
+}
+
 func (s *HTTPServer) SetLuaService(lua LuaService) {
 	s.handler.SetLuaService(lua)
 }
@@ -205,6 +209,11 @@ func (s *HTTPServer) BroadcastMessage(msgType string, payload interface{}) {
 			s.latestQRCode = m["code"]
 			s.qrMu.Unlock()
 		}
+	} else if msgType == "auth_success" || msgType == "logged_out" {
+		// A used or stale QR must not be served to the next client.
+		s.qrMu.Lock()
+		s.latestQRCode = ""
+		s.qrMu.Unlock()
 	}
 	s.hub.Broadcast(WSMessage{
 		Type:    msgType,
