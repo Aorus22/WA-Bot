@@ -77,9 +77,7 @@ impl ChatSidebarComponent {
         if ts == 0 {
             return String::new();
         }
-        let ts_sec = if ts > 10_000_000_000 { ts / 1000 } else { ts };
-        let hours = (ts_sec / 3600) % 24;
-        let mins = (ts_sec / 60) % 60;
+        let (hours, mins) = crate::localtime::hour_minute(ts);
         format!("{:02}:{:02}", hours, mins)
     }
 }

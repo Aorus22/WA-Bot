@@ -46,21 +46,14 @@ impl MessageBubbleHelper {
         if ts == 0 {
             return String::new();
         }
-        let ts_sec = if ts > 10_000_000_000 { ts / 1000 } else { ts };
-        let hours = (ts_sec / 3600) % 24;
-        let mins = (ts_sec / 60) % 60;
+        let (hours, mins) = crate::localtime::hour_minute(ts);
         format!("{:02}:{:02}", hours, mins)
     }
 
     /// Day bucket (days since the Unix epoch) of a second/millisecond
     /// timestamp, used to decide where a date separator belongs.
     pub fn day_index(timestamp: i64) -> i64 {
-        let ts_sec = if timestamp > 10_000_000_000 {
-            timestamp / 1000
-        } else {
-            timestamp
-        };
-        ts_sec.div_euclid(86_400)
+        crate::localtime::local_day(timestamp)
     }
 
     /// Web's `formatDate`: "Today", "Yesterday" or "7 September 2026".

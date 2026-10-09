@@ -64,19 +64,13 @@ fn format_post_time(ts: i64) -> String {
     if ts <= 0 {
         return String::new();
     }
-    let ts_sec = if ts > 10_000_000_000 { ts / 1000 } else { ts };
-    let hours = (ts_sec / 3600) % 24;
-    let mins = (ts_sec / 60) % 60;
+    let (hours, mins) = crate::localtime::hour_minute(ts);
     format!("{:02}:{:02}", hours, mins)
 }
 
 fn format_post_date(ts: i64) -> String {
-    let ts_sec = if ts > 10_000_000_000 { ts / 1000 } else { ts };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    let days_diff = (now / 86400).saturating_sub(ts_sec / 86400);
+    let ts_sec = crate::localtime::to_secs(ts);
+    let days_diff = (crate::localtime::today() - crate::localtime::local_day(ts_sec)).max(0);
     if days_diff == 0 {
         "Today".to_string()
     } else if days_diff == 1 {

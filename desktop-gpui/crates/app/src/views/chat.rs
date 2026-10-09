@@ -1375,8 +1375,7 @@ impl ChatView {
         if timestamp == 0 {
             return String::new();
         }
-        let ts_sec = if timestamp > 10_000_000_000 { timestamp / 1000 } else { timestamp };
-        let mut days = (ts_sec / 86400) as i32;
+        let mut days = crate::localtime::local_day(timestamp) as i32;
         if days < 0 {
             return String::new();
         }
@@ -1418,9 +1417,7 @@ impl ChatView {
         if timestamp == 0 {
             return String::new();
         }
-        let ts_sec = if timestamp > 10_000_000_000 { timestamp / 1000 } else { timestamp };
-        let hours = (ts_sec / 3600) % 24;
-        let mins = (ts_sec / 60) % 60;
+        let (hours, mins) = crate::localtime::hour_minute(timestamp);
         format!("{:02}:{:02}", hours, mins)
     }
 
@@ -2838,9 +2835,7 @@ impl ChatView {
         if timestamp == 0 {
             return String::new();
         }
-        let ts_sec = if timestamp > 10_000_000_000 { timestamp / 1000 } else { timestamp };
-        let hours = (ts_sec / 3600) % 24;
-        let mins = (ts_sec / 60) % 60;
+        let (hours, mins) = crate::localtime::hour_minute(timestamp);
         let period = if hours >= 12 { "PM" } else { "AM" };
         let h12 = if hours % 12 == 0 { 12 } else { hours % 12 };
         format!("{:02}:{:02} {}", h12, mins, period)
