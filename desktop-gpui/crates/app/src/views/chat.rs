@@ -106,6 +106,10 @@ const UNREAD_BADGE_SIZE: f32 = 20.0;
 const SHEET_WIDTH: f32 = 320.0;
 /// Entrance duration for the right-hand drawers, in ms.
 const SHEET_ANIM_MS: u64 = 240;
+/// A live message plays its entrance for this long, then counts as settled.
+const FRESH_MSG_TTL: std::time::Duration = std::time::Duration::from_millis(600);
+/// Entrance duration for a newly arrived message bubble, in ms.
+const MSG_ENTER_MS: u64 = 260;
 
 /// Deterministic color palette for contact avatars
 const AVATAR_COLORS: &[u32] = &[
@@ -357,6 +361,9 @@ pub struct ChatView {
     // Scroll handles for visual scrollbars (uniform_list and virtual list)
     pub chat_list_scroll_handle: UniformListScrollHandle,
     pub messages_list_state: ListState,
+    /// Messages that just arrived live (id -> arrival). They play a short
+    /// entrance; history, scroll-back and chat switches never do.
+    fresh_msgs: std::collections::HashMap<String, std::time::Instant>,
 
     // Conversation sidebar width and its live resize drag (web parity)
     pub sidebar_width: f32,
@@ -468,6 +475,7 @@ impl ChatView {
 
             chat_list_scroll_handle: UniformListScrollHandle::new(),
             messages_list_state: ListState::new(0, ListAlignment::Top, px(200.0)),
+            fresh_msgs: std::collections::HashMap::new(),
 
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             sidebar_resize_drag: None,
@@ -661,8 +669,44 @@ impl ChatView {
         self.messages_list_state.scroll_to_end();
     }
 
+    /// Flag messages appended to the open conversation since the last build so
+    /// their rows can ease in. Only a small tail append counts: a prepended
+    /// history page, a swapped optimistic bubble (an id disappears) or a
+    /// different chat is not "new".
+    fn mark_fresh_messages(&mut self, chat_id: &str, msgs: &[Message]) {
+        const MAX_FRESH: usize = 3;
+        let now = std::time::Instant::now();
+        self.fresh_msgs
+            .retain(|_, at| now.duration_since(*at) < FRESH_MSG_TTL);
+        if self.cached_chat_id.as_deref() != Some(chat_id) || self.cached_render_messages.is_empty() {
+            return;
+        }
+        let old_ids: HashSet<&str> = self
+            .cached_render_messages
+            .iter()
+            .map(|m| m.msg.id.as_str())
+            .collect();
+        let new_ids: HashSet<&str> = msgs.iter().map(|m| m.id.as_str()).collect();
+        if old_ids.iter().any(|id| !new_ids.contains(id)) {
+            return;
+        }
+        let added = msgs.iter().filter(|m| !old_ids.contains(m.id.as_str())).count();
+        if added == 0 || added > MAX_FRESH {
+            return;
+        }
+        // Must be a tail append, not messages slotted in earlier.
+        let tail_start = msgs.len().saturating_sub(added);
+        if msgs[..tail_start].iter().any(|m| !old_ids.contains(m.id.as_str())) {
+            return;
+        }
+        for m in &msgs[tail_start..] {
+            self.fresh_msgs.insert(m.id.clone(), now);
+        }
+    }
+
     /// Rebuild cached render messages without jumping to bottom (preserves scroll position)
     fn rebuild_message_cache_preserve_scroll(&mut self, chat_id: &str, msgs: &[Message]) {
+        self.mark_fresh_messages(chat_id, msgs);
         let mut lookup = std::collections::HashMap::new();
         for m in msgs {
             let sender = if m.from == "me" {
@@ -2968,7 +3012,7 @@ impl ChatView {
                         .items_center()
                         .justify_center()
                         .gap_3()
-                        .child(Icon::new(IconName::LoaderCircle).size(px(24.0)))
+                        .child(crate::components::motion::spinning(Icon::new(IconName::LoaderCircle).size(px(24.0))))
                         .child(
                             div()
                                 .text_xs()
@@ -3363,6 +3407,38 @@ impl ChatView {
             .map(|m| MessageBubbleHelper::format_date_label(m.msg.timestamp).to_uppercase())
     }
 
+    /// Distance from the bottom of the message list in pixels.
+    fn distance_from_bottom(&self) -> Pixels {
+        let max_offset = self.messages_list_state.max_offset_for_scrollbar().y;
+        let current_offset = -self.messages_list_state.scroll_px_offset_for_scrollbar().y;
+        (max_offset - current_offset).max(px(0.0))
+    }
+
+    /// Whether the user has scrolled up away from the newest messages.
+    fn should_show_scroll_to_bottom(&self) -> bool {
+        let total = self.cached_render_messages.len();
+        if total == 0 {
+            return false;
+        }
+        let max_offset = self.messages_list_state.max_offset_for_scrollbar().y;
+        if max_offset <= px(40.0) {
+            return false;
+        }
+        let top_ix = self.messages_list_state.logical_scroll_top().item_ix;
+        self.distance_from_bottom() > px(60.0) || (top_ix + 4 < total)
+    }
+
+    /// Scroll to the newest messages at the bottom.
+    fn scroll_to_bottom(&mut self, cx: &mut Context<Self>) {
+        if self.has_more_next {
+            if let Some(chat_id) = self.selected_chat_id.clone() {
+                self.load_messages(&chat_id, cx);
+            }
+        }
+        self.messages_list_state.scroll_to_end();
+        cx.notify();
+    }
+
     /// Document attachment card, mirroring the web's document bubble: file
     /// icon tile, file name, uppercase extension, then Open / Save As.
     fn render_document_card(
@@ -3571,7 +3647,9 @@ impl ChatView {
         let hover_bg = theme.muted.opacity(0.5);
         // Floats above the compose bar: absolute so it never takes flow space
         // (an in-flow panel would stretch the compose container over the chat).
-        let panel_shell = |children: Vec<AnyElement>| {
+        // Eases up from the compose bar; keyed per panel so switching between
+        // the menu, emoji and sticker panels replays it.
+        let panel_shell = |id: &'static str, children: Vec<AnyElement>| {
             v_flex()
                 .absolute()
                 .left(px(12.0))
@@ -3586,6 +3664,11 @@ impl ChatView {
                 .border_color(border_color)
                 .shadow_2xl()
                 .children(children)
+                .with_animation(
+                    id,
+                    crate::components::motion::enter(crate::components::motion::FAST_MS + 40),
+                    |el, d| el.opacity(d).mb(px(8.0 * d)),
+                )
                 .into_any_element()
         };
 
@@ -3700,6 +3783,11 @@ impl ChatView {
                         .border_color(border_color)
                         .shadow_2xl()
                         .children(rows)
+                        .with_animation(
+                            "attach-menu-in",
+                            crate::components::motion::enter(crate::components::motion::FAST_MS + 40),
+                            |el, d| el.opacity(d).mb(px(8.0 * d)),
+                        )
                         .into_any_element(),
                 )
             }
@@ -3755,7 +3843,7 @@ impl ChatView {
                     })
                     .collect();
 
-                Some(panel_shell(vec![
+                Some(panel_shell("attach-emoji-in", vec![
                     h_flex()
                         .w_full()
                         .justify_between()
@@ -3854,7 +3942,7 @@ impl ChatView {
                         .into_any_element()
                 };
 
-                Some(panel_shell(vec![
+                Some(panel_shell("attach-sticker-in", vec![
                     h_flex()
                         .w_full()
                         .justify_between()
@@ -4115,7 +4203,7 @@ impl ChatView {
             ComposeDialog::Contact => this.send_contact(cx),
         };
 
-        Some(
+        Some(crate::components::motion::modal_in(
             div()
                 .absolute()
                 .inset_0()
@@ -4184,9 +4272,10 @@ impl ChatView {
                                     cx.listener(move |this, _, _, cx| submit(this, cx)),
                                 )),
                         ),
-                )
-                .into_any_element(),
-        )
+                ),
+                "compose-dialog-in",
+            )
+            .into_any_element())
     }
 }
 
@@ -4577,7 +4666,7 @@ impl Render for ChatView {
                                             .items_center()
                                             .justify_center()
                                             .gap_2()
-                                            .child(Icon::new(IconName::LoaderCircle).size(px(24.)))
+                                            .child(crate::components::motion::spinning(Icon::new(IconName::LoaderCircle).size(px(24.))))
                                             .child(div().text_xs().text_color(muted_text).child("Loading conversations..."))
                                     )
                                     .into_any_element()
@@ -4879,6 +4968,7 @@ impl Render for ChatView {
 
                         Some(
                             v_flex()
+                                .relative()
                                 .size_full()
                                 // Chat Header (Clicking opens Info Sheet)
                                 .child(
@@ -5050,7 +5140,7 @@ impl Render for ChatView {
                                                         .items_center()
                                                         .justify_center()
                                                         .gap_2()
-                                                        .child(Icon::new(IconName::LoaderCircle).size(px(24.)))
+                                                        .child(crate::components::motion::spinning(Icon::new(IconName::LoaderCircle).size(px(24.))))
                                                         .child(div().text_xs().text_color(muted_text).child("Loading messages..."))
                                                 )
                                                 .into_any_element()
@@ -5550,11 +5640,31 @@ impl Render for ChatView {
                                                         None
                                                     };
 
-                                                    v_flex()
+                                                    let row = v_flex()
                                                         .w_full()
+                                                        .relative()
                                                         .children(day_separator)
-                                                        .child(body)
-                                                        .into_any_element()
+                                                        .child(body);
+
+                                                    let fresh_id = index
+                                                        .checked_sub(1)
+                                                        .and_then(|i| this.cached_render_messages.get(i))
+                                                        .map(|m| m.msg.id.as_str())
+                                                        .filter(|id| {
+                                                            this.fresh_msgs.get(*id).is_some_and(|at| {
+                                                                at.elapsed() < FRESH_MSG_TTL
+                                                            })
+                                                        });
+                                                    match fresh_id {
+                                                        Some(id) => crate::components::motion::rise_in(
+                                                            row,
+                                                            SharedString::from(format!("msg-in-{id}")),
+                                                            MSG_ENTER_MS,
+                                                            12.0,
+                                                        )
+                                                        .into_any_element(),
+                                                        None => row.into_any_element(),
+                                                    }
                                                 }),
                                             )
                                             .size_full()
@@ -5586,7 +5696,53 @@ impl Render for ChatView {
                                                     muted_text,
                                                 ))
                                                 .into_any_element()
-                                        })),
+                                        }))
+                                        // Floating scroll-to-bottom chevron button when scrolled up
+                                        .children(if self.should_show_scroll_to_bottom() {
+                                            let btn = div()
+                                                .id("btn-scroll-to-bottom")
+                                                .cursor_pointer()
+                                                .absolute()
+                                                .bottom(px(16.0))
+                                                .right(px(16.0))
+                                                .w(px(40.0))
+                                                .h(px(40.0))
+                                                .rounded_full()
+                                                .bg(theme.card)
+                                                .border_1()
+                                                .border_color(border_color.opacity(0.7))
+                                                .shadow_md()
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .hover(|s| s.bg(theme.muted.opacity(0.8)))
+                                                .active(|s| s.bg(theme.muted.opacity(0.95)))
+                                                .tooltip(move |window, cx| {
+                                                    Tooltip::new("Scroll to newest").build(window, cx)
+                                                })
+                                                .child(
+                                                    Icon::new(IconName::ChevronDown)
+                                                        .size(px(20.0))
+                                                        .text_color(muted_text),
+                                                )
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    cx.listener(|this, _, _, cx| {
+                                                        this.scroll_to_bottom(cx);
+                                                    }),
+                                                );
+
+                                            Some(
+                                                crate::components::motion::fade_in(
+                                                    btn,
+                                                    "scroll-bottom-fade",
+                                                    160,
+                                                )
+                                                .into_any_element(),
+                                            )
+                                        } else {
+                                            None
+                                        }),
 
                                 )
                                 // Bottom Compose Container (Banner + Input Field + Integrated Send Icon)
@@ -5864,7 +6020,19 @@ impl Render for ChatView {
                                                         }),
                                                 ),
                                         ),
-                                ),
+                                )
+                                // Opening a conversation slides it in (a push, in pages
+                                // layout) while fading; keyed by chat so reselecting the
+                                // same one doesn't replay it.
+                                .with_animation(
+                                    SharedString::from(format!("chat-pane-{chat_jid}")),
+                                    crate::components::motion::enter(260),
+                                    move |el, d| {
+                                        let travel = if pages { 32.0 } else { 14.0 };
+                                        el.opacity(d).left(px(travel * (1.0 - d)))
+                                    },
+                                )
+                                .into_any_element(),
                         )
                     } else {
                         // Empty state when no chat selected
@@ -5897,7 +6065,8 @@ impl Render for ChatView {
                                         .text_sm()
                                         .text_color(muted_text)
                                         .child("Select a conversation from the left to start chatting."),
-                                ),
+                                )
+                                .into_any_element(),
                         )
                     }),
             )
@@ -6687,7 +6856,7 @@ impl Render for ChatView {
                 } else {
                     Vec::new()
                 };
-                Some(
+                Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
                         .inset_0()
@@ -6838,7 +7007,8 @@ impl Render for ChatView {
                                         ),
                                 ),
                         ),
-                )
+                        "new-group-in",
+                    ))
             } else {
                 None
             })
@@ -6853,7 +7023,7 @@ impl Render for ChatView {
                 };
                 let selected_count = self.forward_selected.len();
                 let can_send = selected_count > 0 && !self.is_forwarding;
-                Some(
+                Some(crate::components::motion::modal_in(
                     div()
                         .id("forward-backdrop")
                         .absolute()
@@ -6982,7 +7152,8 @@ impl Render for ChatView {
                                         ),
                                 ),
                         ),
-                )
+                        "forward-in",
+                    ))
             } else {
                 None
             })
@@ -6990,7 +7161,7 @@ impl Render for ChatView {
             // MODAL: JOIN GROUP DIALOG
             // ====================================================
             .children(if self.is_join_group_open {
-                Some(
+                Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
                         .inset_0()
@@ -7108,7 +7279,8 @@ impl Render for ChatView {
                                         ),
                                 ),
                         ),
-                )
+                        "join-group-in",
+                    ))
             } else {
                 None
             })
@@ -7461,7 +7633,10 @@ impl Render for ChatView {
                         ));
                     }
                 }
-                Some(overlay.into_any_element())
+                Some(
+                    crate::components::motion::fade_in(overlay, "image-viewer-in", 180)
+                        .into_any_element(),
+                )
             } else {
                 None
             })

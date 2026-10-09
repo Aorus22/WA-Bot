@@ -1796,7 +1796,7 @@ impl Render for SettingsView {
                 };
                 let presets = modal.presets.clone();
 
-                Some(
+                Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
                         .inset_0()
@@ -1988,7 +1988,8 @@ impl Render for SettingsView {
                                         ),
                                 ),
                         ),
-                )
+                        "settings-edit-in",
+                    ))
             } else {
                 None
             })

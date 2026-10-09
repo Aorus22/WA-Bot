@@ -7,6 +7,7 @@ pub mod dialogs;
 pub mod emoji_picker;
 pub mod media_player;
 pub mod message_bubble;
+pub mod motion;
 pub mod nav_sidebar;
 pub mod rich_bubbles;
 pub mod titlebar;

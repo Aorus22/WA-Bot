@@ -7,6 +7,7 @@ use gpui_component::{h_flex, v_flex};
 
 use crate::components::call_overlay::CallOverlayView;
 use crate::components::connection_banner::{ConnectionBanner, ConnectionState};
+use crate::components::motion;
 use crate::components::nav_sidebar::NavigationSidebar;
 use crate::components::titlebar::AppTitleBar;
 use crate::router::{AppRoute, Router};
@@ -65,6 +66,9 @@ impl Render for AppShellView {
         } else {
             AppRoute::Chat
         };
+        // Keyed by section (not the full route) so moving between a list and
+        // its detail page doesn't replay the transition.
+        let route_key = current_route.path_prefix();
 
         v_flex()
             .id("app-shell")
@@ -89,7 +93,15 @@ impl Render for AppShellView {
                                     .id("router-outlet")
                                     .size_full()
                                     .overflow_hidden()
-                                    .child(self.render_route_outlet(&current_route, cx)),
+                                    .child(motion::rise_in(
+                                        div()
+                                            .relative()
+                                            .size_full()
+                                            .child(self.render_route_outlet(&current_route, cx)),
+                                        route_key,
+                                        motion::BASE_MS,
+                                        10.0,
+                                    )),
                             ),
                     ),
             )

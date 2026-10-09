@@ -50,7 +50,7 @@ impl RenderOnce for QrCodeView {
                             v_flex()
                                 .items_center()
                                 .gap_3()
-                                .child(Icon::new(IconName::LoaderCircle).size(px(32.)))
+                                .child(crate::components::motion::spinning(Icon::new(IconName::LoaderCircle).size(px(32.))))
                                 .child(
                                     div()
                                         .text_sm()
@@ -82,7 +82,7 @@ impl RenderOnce for QrCodeView {
                             v_flex()
                                 .items_center()
                                 .gap_3()
-                                .child(Icon::new(IconName::LoaderCircle).size(px(32.)))
+                                .child(crate::components::motion::spinning(Icon::new(IconName::LoaderCircle).size(px(32.))))
                                 .child(
                                     div()
                                         .text_sm()

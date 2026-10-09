@@ -800,7 +800,13 @@ impl Render for StatusView {
                                                     this.navigate(1, cx);
                                                 })),
                                         ),
-                                ),
+                                )
+                                .with_animation(
+                                    SharedString::from(format!("status-viewer-{}", group.sender)),
+                                    crate::components::motion::enter(200),
+                                    |el, d| el.opacity(d),
+                                )
+                                .into_any_element(),
                         )
                     } else {
                         // Empty state placeholder
@@ -838,7 +844,8 @@ impl Render for StatusView {
                                         .text_sm()
                                         .text_color(muted_text)
                                         .child("Bagikan foto, video, dan teks yang hilang setelah 24 jam."),
-                                ),
+                                )
+                                .into_any_element(),
                         )
                     }),
             )
@@ -848,7 +855,7 @@ impl Render for StatusView {
                 let text_val = self.composer_text.clone();
                 let is_posting = self.is_posting;
 
-                Some(
+                Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
                         .inset_0()
@@ -1013,7 +1020,8 @@ impl Render for StatusView {
                                         ),
                                 ),
                         ),
-                )
+                        "status-post-in",
+                    ))
             } else {
                 None
             })

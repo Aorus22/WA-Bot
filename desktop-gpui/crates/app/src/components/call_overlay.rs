@@ -651,6 +651,11 @@ impl CallOverlayView {
                             })),
                     ),
             )
+            .with_animation(
+                "call-overlay-in",
+                crate::components::motion::enter(crate::components::motion::BASE_MS),
+                |el, d| el.opacity(d),
+            )
             .into_any_element()
     }
 
@@ -830,6 +835,11 @@ impl CallOverlayView {
                                 cx.listener(|this, _, _, cx| this.answer_call(cx)),
                             )),
                     ),
+            )
+            .with_animation(
+                "incoming-call-in",
+                crate::components::motion::enter(crate::components::motion::BASE_MS),
+                |el, d| el.opacity(d),
             )
             .into_any_element()
     }

@@ -1,12 +1,13 @@
 //! Navigation sidebar 1:1 with web client NavigationSidebar.tsx.
 
 use gpui::{
-    div, prelude::FluentBuilder as _, px, App, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window,
+    div, prelude::FluentBuilder as _, px, AnimationExt as _, AnyElement, App, ElementId, InteractiveElement,
+    IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window,
 };
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{v_flex, Icon, IconName};
 
+use crate::components::motion;
 use crate::router::{AppRoute, Router};
 use crate::theme::manager::AppThemeExt;
 
@@ -77,50 +78,67 @@ impl NavigationSidebar {
     ) -> impl IntoElement {
         let theme = cx.app_theme();
 
+        // The active pill and its edge indicator ease in when an item becomes
+        // active (id differs from the inactive one, so the animation restarts).
+        let indicator: AnyElement = if is_active {
+            div()
+                .absolute()
+                .left_0()
+                .w(px(3.))
+                .bg(theme.primary)
+                .rounded_r_full()
+                .with_animation(
+                    (ElementId::from("nav-indicator"), label),
+                    motion::enter(motion::BASE_MS),
+                    |el, d| el.h(px(24. * d)).opacity(d),
+                )
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        };
+
+        let button = div()
+            .id(label)
+            .p_3()
+            .rounded_2xl()
+            .cursor_pointer()
+            .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+            .on_click(move |_, _, cx| {
+                if cx.has_global::<Router>() {
+                    Router::global_mut(cx).navigate(route.clone());
+                    cx.refresh_windows();
+                }
+            })
+            .when(!is_active, |s| {
+                s.text_color(theme.muted_foreground)
+                    .hover(|h| h.bg(theme.muted.opacity(0.8)).text_color(theme.foreground))
+            })
+            .child(Icon::new(icon));
+
+        let button: AnyElement = if is_active {
+            let (bg, from_fg, to_fg) = (theme.primary, theme.muted_foreground, theme.primary_foreground);
+            button
+                .hover(|h| h.bg(theme.primary.opacity(0.85)))
+                .with_animation(
+                    (ElementId::from("nav-active"), label),
+                    motion::enter(motion::BASE_MS),
+                    move |el, d| {
+                        el.bg(motion::lerp_color(bg.opacity(0.), bg, d))
+                            .text_color(motion::lerp_color(from_fg, to_fg, d))
+                    },
+                )
+                .into_any_element()
+        } else {
+            button.into_any_element()
+        };
+
         div()
             .relative()
             .flex()
             .items_center()
             .justify_center()
             .w_full()
-            .child(
-                // Active indicator bar on left edge
-                div()
-                    .when(is_active, |this| {
-                        this.absolute()
-                            .left_0()
-                            .w(px(3.))
-                            .h(px(24.))
-                            .bg(theme.primary)
-                            .rounded_r_full()
-                    }),
-            )
-            .child(
-                // Button icon container
-                div()
-                    .id(label)
-                    .p_3()
-                    .rounded_2xl()
-                    .cursor_pointer()
-                    .tooltip(move |window, cx| {
-                        Tooltip::new(label).build(window, cx)
-                    })
-                    .on_click(move |_, _, cx| {
-                        if cx.has_global::<Router>() {
-                            Router::global_mut(cx).navigate(route.clone());
-                            cx.refresh_windows();
-                        }
-                    })
-                    .when(is_active, |s| {
-                        s.bg(theme.primary)
-                            .text_color(theme.primary_foreground)
-                            .hover(|h| h.bg(theme.primary.opacity(0.85)))
-                    })
-                    .when(!is_active, |s| {
-                        s.text_color(theme.muted_foreground)
-                            .hover(|h| h.bg(theme.muted.opacity(0.8)).text_color(theme.foreground))
-                    })
-                    .child(Icon::new(icon)),
-            )
+            .child(indicator)
+            .child(button)
     }
 }

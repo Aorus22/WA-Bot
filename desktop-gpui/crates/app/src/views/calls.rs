@@ -952,7 +952,13 @@ impl Render for CallsView {
                                             None
                                         })
                                         .child(Self::detail_row("ID", &log.id, muted_text, muted_text)),
-                                ),
+                                )
+                                .with_animation(
+                                    SharedString::from(format!("call-detail-{}", log.id)),
+                                    crate::components::motion::enter(200),
+                                    |el, d| el.opacity(d),
+                                )
+                                .into_any_element(),
                         )
                     } else {
                         // Empty State Graphic
@@ -991,7 +997,8 @@ impl Render for CallsView {
                                         .text_sm()
                                         .text_color(muted_text)
                                         .child("Select a call from history to view details."),
-                                ),
+                                )
+                                .into_any_element(),
                         )
                     }),
             )

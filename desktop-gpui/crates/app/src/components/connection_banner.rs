@@ -1,9 +1,12 @@
 //! Realtime connection status indicator and reconnection banner.
 
 use gpui::{
-    div, px, App, Global, IntoElement, ParentElement, RenderOnce, Styled, Window,
+    div, px, AnimationExt as _, AnyElement, App, Global, IntoElement, ParentElement, RenderOnce,
+    Styled, Window,
 };
 use gpui_component::{h_flex, Icon, IconName};
+
+use crate::components::motion;
 
 use crate::theme::manager::AppThemeExt;
 
@@ -61,9 +64,9 @@ impl RenderOnce for ConnectionBanner {
 
         let theme = cx.app_theme();
 
-        match status {
-            ConnectionStatus::Connected => div().into_any_element(),
-            ConnectionStatus::Connecting => {
+        let (key, banner): (&'static str, AnyElement) = match status {
+            ConnectionStatus::Connected => return div().into_any_element(),
+            ConnectionStatus::Connecting => ("connecting", {
                 h_flex()
                     .w_full()
                     .h(px(36.))
@@ -76,11 +79,11 @@ impl RenderOnce for ConnectionBanner {
                     .text_xs()
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(theme.accent_foreground)
-                    .child(Icon::new(IconName::LoaderCircle))
+                    .child(motion::spinning(Icon::new(IconName::LoaderCircle)))
                     .child("Connecting to WhatsApp backend...")
                     .into_any_element()
-            }
-            ConnectionStatus::Reconnecting(attempt) => {
+            }),
+            ConnectionStatus::Reconnecting(attempt) => ("reconnecting", {
                 h_flex()
                     .w_full()
                     .h(px(36.))
@@ -93,11 +96,11 @@ impl RenderOnce for ConnectionBanner {
                     .text_xs()
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(theme.accent_foreground)
-                    .child(Icon::new(IconName::RotateCw))
+                    .child(motion::spinning(Icon::new(IconName::RotateCw)))
                     .child(format!("Connection lost. Attempting to reconnect (attempt {})...", attempt))
                     .into_any_element()
-            }
-            ConnectionStatus::Disconnected => {
+            }),
+            ConnectionStatus::Disconnected => ("disconnected", {
                 h_flex()
                     .w_full()
                     .h(px(36.))
@@ -113,7 +116,18 @@ impl RenderOnce for ConnectionBanner {
                     .child(Icon::new(IconName::TriangleAlert))
                     .child("Disconnected from WhatsApp. Please check your backend connection.")
                     .into_any_element()
-            }
-        }
+            }),
+        };
+
+        // Slides open from nothing rather than popping in and shoving the
+        // page down; each status restarts it so a change reads as an update.
+        div()
+            .w_full()
+            .overflow_hidden()
+            .child(banner)
+            .with_animation(key, motion::enter(motion::BASE_MS), |el, d| {
+                el.h(px(36. * d)).opacity(d)
+            })
+            .into_any_element()
     }
 }

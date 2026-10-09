@@ -5,6 +5,7 @@ use gpui::{
 };
 use gpui_component::{v_flex, Icon, IconName};
 
+use crate::components::motion;
 use crate::state::auth::{AuthState, AuthStatus};
 use crate::theme::manager::AppThemeExt;
 use crate::views::auth::login::LoginView;
@@ -51,9 +52,11 @@ impl Render for RootGateView {
                             .justify_center()
                             .gap_3()
                             .child(
-                                Icon::new(IconName::LoaderCircle)
-                                    .size(px(40.))
-                                    .text_color(theme.primary),
+                                motion::spinning(
+                                    Icon::new(IconName::LoaderCircle)
+                                        .size(px(40.))
+                                        .text_color(theme.primary),
+                                ),
                             )
                             .child(
                                 div()
@@ -70,10 +73,16 @@ impl Render for RootGateView {
                     .bg(theme.background)
                     .child(crate::components::titlebar::AppTitleBar::new())
                     .child(
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .child(self.login_view.clone()),
+                        motion::rise_in(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .overflow_hidden()
+                                .child(self.login_view.clone()),
+                            "login-in",
+                            motion::BASE_MS + 80,
+                            14.0,
+                        ),
                     )
                     .into_any_element()
             }

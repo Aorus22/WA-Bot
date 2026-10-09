@@ -852,7 +852,7 @@ impl Render for ChannelsView {
                                                 .items_center()
                                                 .justify_center()
                                                 .gap_2()
-                                                .child(Icon::new(IconName::LoaderCircle).size(px(24.0)))
+                                                .child(crate::components::motion::spinning(Icon::new(IconName::LoaderCircle).size(px(24.0))))
                                                 .child(div().text_xs().text_color(muted_text).child("Loading posts…"))
                                                 .into_any_element()
                                         } else if self.posts.is_empty() {
@@ -1067,7 +1067,13 @@ impl Render for ChannelsView {
                                                 .text_color(muted_text)
                                                 .child("Channels are one-way — you can react to posts but not reply."),
                                         ),
-                                ),
+                                )
+                                .with_animation(
+                                    SharedString::from(format!("channel-detail-{}", channel.jid)),
+                                    crate::components::motion::enter(200),
+                                    |el, d| el.opacity(d),
+                                )
+                                .into_any_element(),
                         )
                     } else {
                         // Empty State Graphic
@@ -1105,7 +1111,8 @@ impl Render for ChannelsView {
                                         .text_sm()
                                         .text_color(muted_text)
                                         .child("Follow channels to see their posts here."),
-                                ),
+                                )
+                                .into_any_element(),
                         )
                     }),
             )
@@ -1115,7 +1122,7 @@ impl Render for ChannelsView {
                 let is_busy = self.is_discovering;
                 let preview = self.discover_preview.clone();
 
-                Some(
+                Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
                         .inset_0()
@@ -1310,14 +1317,15 @@ impl Render for ChannelsView {
                                         ),
                                 ),
                         ),
-                )
+                        "channels-discover-in",
+                    ))
             } else {
                 None
             })
             // --- Unfollow Confirmation Dialog ---
             .children(if self.confirm_unfollow {
                 let channel_name = self.selected_channel.as_ref().map(|c| c.name.clone()).unwrap_or_default();
-                Some(
+                Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
                         .inset_0()
@@ -1380,7 +1388,8 @@ impl Render for ChannelsView {
                                         ),
                                 ),
                         ),
-                )
+                        "channels-unfollow-in",
+                    ))
             } else {
                 None
             })

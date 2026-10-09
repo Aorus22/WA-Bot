@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video, Mic, Square, Trash2, SendHorizontal } from "lucide-react"
+import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video, Mic, Square, Trash2, SendHorizontal, ChevronDown } from "lucide-react"
 import { api, type Chat, type Message } from "@/lib/api"
 import { useCall } from "@/contexts/CallContext"
 import { cn } from "@/lib/utils"
@@ -122,6 +122,7 @@ const formatRecordingTime = (seconds: number) => {
 	const [locationOpen, setLocationOpen] = useState(false)
 	const [contactOpen, setContactOpen] = useState(false)
 	const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null)
+	const [showScrollBottom, setShowScrollBottom] = useState(false)
 	const gifInputRef = useRef<HTMLInputElement>(null)
 	const [headerStatus, setHeaderStatus] = useState("")
 
@@ -205,12 +206,14 @@ const formatRecordingTime = (seconds: number) => {
                 top: scrollHeight - clientHeight,
                 behavior
             })
+            setShowScrollBottom(false)
         }
     }, [])
 
     // Hydrate from store or load messages for the current chat
     useEffect(() => {
         if (!chat) return
+        setShowScrollBottom(false)
         const storeEntry = useChatStore.getState().messagesByChat[chat.id]
         if (storeEntry?.loaded) {
             setTimeout(() => scrollToBottom("auto"), 50)
@@ -358,14 +361,25 @@ const formatRecordingTime = (seconds: number) => {
 
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const target = e.currentTarget
+        const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
         const isNearTop = target.scrollTop < 100
-        const isNearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 100
+        const isNearBottom = distanceFromBottom < 100
+
+        setShowScrollBottom(distanceFromBottom > 150)
 
         if (isNearTop && !loadingMore && hasMore) {
             loadMoreMessages()
         }
         if (isNearBottom && !loadingNewer && hasMoreNext) {
             loadNewerMessages()
+        }
+    }
+
+    const handleScrollToBottom = () => {
+        if (hasMoreNext) {
+            loadMessages()
+        } else {
+            scrollToBottom("smooth")
         }
     }
 
@@ -815,71 +829,85 @@ const handleReplyMessage = (message: Message) => {
                 </div>
             </header>
 
-            <div data-messages-list className="flex-1 overflow-y-auto px-2 md:px-6 pt-3 pb-6 z-10" ref={scrollRef} onScroll={handleScroll}>
-                {loadingMore && (
-                    <div className="flex justify-center py-4">
-                        <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-                    </div>
-                )}
-                {initialLoad && loading ? (
-                    <div className="flex flex-col items-center justify-center py-12 space-y-4 opacity-40">
-                        <div className="w-10 h-10 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-                        <p className="text-sm font-medium tracking-tight">Loading secure conversation...</p>
-                    </div>
-                ) : (
-                    <div className="space-y-10">
-                        {Object.entries(groupedMessages).map(([dateKey, msgs]) => (
-                            <div key={dateKey}>
-                                <div className="flex justify-center sticky top-0 z-20 pointer-events-none py-2">
-                                    <span className="text-[10px] font-bold text-muted-foreground/80 bg-background/60 backdrop-blur-md px-3 py-1 rounded-full border border-border/40 uppercase tracking-widest shadow-sm">
-                                        {dateKey}
-                                    </span>
-                                </div>
-                                {msgs.map((message, idx) => {
-                                    const isMe = message.from === "me"
-                                    const repliedMsg = messages.find(m => m.id === message.replyToId)
-                                    const nextMsg = msgs[idx + 1]
-                                    const prevMsg = msgs[idx - 1]
-                                    const isLastInSequence = !nextMsg || nextMsg.from !== message.from
-                                    const isFirstInSequence = !prevMsg || prevMsg.from !== message.from
+            <div className="flex-1 relative min-h-0 flex flex-col">
+                <div data-messages-list className="flex-1 overflow-y-auto px-2 md:px-6 pt-3 pb-6 z-10" ref={scrollRef} onScroll={handleScroll}>
+                    {loadingMore && (
+                        <div className="flex justify-center py-4">
+                            <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                        </div>
+                    )}
+                    {initialLoad && loading ? (
+                        <div className="flex flex-col items-center justify-center py-12 space-y-4 opacity-40">
+                            <div className="w-10 h-10 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                            <p className="text-sm font-medium tracking-tight">Loading secure conversation...</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-10">
+                            {Object.entries(groupedMessages).map(([dateKey, msgs]) => (
+                                <div key={dateKey}>
+                                    <div className="flex justify-center sticky top-0 z-20 pointer-events-none py-2">
+                                        <span className="text-[10px] font-bold text-muted-foreground/80 bg-background/60 backdrop-blur-md px-3 py-1 rounded-full border border-border/40 uppercase tracking-widest shadow-sm">
+                                            {dateKey}
+                                        </span>
+                                    </div>
+                                    {msgs.map((message, idx) => {
+                                        const isMe = message.from === "me"
+                                        const repliedMsg = messages.find(m => m.id === message.replyToId)
+                                        const nextMsg = msgs[idx + 1]
+                                        const prevMsg = msgs[idx - 1]
+                                        const isLastInSequence = !nextMsg || nextMsg.from !== message.from
+                                        const isFirstInSequence = !prevMsg || prevMsg.from !== message.from
 
-                                    return (
-                                        <div key={message.id} data-message-item>
-                                            <ChatMessageItem
-                                                message={message}
-                                                isMe={isMe}
-                                                isLastInSequence={isLastInSequence}
-                                                isFirstInSequence={isFirstInSequence}
-                                                chat={chat}
-                                                repliedMsg={repliedMsg}
-                                                onReply={() => handleReplyMessage(message)}
-                                                onEdit={() => handleEditMessage(message)}
-                                                onDelete={() => handleDeleteMessage(message.id)}
-                                                onStickerFavorite={(mediaUrl: string) => handleFavoriteSticker(message.id, mediaUrl || "", false)}
-                                                onImageClick={(url: string, el?: HTMLElement, msgId?: string, isSticker?: boolean) => { setSelectedImageUrl(url || null); setImageSourceRect(el?.getBoundingClientRect() || null); if (isSticker && msgId) lastStickerMsgRef.current = { id: msgId, mediaUrl: url } }}
-                                                onDownload={handleDownload}
-                                                formatTime={formatTime}
-                                                renderFormattedContent={renderFormattedContent}
-                                                getMediaUrl={getMediaUrl}
-                                                getAvatarUrl={getAvatarUrl}
-                                                showFavoriteBtn={showFavoriteBtn}
-                                                setShowFavoriteBtn={setShowFavoriteBtn}
-                                                isHighlighted={highlightedMessageId === message.id}
-                                                onReact={(emoji: string) => handleReact(message, emoji)}
-                                                onForward={() => setForwardingMessage(message)}
-                                                onVote={(options: string[]) => handleVote(message, options)}
-                                            />
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        ))}
-                    </div>
-                )}
-                {loadingNewer && (
-                    <div className="flex justify-center py-4">
-                        <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-                    </div>
+                                        return (
+                                            <div key={message.id} data-message-item>
+                                                <ChatMessageItem
+                                                    message={message}
+                                                    isMe={isMe}
+                                                    isLastInSequence={isLastInSequence}
+                                                    isFirstInSequence={isFirstInSequence}
+                                                    chat={chat}
+                                                    repliedMsg={repliedMsg}
+                                                    onReply={() => handleReplyMessage(message)}
+                                                    onEdit={() => handleEditMessage(message)}
+                                                    onDelete={() => handleDeleteMessage(message.id)}
+                                                    onStickerFavorite={(mediaUrl: string) => handleFavoriteSticker(message.id, mediaUrl || "", false)}
+                                                    onImageClick={(url: string, el?: HTMLElement, msgId?: string, isSticker?: boolean) => { setSelectedImageUrl(url || null); setImageSourceRect(el?.getBoundingClientRect() || null); if (isSticker && msgId) lastStickerMsgRef.current = { id: msgId, mediaUrl: url } }}
+                                                    onDownload={handleDownload}
+                                                    formatTime={formatTime}
+                                                    renderFormattedContent={renderFormattedContent}
+                                                    getMediaUrl={getMediaUrl}
+                                                    getAvatarUrl={getAvatarUrl}
+                                                    showFavoriteBtn={showFavoriteBtn}
+                                                    setShowFavoriteBtn={setShowFavoriteBtn}
+                                                    isHighlighted={highlightedMessageId === message.id}
+                                                    onReact={(emoji: string) => handleReact(message, emoji)}
+                                                    onForward={() => setForwardingMessage(message)}
+                                                    onVote={(options: string[]) => handleVote(message, options)}
+                                                />
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {loadingNewer && (
+                        <div className="flex justify-center py-4">
+                            <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                        </div>
+                    )}
+                </div>
+
+                {showScrollBottom && (
+                    <button
+                        type="button"
+                        onClick={handleScrollToBottom}
+                        title="Scroll ke paling baru"
+                        aria-label="Scroll to newest messages"
+                        className="absolute right-5 bottom-4 z-20 w-10 h-10 rounded-full bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground shadow-md hover:shadow-lg border border-border/60 flex items-center justify-center transition-all duration-200 active:scale-95 cursor-pointer backdrop-blur-sm animate-in fade-in zoom-in-75"
+                    >
+                        <ChevronDown className="h-5 w-5" />
+                    </button>
                 )}
             </div>
 

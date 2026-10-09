@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use gpui::layer_shell::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions};
 use gpui::{
-    div, point, px, size, AnyView, AnyWindowHandle, App, AppContext, Bounds, Context, Global,
+    div, point, AnimationExt as _, px, size, AnyView, AnyWindowHandle, App, AppContext, Bounds, Context, Global,
     InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement,
     Render, Styled, Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
@@ -422,7 +422,17 @@ pub struct PopoverFrame {
 impl Render for PopoverFrame {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
+        // The card is a fresh window on every toggle, so this plays on each
+        // open: it fades in while sliding out from the panel edge it hangs
+        // from (the layer surface clips the part still "behind" the panel).
+        let (dx, dy) = match Edge::from_env() {
+            Edge::Top => (0.0, -1.0),
+            Edge::Bottom => (0.0, 1.0),
+            Edge::Left => (-1.0, 0.0),
+            Edge::Right => (1.0, 0.0),
+        };
         div()
+            .relative()
             .size_full()
             .rounded(px(CARD_RADIUS))
             .bg(theme.background)
@@ -431,5 +441,13 @@ impl Render for PopoverFrame {
             .p(px(5.0))
             .overflow_hidden()
             .child(self.child.clone())
+            .with_animation(
+                "popover-in",
+                crate::components::motion::enter(crate::components::motion::BASE_MS),
+                move |el, d| {
+                    let travel = 14.0 * (1.0 - d);
+                    el.opacity(d).left(px(dx * travel)).top(px(dy * travel))
+                },
+            )
     }
 }
