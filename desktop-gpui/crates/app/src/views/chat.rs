@@ -31,17 +31,33 @@ use crate::state::chat::ChatStore;
 use crate::theme::manager::{ActiveTokens, AppThemeExt};
 use crate::TOKIO_RT;
 
-/// Natural pixel size of the image at `url`, once gpui has loaded it. Uses the
-/// same asset cache as the `img` element, so this adds no second download.
-fn preview_natural_size(url: &str, window: &mut Window, cx: &mut App) -> Option<(f32, f32)> {
+/// Load state of the viewer image.
+#[derive(Clone, Copy, PartialEq)]
+enum PreviewLoad {
+    /// Still downloading / decoding.
+    Loading,
+    /// Ready, with its natural pixel size.
+    Ready(f32, f32),
+    Failed,
+}
+
+/// Load state (and natural size) of the image at `url`. Uses the same asset
+/// cache as the `img` element, so this adds no second download; gpui re-renders
+/// the view when the load finishes.
+fn preview_load_state(url: &str, window: &mut Window, cx: &mut App) -> PreviewLoad {
     let resource = if url.starts_with("http://") || url.starts_with("https://") {
         Resource::Uri(SharedUri::from(url.to_string()))
     } else {
         Resource::Path(std::path::Path::new(url).into())
     };
-    let data = window.use_asset::<ImageAssetLoader>(&resource, cx)?.ok()?;
-    let size = data.size(0);
-    Some((size.width.0 as f32, size.height.0 as f32))
+    match window.use_asset::<ImageAssetLoader>(&resource, cx) {
+        None => PreviewLoad::Loading,
+        Some(Err(_)) => PreviewLoad::Failed,
+        Some(Ok(data)) => {
+            let size = data.size(0);
+            PreviewLoad::Ready(size.width.0 as f32, size.height.0 as f32)
+        }
+    }
 }
 
 /// One row of a context menu: icon + label, hover highlight. The caller adds
@@ -7058,9 +7074,9 @@ impl Render for ChatView {
                 // Natural size of the picture (from gpui's asset cache, the same one
                 // the img element uses). Fit = scale so it fits the area, never
                 // upscaled past 100%; zoom multiplies that.
-                let natural = preview_natural_size(&url, window, cx);
-                let (box_w, box_h) = match natural {
-                    Some((nw, nh)) if nw > 0.0 && nh > 0.0 => {
+                let load = preview_load_state(&url, window, cx);
+                let (box_w, box_h) = match load {
+                    PreviewLoad::Ready(nw, nh) if nw > 0.0 && nh > 0.0 => {
                         let fit = (area_w / nw).min(area_h / nh).min(1.0);
                         (nw * fit * zoom, nh * fit * zoom)
                     }
@@ -7242,7 +7258,7 @@ impl Render for ChatView {
                         .absolute()
                         .size_full()
                     })
-                    .child(
+                    .children(if matches!(load, PreviewLoad::Ready(..)) { Some(
                         // The image box is the fit area times the zoom; `Contain`
                         // scales the picture to the box, so zoom 1 is fit-to-window.
                         div()
@@ -7285,7 +7301,37 @@ impl Render for ChatView {
                                     .h(px(box_h))
                                     .object_fit(ObjectFit::Contain),
                             ),
-                    )
+                    ) } else { None })
+                    // Shown immediately on open: a spinner while the image downloads,
+                    // or the failure, so the viewer never looks frozen.
+                    .children(match load {
+                        PreviewLoad::Ready(..) => None,
+                        PreviewLoad::Loading | PreviewLoad::Failed => Some(
+                            v_flex()
+                                .id("preview-status")
+                                .absolute()
+                                .left(px(ox - 100.0))
+                                .top(px(oy - 44.0))
+                                .w(px(200.0))
+                                .items_center()
+                                .gap_3()
+                                .children(if load == PreviewLoad::Loading {
+                                    Some(Spinner::new().color(icon))
+                                } else {
+                                    None
+                                })
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(icon.opacity(0.85))
+                                        .child(if load == PreviewLoad::Loading {
+                                            "Loading image…"
+                                        } else {
+                                            "Couldn't load this image"
+                                        }),
+                                ),
+                        ),
+                    })
                     .child(toolbar);
 
                 // Prev / next among the chat's images.
