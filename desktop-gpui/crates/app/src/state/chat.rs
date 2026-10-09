@@ -232,6 +232,11 @@ impl ChatStore {
 
     pub fn handle_ws_event(&mut self, event: &WsEvent) -> bool {
         match event {
+            // Another account may link next: drop everything cached from this one.
+            WsEvent::LoggedOut => {
+                *self = Self::default();
+                true
+            }
             WsEvent::MessageStatus { chat_id, id, status } => {
                 if let Some(cid) = chat_id {
                     self.patch_message(cid, id, |m| m.status = status.clone());

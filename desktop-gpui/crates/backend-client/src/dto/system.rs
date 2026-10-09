@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct StatusResponse {
     pub is_logged_in: bool,
+    /// Phone number of the linked account (empty/absent when not logged in).
+    #[serde(default)]
+    pub phone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

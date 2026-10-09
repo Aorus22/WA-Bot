@@ -385,6 +385,7 @@ fn main() {
                             Ok(status) => {
                                 if status.is_logged_in {
                                     auth.set_status(AuthStatus::Authenticated);
+                                    auth.phone = status.phone.clone().filter(|p| !p.is_empty());
                                 } else {
                                     auth.set_status(AuthStatus::Unauthenticated);
                                     if let Some(qr) = qr_res {

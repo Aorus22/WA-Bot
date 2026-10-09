@@ -573,6 +573,11 @@ impl Render for SettingsView {
             && ConnectionState::global(cx).status == ConnectionStatus::Connected;
         let is_logged_in = cx.has_global::<AuthState>()
             && AuthState::global(cx).status == AuthStatus::Authenticated;
+        let linked_phone = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).phone.clone()
+        } else {
+            None
+        };
 
         let show_theme_picker = self.show_theme_mode_picker;
         let show_tts_picker = self.show_tts_provider_picker;
@@ -1018,9 +1023,12 @@ impl Render for SettingsView {
                                                                     .text_xs()
                                                                     .text_color(muted_text)
                                                                     .child(if is_logged_in {
-                                                                        "WhatsApp bot session is active"
+                                                                        match linked_phone.as_deref() {
+                                                                            Some(phone) => format!("Linked account: +{phone}"),
+                                                                            None => "WhatsApp bot session is active".to_string(),
+                                                                        }
                                                                     } else {
-                                                                        "No WhatsApp account linked"
+                                                                        "No WhatsApp account linked".to_string()
                                                                     }),
                                                             ),
                                                     ),

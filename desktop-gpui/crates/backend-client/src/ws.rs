@@ -84,7 +84,9 @@ pub enum WsEvent {
         payload: serde_json::Value,
     },
     QrCode(String),
-    AuthSuccess,
+    AuthSuccess { phone: Option<String> },
+    /// The linked account was logged out (here or from the phone); a new QR follows.
+    LoggedOut,
     HistorySync(crate::dto::HistorySyncStatus),
     Raw(WsMessage),
 }
@@ -101,7 +103,15 @@ impl WsMessage {
                     .to_string();
                 WsEvent::QrCode(code)
             }
-            "auth_success" => WsEvent::AuthSuccess,
+            "auth_success" => WsEvent::AuthSuccess {
+                phone: self
+                    .payload
+                    .get("phone")
+                    .and_then(|v| v.as_str())
+                    .filter(|p| !p.is_empty())
+                    .map(String::from),
+            },
+            "logged_out" => WsEvent::LoggedOut,
             "new_message" => {
                 if let Ok(msg) = serde_json::from_value::<Message>(self.payload.clone()) {
                     WsEvent::NewMessage(Box::new(msg))

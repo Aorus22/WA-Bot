@@ -28,6 +28,8 @@ pub struct AuthState {
     pub qr_code: Option<String>,
     pub qr_loading: bool,
     pub qr_error: Option<String>,
+    /// Phone number of the linked WhatsApp account, when known.
+    pub phone: Option<String>,
     pub base_url: String,
 }
 
@@ -39,6 +41,7 @@ impl Default for AuthState {
             qr_code: None,
             qr_loading: false,
             qr_error: None,
+            phone: None,
             base_url: "http://127.0.0.1:3000/api".to_string(),
         }
     }
@@ -86,8 +89,15 @@ impl AuthState {
     /// Process incoming WebSocket event to update auth state.
     pub fn handle_ws_event(&mut self, event: &WsEvent) -> bool {
         match event {
-            WsEvent::AuthSuccess => {
+            WsEvent::AuthSuccess { phone } => {
                 self.set_status(AuthStatus::Authenticated);
+                self.phone = phone.clone();
+                true
+            }
+            WsEvent::LoggedOut => {
+                self.set_status(AuthStatus::Unauthenticated);
+                self.phone = None;
+                self.set_qr_code(None);
                 true
             }
             WsEvent::QrCode(code) => {
@@ -120,7 +130,7 @@ mod tests {
         assert_eq!(state.qr_code.as_deref(), Some("qr-pairing-123"));
 
         // WS AuthSuccess transitions to Authenticated and clears QR
-        let changed = state.handle_ws_event(&WsEvent::AuthSuccess);
+        let changed = state.handle_ws_event(&WsEvent::AuthSuccess { phone: Some("628123".into()) });
         assert!(changed);
         assert_eq!(state.status, AuthStatus::Authenticated);
         assert_eq!(state.qr_code, None);
