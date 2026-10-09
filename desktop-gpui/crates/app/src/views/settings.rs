@@ -26,7 +26,7 @@ use gpui::*;
 use gpui_component::{Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::HistorySyncStatus;
-use wabot_settings::{DesktopSettings, ThemeMode as SettingsThemeMode};
+use wabot_settings::{ChatLayout, DesktopSettings, ThemeMode as SettingsThemeMode};
 
 use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
 use crate::components::toast;
@@ -544,6 +544,7 @@ impl Render for SettingsView {
         let secondary_bg = theme.secondary;
         let tag_bg = theme.muted;
 
+        let layout_pref_now = crate::layout_pref::preference(cx);
         let theme_mgr = ThemeManager::global(cx);
         let active_preset_name = theme_mgr.active_preset.name.clone();
 
@@ -750,6 +751,76 @@ impl Render for SettingsView {
                                             } else {
                                                 None
                                             }),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Row: Chat layout (pages vs sidebar)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .justify_between()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .gap_3()
+                                                    .child(Icon::new(IconName::PanelLeft).text_color(muted_text))
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(text_color)
+                                                                    .child("Chat Layout"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .child("Auto: pages in the popover, sidebar in a window"),
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .gap_1()
+                                                    .p_0p5()
+                                                    .rounded_md()
+                                                    .border_1()
+                                                    .border_color(border_color)
+                                                    .bg(tag_bg)
+                                                    .children([
+                                                        (ChatLayout::Auto, "Auto"),
+                                                        (ChatLayout::Pages, "Detail"),
+                                                        (ChatLayout::Sidebar, "Sidebar"),
+                                                    ].into_iter().map(|(value, label)| {
+                                                        let active = layout_pref_now == value
+                                                            || (value == ChatLayout::Auto && layout_pref_now == ChatLayout::Unknown);
+                                                        div()
+                                                            .id(label)
+                                                            .cursor_pointer()
+                                                            .px_3()
+                                                            .py_1()
+                                                            .rounded_md()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .bg(if active { primary_color } else { rgba(0x00000000).into() })
+                                                            .text_color(if active { theme.primary_foreground } else { text_color })
+                                                            .child(label)
+                                                            .on_mouse_down(MouseButton::Left, cx.listener(move |_this, _, _, cx| {
+                                                                crate::layout_pref::set(cx, value);
+                                                            }))
+                                                    })),
+                                            ),
                                     )
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Row 2: Color Theme Cards Grid

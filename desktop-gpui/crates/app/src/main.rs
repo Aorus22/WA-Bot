@@ -76,6 +76,7 @@ fn main() {
             let theme_manager = ThemeManager::init_from_settings(&settings);
             let is_dark = theme_manager.is_dark();
             cx.set_global(theme_manager);
+            cx.set_global(wabot_app::layout_pref::ChatLayoutPref(settings.chat_layout));
 
             // Stop the bundled backend (if this process started it) on quit.
             cx.on_app_quit(|_| async {

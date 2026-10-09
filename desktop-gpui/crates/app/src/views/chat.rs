@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::ops::Range;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::spinner::Spinner;
@@ -21,6 +22,7 @@ use crate::components::{
 };
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
 use crate::icons::*;
+use crate::layout_pref::{self, LayoutKind};
 use super::viewer_math::{
     clamp_pan, pan_after_zoom, preview_geometry, PREVIEW_MAX_ZOOM, PREVIEW_MIN_ZOOM,
     PREVIEW_TOOLBAR_H,
@@ -358,6 +360,8 @@ pub struct ChatView {
 
     // Conversation sidebar width and its live resize drag (web parity)
     pub sidebar_width: f32,
+    /// Sidebar layout only: the chat list is hidden while a chat is open.
+    pub sidebar_collapsed: bool,
     /// `(pointer x, sidebar width)` captured when the divider drag started.
     pub sidebar_resize_drag: Option<(f32, f32)>,
 
@@ -467,6 +471,7 @@ impl ChatView {
 
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             sidebar_resize_drag: None,
+            sidebar_collapsed: false,
 
             context_menu: None,
             forward_msg: None,
@@ -2357,6 +2362,21 @@ impl ChatView {
             }
         })
         .detach();
+    }
+
+    /// Pages layout: leave the open chat and return to the chat list.
+    pub fn back_to_list(&mut self, cx: &mut Context<Self>) {
+        self.selected_chat_id = None;
+        self.context_menu = None;
+        self.chat_context_menu = None;
+        self.preview_image_url = None;
+        cx.notify();
+    }
+
+    /// Sidebar layout: hide or show the chat list.
+    pub fn toggle_sidebar_collapsed(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        cx.notify();
     }
 
     /// Open the full-screen image viewer, fitted to the window.
@@ -4258,6 +4278,14 @@ impl Render for ChatView {
                 }
             });
 
+        // Layout: pages (list OR conversation) or sidebar (list beside it).
+        let layout = layout_pref::effective(cx);
+        let pages = layout == LayoutKind::Pages;
+        let has_selection = selected_chat.is_some();
+        let show_list = if pages { !has_selection } else { !(self.sidebar_collapsed && has_selection) };
+        let show_right = if pages { has_selection } else { true };
+        let collapsed = self.sidebar_collapsed;
+
         let selected_chat_id = self.selected_chat_id.clone();
         let is_loading_chats = self.is_loading_chats;
         let is_loading_messages = self.is_loading_messages;
@@ -4298,6 +4326,8 @@ impl Render for ChatView {
             .child(
                 v_flex()
                     .w(px(self.sidebar_width))
+                    .when(pages, |el| el.w_full())
+                    .when(!show_list, |el| el.hidden())
                     .h_full()
                     .border_r_1()
                     .border_color(border_color.opacity(0.4))
@@ -4354,6 +4384,22 @@ impl Render for ChatView {
                                         h_flex()
                                             .items_center()
                                             .gap_1()
+                                            // Sidebar layout: collapse the chat list.
+                                            .children((!pages && has_selection).then(|| {
+                                                div()
+                                                    .id("btn-collapse-sidebar")
+                                                    .cursor_pointer()
+                                                    .p_2()
+                                                    .rounded_full()
+                                                    .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                    .tooltip(move |window, cx| {
+                                                        Tooltip::new("Hide chats").build(window, cx)
+                                                    })
+                                                    .child(svg().data(SIDEBAR_SVG).size(px(18.0)).text_color(muted_text))
+                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                        this.toggle_sidebar_collapsed(cx);
+                                                    }))
+                                            }))
                                             // New Group Button
                                             .child(
                                                 div()
@@ -4825,6 +4871,7 @@ impl Render for ChatView {
                     .min_w(px(0.0))
                     .h_full()
                     .overflow_hidden()
+                    .when(!show_right, |el| el.hidden())
                     .bg(theme.chat.map(|c| c.chat_bg).unwrap_or(bg_color))
                     .children(if let Some(ref active_chat) = selected_chat {
                         let chat_name = active_chat.name.clone();
@@ -4843,10 +4890,51 @@ impl Render for ChatView {
                                         .bg(theme.chat.map(|c| c.header).unwrap_or(bg_color))
                                         .items_center()
                                         .justify_between()
+                                        .gap_1()
+                                        // Pages: back to the chat list. Sidebar: collapse / expand it.
+                                        .child(
+                                            div()
+                                                .id("btn-header-nav")
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .flex_shrink_0()
+                                                .w(px(34.0))
+                                                .h(px(34.0))
+                                                .rounded_full()
+                                                .cursor_pointer()
+                                                .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                                .tooltip(move |window, cx| {
+                                                    Tooltip::new(if pages {
+                                                        "Back to chats"
+                                                    } else if collapsed {
+                                                        "Show chats"
+                                                    } else {
+                                                        "Hide chats"
+                                                    })
+                                                    .build(window, cx)
+                                                })
+                                                .child(
+                                                    svg()
+                                                        .data(if pages { CHEVRON_LEFT_SVG } else { SIDEBAR_SVG })
+                                                        .size(px(18.0))
+                                                        .text_color(muted_text),
+                                                )
+                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                    if pages {
+                                                        this.back_to_list(cx);
+                                                    } else {
+                                                        this.toggle_sidebar_collapsed(cx);
+                                                    }
+                                                })),
+                                        )
                                         // Left Profile Area (Clicking opens Info Sheet)
                                         .child(
                                             h_flex()
                                                 .id("chat-header-profile")
+                                                .flex_1()
+                                                .min_w(px(0.0))
+                                                .overflow_hidden()
                                                 .items_center()
                                                 .gap_3()
                                                 .cursor_pointer()
@@ -7030,6 +7118,7 @@ impl Render for ChatView {
             .child(
                 div()
                     .id("sidebar-resize-handle")
+                    .when(pages || !show_list, |el| el.hidden())
                     .absolute()
                     .top_0()
                     .bottom_0()

@@ -12,6 +12,7 @@ pub static TOKIO_RT: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 pub mod backend;
 pub mod components;
 pub mod icons;
+pub mod layout_pref;
 pub mod popover;
 pub mod router;
 pub mod state;

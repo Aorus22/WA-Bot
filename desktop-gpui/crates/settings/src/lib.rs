@@ -41,6 +41,22 @@ pub enum ThemeMode {
     Unknown,
 }
 
+/// How the chat screen is laid out. `Auto` picks per surface: pages in the
+/// panel popover (narrow), sidebar in a normal window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatLayout {
+    #[default]
+    Auto,
+    /// Chat list and conversation are separate pages (with a back button).
+    Pages,
+    /// Chat list beside the conversation (collapsible).
+    Sidebar,
+    /// Forward-compat catch-all; treated as `Auto`.
+    #[serde(other)]
+    Unknown,
+}
+
 /// Window dimensions and layout state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct WindowState {
@@ -79,6 +95,9 @@ pub struct DesktopSettings {
     /// App theme mode; semantics identical to web `wa-bot-theme`.
     #[serde(default)]
     pub theme_mode: ThemeMode,
+    /// Chat screen layout (list + conversation as pages or side by side).
+    #[serde(default)]
+    pub chat_layout: ChatLayout,
     /// Operator override for the backend binary path (dev/testing).
     /// Relative paths are rejected (normalized to `None` on load).
     #[serde(default)]
@@ -98,6 +117,7 @@ impl Default for DesktopSettings {
         Self {
             theme_preset: default_theme_preset(),
             theme_mode: ThemeMode::default(),
+            chat_layout: ChatLayout::default(),
             backend_path_override: None,
             last_backend_url: None,
             window_state: None,
