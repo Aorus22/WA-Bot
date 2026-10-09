@@ -3,7 +3,7 @@
 use gpui::{
     div, px, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
 };
-use gpui_component::{v_flex, Icon, IconName};
+use gpui_component::{v_flex, Icon, IconName, Root};
 
 use crate::components::motion;
 use crate::state::auth::{AuthState, AuthStatus};
@@ -31,7 +31,11 @@ impl RootGateView {
 }
 
 impl Render for RootGateView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Dialogs opened through `window.open_*_dialog` (e.g. the logout
+        // confirmation) only show if some view mounts this layer.
+        let dialog_layer = Root::render_dialog_layer(window, cx);
+
         let theme = cx.app_theme();
         let status = if cx.has_global::<AuthState>() {
             AuthState::global(cx).status
@@ -39,7 +43,7 @@ impl Render for RootGateView {
             AuthStatus::Checking
         };
 
-        match status {
+        let content = match status {
             AuthStatus::Checking => {
                 v_flex()
                     .size_full()
@@ -92,6 +96,12 @@ impl Render for RootGateView {
                     .child(self.shell_view.clone())
                     .into_any_element()
             }
-        }
+        };
+
+        div()
+            .relative()
+            .size_full()
+            .child(content)
+            .children(dialog_layer)
     }
 }
