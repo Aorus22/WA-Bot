@@ -86,7 +86,9 @@ fn default_theme_preset() -> String {
 }
 
 pub const DEFAULT_WINDOW_TRANSPARENCY: u8 = 28;
-pub const MAX_WINDOW_TRANSPARENCY: u8 = 70;
+pub const MAX_WINDOW_TRANSPARENCY: u8 = 100;
+const LEGACY_MAX_WINDOW_TRANSPARENCY: u8 = 70;
+const SETTINGS_SCHEMA_VERSION: u8 = 1;
 
 fn default_window_transparency() -> u8 {
     DEFAULT_WINDOW_TRANSPARENCY
@@ -118,7 +120,10 @@ pub struct DesktopSettings {
     pub last_backend_url: Option<String>,
     #[serde(default)]
     pub window_state: Option<WindowState>,
-    /// How much of the desktop shows through app surfaces, from 0 to 70 percent.
+    /// Schema version used to migrate local UI preferences.
+    #[serde(default)]
+    pub settings_version: u8,
+    /// How much of the desktop shows through app surfaces, from 0 to 100 percent.
     #[serde(default = "default_window_transparency")]
     pub window_transparency: u8,
     /// Whether to request the compositor's default backdrop blur.
@@ -138,6 +143,7 @@ impl Default for DesktopSettings {
             backend_path_override: None,
             last_backend_url: None,
             window_state: None,
+            settings_version: SETTINGS_SCHEMA_VERSION,
             window_transparency: default_window_transparency(),
             window_blur_enabled: default_window_blur_enabled(),
             custom_base: None,
@@ -206,6 +212,14 @@ impl DesktopSettings {
         // Negative/zero window bounds reset to None.
         if let Some(ws) = self.window_state {
             self.window_state = ws.normalized();
+        }
+        if self.settings_version < SETTINGS_SCHEMA_VERSION {
+            // The previous slider stopped at 70%, so a saved maximum means
+            // the user had dragged it to the end of its range.
+            if self.window_transparency == LEGACY_MAX_WINDOW_TRANSPARENCY {
+                self.window_transparency = MAX_WINDOW_TRANSPARENCY;
+            }
+            self.settings_version = SETTINGS_SCHEMA_VERSION;
         }
         self.window_transparency = self.window_transparency.min(MAX_WINDOW_TRANSPARENCY);
         // Relative backend overrides are meaningless across cwd changes.

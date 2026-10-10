@@ -13,7 +13,7 @@ pub const WINDOW_CORNER_RADIUS: f32 = 10.0;
 pub const WINDOW_SHADOW_MARGIN: f32 = 16.0;
 
 /// Apply the shared glass tint to an opaque theme color. Transparency is
-/// expressed as a percentage; the fill retains at least 30% opacity.
+/// expressed as a percentage, where 100 makes the tint fully transparent.
 pub fn glass_fill(color: Hsla, transparency: u8) -> Hsla {
     let transparency = transparency.min(MAX_WINDOW_TRANSPARENCY) as f32 / 100.0;
     color.opacity(1.0 - transparency)
