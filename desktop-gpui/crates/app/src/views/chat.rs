@@ -3002,6 +3002,16 @@ impl ChatView {
 
         let target_chat = chat_id.clone();
         let new_state = !is_archived;
+        let success_message = if new_state {
+            "Chat berhasil diarsipkan"
+        } else {
+            "Chat dikeluarkan dari arsip"
+        };
+        let error_message = if new_state {
+            "Gagal mengarsipkan chat"
+        } else {
+            "Gagal mengeluarkan chat dari arsip"
+        };
 
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let view_weak = this;
@@ -3014,10 +3024,21 @@ impl ChatView {
 
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = view_weak.upgrade() {
-                        view.update(cx, |_this, cx| {
-                            if let Ok(Ok(cs)) = res {
-                                if cx.has_global::<ChatStore>() {
-                                    ChatStore::global_mut(cx).patch_chat_state(&cs);
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(state)) => {
+                                    if cx.has_global::<ChatStore>() {
+                                        ChatStore::global_mut(cx).patch_chat_state(&state);
+                                    }
+                                    toast::success(success_message, cx);
+                                }
+                                Ok(Err(error)) => {
+                                    toast::error(format!("{error_message}: {error}"), cx);
+                                    this.load_chats(cx);
+                                }
+                                Err(error) => {
+                                    toast::error(format!("{error_message}: {error}"), cx);
+                                    this.load_chats(cx);
                                 }
                             }
                             cx.notify();
@@ -4693,6 +4714,7 @@ impl Render for ChatView {
             self.cached_filtered_chats = filtered;
             self.last_filter_key = filter_key;
         }
+        let pinned_count = self.cached_filtered_chats.iter().filter(|chat| chat.pinned_at.is_some()).count();
 
         let selected_chat = self
             .selected_chat_id
@@ -4939,8 +4961,8 @@ impl Render for ChatView {
                                     }),
                             ),
                     )
-                    // Archived Button Row (when archived mode is false and archived chats exist)
-                    .children(if !self.archived_mode && self.search_query.is_empty() && archived_count > 0 {
+                    // Archived is always the first row in the conversation list.
+                    .children(if !self.archived_mode && self.search_query.is_empty() {
                         Some(
                             h_flex()
                                 .id("btn-archived-row")
@@ -4976,13 +4998,32 @@ impl Render for ChatView {
                                         .text_color(text_color)
                                         .child("Archived"),
                                 )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(rgb(0x00a884))
-                                        .child(format!("{}", archived_count)),
-                                ),
+                                .children(if archived_count > 0 {
+                                    Some(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(0x00a884))
+                                            .child(format!("{}", archived_count)),
+                                    )
+                                } else {
+                                    None
+                                }),
+                        )
+                    } else {
+                        None
+                    })
+                    .children(if !self.archived_mode && self.search_query.is_empty() && pinned_count > 0 {
+                        Some(
+                            h_flex()
+                                .mx_4()
+                                .mt_2()
+                                .mb_1()
+                                .items_center()
+                                .gap_2()
+                                .child(svg().data(PIN_SVG).size(px(13.0)).text_color(muted_text))
+                                .child(div().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(muted_text).child("Pinned"))
+                                .child(div().text_xs().text_color(muted_text.opacity(0.7)).child(format!("{pinned_count}"))),
                         )
                     } else {
                         None
@@ -6973,7 +7014,11 @@ impl Render for ChatView {
                     .border_1()
                     .border_color(border_color)
                     .shadow_xl()
-                    .on_mouse_down(MouseButton::Left, |_, _, _| {});
+                    .occlude()
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                        this.context_menu = None;
+                        cx.notify();
+                    }));
 
                 // Quick reactions. Each emoji gets a fixed square hit area so the
                 // row can never overflow the menu.
@@ -7095,25 +7140,24 @@ impl Render for ChatView {
                 }
 
                 Some(
-                    div()
-                        .id("context-menu-backdrop")
-                        .absolute()
-                        .inset_0()
-                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                            this.context_menu = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            anchored()
-                                .position(menu_pos)
-                                .snap_to_window_with_margin(px(8.0))
-                                .child(menu.with_animation(
-                                    "message-context-menu-in",
-                                    Animation::new(std::time::Duration::from_millis(140))
-                                        .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
-                                    move |el, delta| el.opacity(delta),
-                                )),
-                        ),
+                    deferred(anchored().child(
+                        div()
+                            .id("context-menu-backdrop")
+                            .w(window.bounds().size.width)
+                            .h(window.bounds().size.height)
+                            .child(
+                                gpui_base::Positioner::corner(Anchor::TopLeft, menu_pos)
+                                    .margin(px(8.0))
+                                    .occlude()
+                                    .child(menu.with_animation(
+                                        "message-context-menu-in",
+                                        Animation::new(std::time::Duration::from_millis(140))
+                                            .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
+                                        move |el, delta| el.opacity(delta),
+                                    )),
+                            ),
+                    ))
+                    .with_priority(gpui_base::POPUP_PRIORITY),
                 )
             } else {
                 None
@@ -7143,7 +7187,11 @@ impl Render for ChatView {
                     .border_1()
                     .border_color(border_color)
                     .shadow_xl()
-                    .on_mouse_down(MouseButton::Left, |_, _, _| {});
+                    .occlude()
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                        this.chat_context_menu = None;
+                        cx.notify();
+                    }));
 
                 // Mark as read (only while there is something unread)
                 if unread > 0 {
@@ -7281,29 +7329,24 @@ impl Render for ChatView {
                 }
 
                 Some(
-                    div()
-                        .id("chat-context-menu-backdrop")
-                        .absolute()
-                        .inset_0()
-                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                            this.chat_context_menu = None;
-                            cx.notify();
-                        }))
-                        .on_mouse_down(MouseButton::Right, cx.listener(|this, _, _, cx| {
-                            this.chat_context_menu = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            anchored()
-                                .position(menu_pos)
-                                .snap_to_window_with_margin(px(8.0))
-                                .child(menu.with_animation(
-                                    "chat-context-menu-in",
-                                    Animation::new(std::time::Duration::from_millis(140))
-                                        .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
-                                    move |el, delta| el.opacity(delta),
-                                )),
-                        ),
+                    deferred(anchored().child(
+                        div()
+                            .id("chat-context-menu-backdrop")
+                            .w(window.bounds().size.width)
+                            .h(window.bounds().size.height)
+                            .child(
+                                gpui_base::Positioner::corner(Anchor::TopLeft, menu_pos)
+                                    .margin(px(8.0))
+                                    .occlude()
+                                    .child(menu.with_animation(
+                                        "chat-context-menu-in",
+                                        Animation::new(std::time::Duration::from_millis(140))
+                                            .with_easing(|d| 1.0 - (1.0 - d).powi(5)),
+                                        move |el, delta| el.opacity(delta),
+                                    )),
+                            ),
+                    ))
+                    .with_priority(gpui_base::POPUP_PRIORITY),
                 )
             } else {
                 None

@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waTypes "go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 
@@ -48,6 +50,10 @@ type WhatsAppClient struct {
 	// ResetSession after a logout.
 	handlersMu sync.Mutex
 	handlers   []func(event interface{})
+
+	appStateMutationMu      sync.Mutex
+	appStateRecoveryMu      sync.Mutex
+	appStateRecoveryWaiters map[appstate.WAPatchName][]chan struct{}
 }
 
 func NewWhatsAppClient(dbURL string, logLevel string, dbLog waLog.Logger) (*WhatsAppClient, error) {
@@ -64,13 +70,17 @@ func NewWhatsAppClient(dbURL string, logLevel string, dbLog waLog.Logger) (*What
 	// prevents whatsmeow from dispatching it straight into the visible message
 	// pipeline before the user clicks Sync in Settings.
 	client.ManualHistorySyncDownload = true
+	// App-state recovery must dispatch its snapshot mutations so repository
+	// state (archive, pin, and mute) catches up with the recovered WhatsApp state.
+	client.EmitAppStateEventsOnFullSync = true
 
 	w := &WhatsAppClient{
-		client:    client,
-		logLevel:  logLevel,
-		dbURL:     dbURL,
-		dbLog:     dbLog,
-		container: container,
+		client:                  client,
+		logLevel:                logLevel,
+		dbURL:                   dbURL,
+		dbLog:                   dbLog,
+		container:               container,
+		appStateRecoveryWaiters: make(map[appstate.WAPatchName][]chan struct{}),
 	}
 	// meowcaller wraps the same whatsmeow.Client and MUST be created before
 	// whatsmeow.Connect() so call hooks are attached before the receive loop starts.
@@ -582,15 +592,100 @@ func (w *WhatsAppClient) GetClient() interface{} {
 func (w *WhatsAppClient) CoreClient() *whatsmeow.Client { return w.client }
 
 func (w *WhatsAppClient) SetChatPinned(ctx context.Context, jid waTypes.JID, pinned bool) error {
-	return w.client.SendAppState(ctx, appstate.BuildPin(jid, pinned))
+	return w.sendAppStatePatch(ctx, appstate.BuildPin(jid, pinned))
 }
 
 func (w *WhatsAppClient) SetChatArchived(ctx context.Context, jid waTypes.JID, archived bool, lastMessageTimestamp time.Time, lastMessageKey *waCommon.MessageKey) error {
-	return w.client.SendAppState(ctx, appstate.BuildArchive(jid, archived, lastMessageTimestamp, lastMessageKey))
+	return w.sendAppStatePatch(ctx, appstate.BuildArchive(jid, archived, lastMessageTimestamp, lastMessageKey))
 }
 
 func (w *WhatsAppClient) SetChatMuted(ctx context.Context, jid waTypes.JID, muted bool, duration time.Duration) error {
-	return w.client.SendAppState(ctx, appstate.BuildMute(jid, muted, duration))
+	return w.sendAppStatePatch(ctx, appstate.BuildMute(jid, muted, duration))
+}
+
+// sendAppStatePatch retries once after a normal app-state sync. If that sync
+// cannot reconcile a known LTHash mismatch, it asks the primary device for a
+// recovery snapshot and retries after whatsmeow has applied that snapshot.
+func (w *WhatsAppClient) sendAppStatePatch(ctx context.Context, patch appstate.PatchInfo) error {
+	w.appStateMutationMu.Lock()
+	defer w.appStateMutationMu.Unlock()
+
+	err := w.client.SendAppState(ctx, patch)
+	if err == nil || !errors.Is(err, appstate.ErrMismatchingLTHash) {
+		return err
+	}
+
+	firstErr := err
+	fullSyncErr := w.client.FetchAppState(ctx, patch.Type, true, false)
+	if fullSyncErr == nil {
+		err = w.client.SendAppState(ctx, patch)
+		if err == nil || !errors.Is(err, appstate.ErrMismatchingLTHash) {
+			return err
+		}
+		firstErr = err
+	}
+
+	if err = w.requestAppStateRecovery(ctx, patch.Type); err != nil {
+		if fullSyncErr != nil {
+			return fmt.Errorf("app state %s is out of sync (full sync failed: %v; recovery failed: %w)", patch.Type, fullSyncErr, err)
+		}
+		return fmt.Errorf("app state %s is out of sync after full sync (%v); recovery failed: %w", patch.Type, firstErr, err)
+	}
+
+	if err = w.client.SendAppState(ctx, patch); err != nil {
+		return fmt.Errorf("app state %s recovery completed, but retry failed: %w", patch.Type, err)
+	}
+	return nil
+}
+
+func (w *WhatsAppClient) requestAppStateRecovery(ctx context.Context, name appstate.WAPatchName) error {
+	waiter := make(chan struct{})
+	w.appStateRecoveryMu.Lock()
+	w.appStateRecoveryWaiters[name] = append(w.appStateRecoveryWaiters[name], waiter)
+	w.appStateRecoveryMu.Unlock()
+	defer w.removeAppStateRecoveryWaiter(name, waiter)
+
+	if _, err := w.client.SendPeerMessage(ctx, whatsmeow.BuildAppStateRecoveryRequest(name)); err != nil {
+		return fmt.Errorf("send recovery request: %w", err)
+	}
+
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-waiter:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("timed out waiting for the primary device to recover %s", name)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (w *WhatsAppClient) removeAppStateRecoveryWaiter(name appstate.WAPatchName, waiter chan struct{}) {
+	w.appStateRecoveryMu.Lock()
+	defer w.appStateRecoveryMu.Unlock()
+	waiters := w.appStateRecoveryWaiters[name]
+	for i, current := range waiters {
+		if current == waiter {
+			waiters = append(waiters[:i], waiters[i+1:]...)
+			break
+		}
+	}
+	if len(waiters) == 0 {
+		delete(w.appStateRecoveryWaiters, name)
+	} else {
+		w.appStateRecoveryWaiters[name] = waiters
+	}
+}
+
+func (w *WhatsAppClient) notifyAppStateRecoveryComplete(name appstate.WAPatchName) {
+	w.appStateRecoveryMu.Lock()
+	waiters := w.appStateRecoveryWaiters[name]
+	delete(w.appStateRecoveryWaiters, name)
+	w.appStateRecoveryMu.Unlock()
+	for _, waiter := range waiters {
+		close(waiter)
+	}
 }
 
 // GetCallClient returns the meowcaller.Client wrapping the same whatsmeow.Client.
@@ -600,10 +695,16 @@ func (w *WhatsAppClient) GetCallClient() *meowcaller.Client {
 }
 
 func (w *WhatsAppClient) AddEventHandler(handler func(event interface{})) {
+	wrapped := func(event interface{}) {
+		if complete, ok := event.(*events.AppStateSyncComplete); ok && complete.Recovery {
+			w.notifyAppStateRecoveryComplete(complete.Name)
+		}
+		handler(event)
+	}
 	w.handlersMu.Lock()
-	w.handlers = append(w.handlers, handler)
+	w.handlers = append(w.handlers, wrapped)
 	w.handlersMu.Unlock()
-	w.client.AddEventHandler(handler)
+	w.client.AddEventHandler(wrapped)
 }
 
 // Phone returns the phone number (JID user part) of the paired account, or ""
@@ -626,6 +727,7 @@ func (w *WhatsAppClient) ResetSession() {
 	}
 	client := whatsmeow.NewClient(w.container.NewDevice(), waLog.Stdout("Client", w.logLevel, true))
 	client.ManualHistorySyncDownload = true
+	client.EmitAppStateEventsOnFullSync = true
 	w.callClient = meowcaller.NewClient(client)
 	w.client = client
 

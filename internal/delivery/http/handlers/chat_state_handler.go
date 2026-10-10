@@ -34,7 +34,7 @@ func (ch *ChatHandler) PinChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	if err := ch.handler.client.SetChatPinned(ctx, jid, body.Pinned); err != nil {
 		ch.handler.sendError(w, http.StatusBadGateway, err.Error())
@@ -75,7 +75,9 @@ func (ch *ChatHandler) ArchiveChat(w http.ResponseWriter, r *http.Request) {
 			key.Participant = proto.String(anchor.SenderID)
 		}
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	// App-state conflicts may require a full sync and a recovery snapshot from
+	// the primary device before this mutation can be retried.
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	if err := ch.handler.client.SetChatArchived(ctx, jid, body.Archived, timestamp, key); err != nil {
 		ch.handler.sendError(w, http.StatusBadGateway, err.Error())
@@ -115,7 +117,7 @@ func (ch *ChatHandler) MuteChat(w http.ResponseWriter, r *http.Request) {
 		ch.handler.sendError(w, http.StatusBadRequest, "mode must be off, 8h, 1w, or forever")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	if err := ch.handler.client.SetChatMuted(ctx, jid, muted, duration); err != nil {
 		ch.handler.sendError(w, http.StatusBadGateway, err.Error())
