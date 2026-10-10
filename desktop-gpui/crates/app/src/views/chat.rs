@@ -36,6 +36,11 @@ use crate::theme::manager::{ActiveTokens, AppThemeExt, ThemeManager};
 use crate::window_material;
 use crate::TOKIO_RT;
 
+const MESSAGE_IMAGE_MIN_WIDTH: f32 = 240.0;
+const MESSAGE_IMAGE_MAX_WIDTH: f32 = 340.0;
+const MESSAGE_IMAGE_MIN_HEIGHT: f32 = 180.0;
+const MESSAGE_IMAGE_MAX_HEIGHT: f32 = 360.0;
+
 fn prepare_mention_text(text: &str, group: Option<&GroupCache>) -> (String, Vec<String>) {
     let Some(group) = group else { return (text.to_string(), Vec::new()) };
     let mut content = text.to_string();
@@ -5558,7 +5563,7 @@ impl Render for ChatView {
                                         } else {
                                             list(
                                                 self.messages_list_state.clone(),
-                                                cx.processor(|this, index: usize, _window, cx| {
+                                                cx.processor(|this, index: usize, window, cx| {
                                                     let theme = *cx.app_theme();
                                                     let primary_color = theme.primary;
                                                     let muted_text = theme.muted_foreground;
@@ -5639,6 +5644,11 @@ impl Render for ChatView {
                                                         let is_document = msg_type == "document"
                                                             || (r_msg.msg.media_url.is_some()
                                                                 && looks_like_document_name(&doc_file_name));
+                                                        let image_has_caption = is_image
+                                                            && !content.is_empty()
+                                                            && content != "[Image]";
+                                                        let show_image_timestamp =
+                                                            is_image && r_msg.msg.media_url.is_some() && !image_has_caption;
 
                                                         let is_dark_bg = theme.background.l < 0.5;
                                                         let (bubble_bg, bubble_text) = if is_sticker {
@@ -5667,10 +5677,19 @@ impl Render for ChatView {
                                                         let is_highlighted = this.highlighted_message_id.as_deref() == Some(&r_msg.msg.id);
                                                         let base_bubble_bg: Hsla = bubble_bg.into();
                                                         let final_bubble_bg = if is_highlighted { theme.primary.opacity(0.35) } else { base_bubble_bg };
-                                                        let mut bubble = v_flex()
-                                                            .max_w(px(520.0))
-                                                            .px_3p5()
-                                                            .py_2()
+                                                        let mut bubble = if is_image {
+                                                            // Media bubbles sit close to the thumbnail; text bubbles keep the
+                                                            // roomier text padding.
+                                                            v_flex()
+                                                                .max_w(px(520.0))
+                                                                .px_1()
+                                                                .py_1()
+                                                        } else {
+                                                            v_flex()
+                                                                .max_w(px(520.0))
+                                                                .px_3p5()
+                                                                .py_2()
+                                                        }
                                                             .rounded_2xl()
                                                             .bg(final_bubble_bg)
                                                             .shadow_sm()
@@ -5739,13 +5758,39 @@ impl Render for ChatView {
                                                                 if let Some(ref m_url) = r_msg.msg.media_url {
                                                                     let full_url = resolve_media_url(m_url, &base_url);
                                                                     let click_url = full_url.clone();
-                                                                    Some(
-                                                                        div()
-                                                                            .mb_1p5()
-                                                                            .max_w(px(340.0))
-                                                                            .max_h(px(360.0))
+                                                                    // WhatsApp gives media a bounded thumbnail frame. Clamp each
+                                                                    // dimension independently, then cover-crop from the center when
+                                                                    // the image's aspect ratio does not match that frame.
+                                                                    let (image_w, image_h) =
+                                                                        match preview_load_state(&full_url, window, cx) {
+                                                                            PreviewLoad::Ready(nw, nh)
+                                                                                if nw > 0.0 && nh > 0.0 =>
+                                                                            {
+                                                                                let scale = (MESSAGE_IMAGE_MAX_WIDTH / nw)
+                                                                                    .min(MESSAGE_IMAGE_MAX_HEIGHT / nh)
+                                                                                    .min(1.0);
+                                                                                (
+                                                                                    (nw * scale).clamp(
+                                                                                        MESSAGE_IMAGE_MIN_WIDTH,
+                                                                                        MESSAGE_IMAGE_MAX_WIDTH,
+                                                                                    ),
+                                                                                    (nh * scale).clamp(
+                                                                                        MESSAGE_IMAGE_MIN_HEIGHT,
+                                                                                        MESSAGE_IMAGE_MAX_HEIGHT,
+                                                                                    ),
+                                                                                )
+                                                                            }
+                                                                            _ => (
+                                                                                MESSAGE_IMAGE_MIN_WIDTH,
+                                                                                MESSAGE_IMAGE_MIN_HEIGHT,
+                                                                            ),
+                                                                        };
+                                                                    let frame = div()
+                                                                            .w(px(image_w))
+                                                                            .h(px(image_h))
                                                                             .rounded_xl()
                                                                             .overflow_hidden()
+                                                                            .relative()
                                                                             .cursor_pointer()
                                                                             .on_mouse_down(MouseButton::Left, cx.listener({
                                                                                 let u = click_url.clone();
@@ -5761,13 +5806,65 @@ impl Render for ChatView {
                                                                                 // frame ever renders.
                                                                                 img(full_url)
                                                                                     .id(format!("msg-image-{}", r_msg.msg.id))
-                                                                                    .max_w(px(340.0))
-                                                                                    .max_h(px(360.0))
+                                                                                    .w(px(image_w))
+                                                                                    .h(px(image_h))
                                                                                     .rounded_xl()
-                                                                                    .object_fit(ObjectFit::Contain)
-                                                                            )
-                                                                            .into_any_element()
-                                                                    )
+                                                                                    .object_fit(ObjectFit::Cover)
+                                                                            );
+                                                                    let frame = if show_image_timestamp {
+                                                                        frame.child(
+                                                                            h_flex()
+                                                                                .absolute()
+                                                                                .right(px(6.0))
+                                                                                .bottom(px(6.0))
+                                                                                .items_center()
+                                                                                .gap_1()
+                                                                                .px_1p5()
+                                                                                .py(px(2.0))
+                                                                                .rounded_lg()
+                                                                                .bg(rgba(0x00000099))
+                                                                                .child(
+                                                                                    div()
+                                                                                        .text_xs()
+                                                                                        .text_color(rgb(0xffffff))
+                                                                                        .child(time_str.clone()),
+                                                                                )
+                                                                                .children(if is_from_me {
+                                                                                    match ticks {
+                                                                                        MessageTicks::Read => Some(
+                                                                                            svg()
+                                                                                                .data(CHECK_CHECK_SVG)
+                                                                                                .size(px(14.0))
+                                                                                                .text_color(rgb(0x53bdeb)),
+                                                                                        ),
+                                                                                        MessageTicks::Delivered => Some(
+                                                                                            svg()
+                                                                                                .data(CHECK_CHECK_SVG)
+                                                                                                .size(px(14.0))
+                                                                                                .text_color(rgb(0xffffff).opacity(0.8)),
+                                                                                        ),
+                                                                                        MessageTicks::Sent => Some(
+                                                                                            svg()
+                                                                                                .data(CHECK_SVG)
+                                                                                                .size(px(14.0))
+                                                                                                .text_color(rgb(0xffffff).opacity(0.8)),
+                                                                                        ),
+                                                                                        MessageTicks::Failed => Some(
+                                                                                            svg()
+                                                                                                .data(X_SVG)
+                                                                                                .size(px(12.0))
+                                                                                                .text_color(rgb(0xef4444)),
+                                                                                        ),
+                                                                                        MessageTicks::None => None,
+                                                                                    }
+                                                                                } else {
+                                                                                    None
+                                                                                }),
+                                                                        )
+                                                                    } else {
+                                                                        frame
+                                                                    };
+                                                                    Some(frame.into_any_element())
                                                                 } else {
                                                                     None
                                                                 }
@@ -5836,7 +5933,7 @@ impl Render for ChatView {
                                                                 }
                                                             })
                                                             // Bottom Right Timestamp & Checkmarks
-                                                            .child(
+                                                            .children((!show_image_timestamp).then(||
                                                                 h_flex()
                                                                     .w_full()
                                                                     .justify_end()
@@ -5879,7 +5976,7 @@ impl Render for ChatView {
                                                                     } else {
                                                                         None
                                                                     }),
-                                                            );
+                                                            ));
 
                                                         // Reaction chips row (like web's ReactionChips):
                                                         // floats above the bubble, tap toggles own reaction.
