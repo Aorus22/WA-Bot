@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -26,6 +27,7 @@ type LuaService interface {
 }
 
 type Handler struct {
+	messageWriteMu sync.Mutex
 	client         *whatsappInfra.WhatsAppClient
 	config         repository.ConfigRepository
 	storage        repository.StorageRepository
@@ -310,6 +312,13 @@ type wsHub interface {
 
 func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 	if h.msgRepo != nil {
+		// Serialize existence checks and inserts so the WhatsApp event echo and
+		// the send request cannot both broadcast the same message ID.
+		h.messageWriteMu.Lock()
+		defer h.messageWriteMu.Unlock()
+		if h.msgRepo.HasMessage(msg.ID) {
+			return
+		}
 		if err := h.msgRepo.SaveMessage(msg); err != nil {
 			fmt.Printf("Failed to save message: %v\n", err)
 			return

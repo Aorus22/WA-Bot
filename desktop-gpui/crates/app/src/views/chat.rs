@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::ops::Range;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
+use gpui_base::SelectableText;
+use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
@@ -336,7 +338,10 @@ pub struct ChatView {
     pub search_focus_handle: FocusHandle,
     pub filter: ChatFilter,
     pub compose_text: String,
-    pub compose_focus_handle: FocusHandle,
+    compose_input: Option<Entity<InputState>>,
+    compose_textarea: Option<Entity<TextareaState>>,
+    _compose_input_subscription: Option<Subscription>,
+    _compose_textarea_subscription: Option<Subscription>,
     pub archived_mode: bool,
     pub selected_chat_id: Option<String>,
     pub reply_to: Option<Message>,
@@ -454,7 +459,10 @@ impl ChatView {
             search_focus_handle: cx.focus_handle(),
             filter: ChatFilter::All,
             compose_text: String::new(),
-            compose_focus_handle: cx.focus_handle(),
+            compose_input: None,
+            compose_textarea: None,
+            _compose_input_subscription: None,
+            _compose_textarea_subscription: None,
             archived_mode: false,
             selected_chat_id: None,
             reply_to: None,
@@ -541,6 +549,90 @@ impl ChatView {
         view
     }
 
+    fn ensure_composer_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.compose_input.is_some() {
+            return;
+        }
+
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Type a message..."));
+        let textarea = cx.new(|cx| TextareaState::new(window, cx).placeholder("Write markdown..."));
+
+        let input_subscription = cx.subscribe(
+            &input,
+            |this, input: Entity<InputState>, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.compose_text = input.read(cx).value().to_string();
+                    cx.notify();
+                }
+            },
+        );
+        let textarea_subscription = cx.subscribe(
+            &textarea,
+            |this, textarea: Entity<TextareaState>, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.compose_text = textarea.read(cx).value().to_string();
+                    cx.notify();
+                }
+            },
+        );
+
+        self.compose_input = Some(input);
+        self.compose_textarea = Some(textarea);
+        self._compose_input_subscription = Some(input_subscription);
+        self._compose_textarea_subscription = Some(textarea_subscription);
+    }
+
+    fn compose_placeholder(&self) -> &'static str {
+        if self.editing_message.is_some() {
+            "Edit message..."
+        } else if self.reply_to.is_some() {
+            "Type reply..."
+        } else if self.is_md_mode {
+            "Write markdown..."
+        } else {
+            "Type a message..."
+        }
+    }
+
+    fn set_compose_text(&mut self, value: impl Into<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let value = value.into();
+        let placeholder = self.compose_placeholder();
+        self.compose_text = value.clone();
+
+        if let Some(input) = self.compose_input.clone() {
+            input.update(cx, |state, cx| {
+                state.set_value(value.clone(), window, cx);
+                state.set_placeholder(placeholder, window, cx);
+            });
+        }
+        if let Some(textarea) = self.compose_textarea.clone() {
+            textarea.update(cx, |state, cx| {
+                state.set_value(value.clone(), window, cx);
+                state.set_placeholder(placeholder, window, cx);
+            });
+        }
+    }
+
+    fn update_compose_placeholder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let placeholder = self.compose_placeholder();
+        if let Some(input) = self.compose_input.clone() {
+            input.update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
+        }
+        if let Some(textarea) = self.compose_textarea.clone() {
+            textarea.update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
+        }
+    }
+
+    fn focus_composer(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_md_mode {
+            if let Some(textarea) = self.compose_textarea.clone() {
+                textarea.update(cx, |state, cx| state.focus(window, cx));
+            }
+        } else if let Some(input) = self.compose_input.clone() {
+            input.update(cx, |state, cx| state.focus(window, cx));
+        }
+    }
+
     /// Fetch all chats from GET /api/chats and populate ChatStore
     pub fn load_chats(&mut self, cx: &mut Context<Self>) {
         if self.is_loading_chats {
@@ -584,6 +676,7 @@ impl ChatView {
         self.selected_chat_id = Some(chat_id.clone());
         self.reply_to = None;
         self.editing_message = None;
+        self.update_compose_placeholder(window, cx);
         self.context_menu = None;
         self.chat_context_menu = None;
         // Switching conversations cuts both drawers immediately — a lingering
@@ -626,7 +719,7 @@ impl ChatView {
         .detach();
 
         self.load_messages(&chat_id, cx);
-        self.compose_focus_handle.focus(window, cx);
+        self.focus_composer(window, cx);
         cx.notify();
     }
 
@@ -708,6 +801,8 @@ impl ChatView {
     /// Rebuild cached render messages without jumping to bottom (preserves scroll position)
     fn rebuild_message_cache_preserve_scroll(&mut self, chat_id: &str, msgs: &[Message]) {
         self.mark_fresh_messages(chat_id, msgs);
+        let old_ids: Vec<String> = self.cached_render_messages.iter().map(|m| m.msg.id.clone()).collect();
+        let new_ids: Vec<String> = msgs.iter().map(|m| m.id.clone()).collect();
         let mut lookup = std::collections::HashMap::new();
         for m in msgs {
             let sender = if m.from == "me" {
@@ -743,13 +838,38 @@ impl ChatView {
 
         let total_items = if self.cached_render_messages.is_empty() { 0 } else { self.cached_render_messages.len() + 1 };
 
-        // Same item count (reaction, edit, status-tick update): remeasure in
-        // place so the scroll position is preserved exactly. `reset` clears
-        // the scroll offset, which snaps the list back to the bottom.
-        if self.messages_list_state.item_count() == total_items {
-            self.messages_list_state.remeasure();
+        let old_items = self.messages_list_state.item_count();
+
+        // Splice only the changed message range. ListState adjusts the anchor
+        // when rows are appended or prepended, so a tail follower stays at the
+        // bottom and someone reading older messages stays at the same row.
+        if old_items == 0 {
+            if total_items > 0 {
+                self.messages_list_state.splice(0..0, total_items);
+            }
+        } else if total_items == 0 {
+            self.messages_list_state.splice(0..old_items, 0);
         } else {
-            self.messages_list_state.reset(total_items);
+            let mut prefix = 0;
+            while prefix < old_ids.len().min(new_ids.len()) && old_ids[prefix] == new_ids[prefix] {
+                prefix += 1;
+            }
+            let mut suffix = 0;
+            while suffix < old_ids.len().saturating_sub(prefix).min(new_ids.len().saturating_sub(prefix))
+                && old_ids[old_ids.len() - 1 - suffix] == new_ids[new_ids.len() - 1 - suffix]
+            {
+                suffix += 1;
+            }
+
+            let old_start = prefix + 1; // row zero is the in-flow date pill
+            let old_end = old_ids.len() - suffix + 1;
+            let new_count = new_ids.len() - prefix - suffix;
+            if old_start != old_end || new_count != 0 {
+                self.messages_list_state.splice(old_start..old_end, new_count);
+            }
+        }
+        if total_items > 0 {
+            self.messages_list_state.remeasure_items(0..total_items);
         }
     }
 
@@ -1535,15 +1655,20 @@ impl ChatView {
     }
 
     /// Append an emoji to the compose box (web's `addEmoji`).
-    pub fn insert_emoji(&mut self, emoji: &str, cx: &mut Context<Self>) {
+    pub fn insert_emoji(&mut self, emoji: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.compose_text.push_str(emoji);
+        let text = self.compose_text.clone();
+        self.set_compose_text(text, window, cx);
         cx.notify();
     }
 
     /// Toggle markdown mode (web's "Markdown (on/off)" item).
-    pub fn toggle_markdown_mode(&mut self, cx: &mut Context<Self>) {
+    pub fn toggle_markdown_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.is_md_mode = !self.is_md_mode;
         self.attach_panel = AttachPanel::None;
+        let text = self.compose_text.clone();
+        self.set_compose_text(text, window, cx);
+        self.focus_composer(window, cx);
         if self.is_md_mode {
             toast::info("Markdown aktif untuk pesan berikutnya", cx);
         } else {
@@ -1811,6 +1936,7 @@ impl ChatView {
             }
         }
 
+        let old_items = self.messages_list_state.item_count();
         self.cached_render_messages.push(RenderMessage {
             msg,
             is_from_me: true,
@@ -1820,7 +1946,7 @@ impl ChatView {
             quoted: None,
         });
         let total_items = self.cached_render_messages.len() + 1;
-        self.messages_list_state.reset(total_items);
+        self.messages_list_state.splice(old_items..old_items, total_items.saturating_sub(old_items));
         self.messages_list_state.scroll_to_end();
         temp_id
     }
@@ -2092,30 +2218,33 @@ impl ChatView {
         self.reply_to = Some(msg);
         self.editing_message = None;
         self.context_menu = None;
-        self.compose_focus_handle.focus(window, cx);
+        self.update_compose_placeholder(window, cx);
+        self.focus_composer(window, cx);
         cx.notify();
     }
 
     /// Cancel active reply
-    pub fn cancel_reply(&mut self, cx: &mut Context<Self>) {
+    pub fn cancel_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reply_to = None;
+        self.update_compose_placeholder(window, cx);
         cx.notify();
     }
 
     /// Start editing an existing outgoing message
     pub fn start_edit(&mut self, msg: Message, window: &mut Window, cx: &mut Context<Self>) {
-        self.compose_text = msg.content.clone();
         self.editing_message = Some(msg);
         self.reply_to = None;
         self.context_menu = None;
-        self.compose_focus_handle.focus(window, cx);
+        let text = self.editing_message.as_ref().map(|m| m.content.clone()).unwrap_or_default();
+        self.set_compose_text(text, window, cx);
+        self.focus_composer(window, cx);
         cx.notify();
     }
 
     /// Cancel active edit
-    pub fn cancel_edit(&mut self, cx: &mut Context<Self>) {
+    pub fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing_message = None;
-        self.compose_text.clear();
+        self.set_compose_text(String::new(), window, cx);
         cx.notify();
     }
 
@@ -2139,9 +2268,16 @@ impl ChatView {
         if cx.has_global::<ChatStore>() {
             ChatStore::global_mut(cx).delete_message(&chat_id, &msg_id);
         }
+        let removed_row = self.cached_render_messages.iter().position(|m| m.msg.id == msg_id).map(|index| index + 1);
+        let old_items = self.messages_list_state.item_count();
         self.cached_render_messages.retain(|m| m.msg.id != msg_id);
         let total_items = if self.cached_render_messages.is_empty() { 0 } else { self.cached_render_messages.len() + 1 };
-        self.messages_list_state.reset(total_items);
+        if total_items == 0 {
+            self.messages_list_state.splice(0..old_items, 0);
+        } else if let Some(row) = removed_row {
+            self.messages_list_state.splice(row..row + 1, 0);
+            self.messages_list_state.remeasure_items(0..total_items);
+        }
         cx.notify();
 
         let cid = chat_id.clone();
@@ -2174,7 +2310,7 @@ impl ChatView {
     }
 
     /// Send current message in compose bar (supports regular send, reply, and edit)
-    pub fn send_current_message(&mut self, cx: &mut Context<Self>) {
+    pub fn send_current_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.compose_text.trim().to_string();
         if text.is_empty() || self.is_sending {
             return;
@@ -2184,7 +2320,7 @@ impl ChatView {
             None => return,
         };
 
-        self.compose_text.clear();
+        self.set_compose_text(String::new(), window, cx);
         self.is_sending = true;
 
         // Markdown mode wraps the outgoing text in the `{{md:…}}` wire format
@@ -2203,6 +2339,7 @@ impl ChatView {
 
         // Case 1: Editing existing message
         if let Some(edit_msg) = self.editing_message.take() {
+            self.update_compose_placeholder(window, cx);
             let edit_id = edit_msg.id.clone();
             let sent_text = wire_text.clone();
             let target_chat = chat_id.clone();
@@ -2250,6 +2387,7 @@ impl ChatView {
 
         // Case 2: Replying to message or Case 3: Regular send
         let reply_to_id = self.reply_to.take().map(|m| m.id);
+        self.update_compose_placeholder(window, cx);
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -2284,6 +2422,7 @@ impl ChatView {
         }
 
         // Optimistically add to cached render messages
+        let old_items = self.messages_list_state.item_count();
         self.cached_render_messages.push(RenderMessage {
             msg: opt_msg.clone(),
             is_from_me: true,
@@ -2293,7 +2432,11 @@ impl ChatView {
             quoted: None,
         });
         let total_items = self.cached_render_messages.len() + 1;
-        self.messages_list_state.reset(total_items);
+        if total_items > old_items {
+            self.messages_list_state.splice(old_items..old_items, total_items - old_items);
+        } else {
+            self.messages_list_state.reset(total_items);
+        }
         self.messages_list_state.scroll_to_end();
 
         let target_chat = chat_id.clone();
@@ -3761,7 +3904,7 @@ impl ChatView {
                         if self.is_md_mode { primary_color } else { muted_text },
                         if self.is_md_mode { primary_color } else { text_color },
                         hover_bg,
-                        cx.listener(|this, _, _, cx| this.toggle_markdown_mode(cx)),
+                        cx.listener(|this, _, window, cx| this.toggle_markdown_mode(window, cx)),
                     ),
                 ];
                 Some(
@@ -3832,8 +3975,8 @@ impl ChatView {
                             .text_size(px(16.0))
                             .hover(move |s| s.bg(hover_bg))
                             .child(em)
-                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                this.insert_emoji(&em_handler, cx);
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
+                                this.insert_emoji(&em_handler, window, cx);
                             }))
                             .into_any_element()
                     })
@@ -4277,6 +4420,7 @@ impl ChatView {
 
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ensure_composer_inputs(window, cx);
         if self.preview_needs_focus && self.preview_image_url.is_some() {
             // Keys (Esc, arrows, +/-) go to the viewer as soon as it opens.
             self.preview_focus.focus(window, cx);
@@ -5434,7 +5578,10 @@ impl Render for ChatView {
                                                                         div()
                                                                             .text_sm()
                                                                             .text_color(bubble_text)
-                                                                            .child(content)
+                                                                            .child(SelectableText::new(
+                                                                                format!("message-body-{}", r_msg.msg.id),
+                                                                                content.clone(),
+                                                                            ))
                                                                     )
                                                                 } else {
                                                                     None
@@ -5802,8 +5949,8 @@ impl Render for ChatView {
                                                             .rounded_full()
                                                             .hover(|s| s.bg(theme.muted.opacity(0.6)))
                                                             .child(svg().data(X_SVG).size(px(14.0)).text_color(muted_text))
-                                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                                this.cancel_reply(cx);
+                                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                                                this.cancel_reply(window, cx);
                                                             })),
                                                     ),
                                             )
@@ -5849,8 +5996,8 @@ impl Render for ChatView {
                                                             .rounded_full()
                                                             .hover(|s| s.bg(theme.muted.opacity(0.6)))
                                                             .child(svg().data(X_SVG).size(px(14.0)).text_color(muted_text))
-                                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                                this.cancel_edit(cx);
+                                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                                                this.cancel_edit(window, cx);
                                                             })),
                                                     ),
                                             )
@@ -5922,71 +6069,53 @@ impl Render for ChatView {
                                                         .items_center()
                                                         .gap_2()
                                                         .cursor_text()
-                                                        .track_focus(&self.compose_focus_handle)
                                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                                            this.compose_focus_handle.focus(window, cx);
+                                                            this.focus_composer(window, cx);
                                                         }))
-                                                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                                            if (ev.keystroke.modifiers.control || ev.keystroke.modifiers.platform)
-                                                                && ev.keystroke.key.as_str().eq_ignore_ascii_case("v")
-                                                            {
-                                                                if let Some(item) = cx.read_from_clipboard() {
-                                                                    if let Some(text) = item.text() {
-                                                                        this.compose_text.push_str(&text);
-                                                                        cx.notify();
-                                                                    }
+                                                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                                                            let key = ev.keystroke.key.as_str();
+                                                            let modifiers = ev.keystroke.modifiers;
+                                                            let send = if this.is_md_mode {
+                                                                key == "enter" && (modifiers.control || modifiers.platform)
+                                                            } else {
+                                                                key == "enter" && !modifiers.shift
+                                                            };
+                                                            if send {
+                                                                cx.stop_propagation();
+                                                                this.send_current_message(window, cx);
+                                                            } else if key == "escape" {
+                                                                if this.reply_to.is_some() {
+                                                                    cx.stop_propagation();
+                                                                    this.cancel_reply(window, cx);
+                                                                } else if this.editing_message.is_some() {
+                                                                    cx.stop_propagation();
+                                                                    this.cancel_edit(window, cx);
                                                                 }
-                                                                return;
-                                                            }
-
-                                                            match ev.keystroke.key.as_str() {
-                                                                "enter" => {
-                                                                    this.send_current_message(cx);
-                                                                }
-                                                                "escape" => {
-                                                                    if this.reply_to.is_some() {
-                                                                        this.cancel_reply(cx);
-                                                                    } else if this.editing_message.is_some() {
-                                                                        this.cancel_edit(cx);
-                                                                    }
-                                                                }
-                                                                "backspace" => {
-                                                                    this.compose_text.pop();
-                                                                    cx.notify();
-                                                                }
-                                                                "space" => {
-                                                                    this.compose_text.push(' ');
-                                                                    cx.notify();
-                                                                }
-                                                                k if k.len() == 1 => {
-                                                                    this.compose_text.push_str(k);
-                                                                    cx.notify();
-                                                                }
-                                                                _ => {}
                                                             }
                                                         }))
-                                                        .child(
-                                                            div()
-                                                                .flex_1()
-                                                                .cursor_text()
+                                                        .child(if self.is_md_mode {
+                                                            let state = self.compose_textarea.as_ref().expect("composer textarea initialized");
+                                                            Textarea::new(state)
+                                                                .appearance(false)
+                                                                .bordered(false)
+                                                                .w_full()
+                                                                .min_h(px(32.0))
+                                                                .max_h(px(150.0))
                                                                 .text_sm()
-                                                                .text_color(if self.compose_text.is_empty() {
-                                                                    muted_text
-                                                                } else {
-                                                                    text_color
-                                                                })
-                                                                .child(if self.compose_text.is_empty() {
-                                                                    if self.editing_message.is_some() {
-                                                                        "Edit message...".to_string()
-                                                                    } else if self.reply_to.is_some() {
-                                                                        "Type reply...".to_string()
-                                                                    } else {
-                                                                        "Type a message...".to_string()
-                                                                    }
-                                                                } else {
-                                                                    self.compose_text.clone()
-                                                                }),
-                                                        )
+                                                                .text_color(text_color)
+                                                                .into_any_element()
+                                                        } else {
+                                                            let state = self.compose_input.as_ref().expect("composer input initialized");
+                                                            Input::new(state)
+                                                                .id("chat-compose-input")
+                                                                .appearance(false)
+                                                                .bordered(false)
+                                                                .focus_bordered(false)
+                                                                .w_full()
+                                                                .text_sm()
+                                                                .text_color(text_color)
+                                                                .into_any_element()
+                                                        })
                                                         // Send Button: Integrated inside input bar on the right
                                                         .child({
                                                             let has_text = !self.compose_text.trim().is_empty();
@@ -6020,8 +6149,8 @@ impl Render for ChatView {
                                                                             muted_text.opacity(0.6)
                                                                         }),
                                                                 )
-                                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                                    this.send_current_message(cx);
+                                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                                                    this.send_current_message(window, cx);
                                                                 }))
                                                         }),
                                                 ),

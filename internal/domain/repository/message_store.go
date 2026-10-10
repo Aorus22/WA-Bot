@@ -578,6 +578,20 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 
 	return tx.Commit()
 }
+
+// HasMessage reports whether a message ID has already been persisted. WhatsApp
+// may echo a message sent from another linked device after the send request has
+// already been logged locally.
+func (s *MessageStore) HasMessage(messageID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var exists bool
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)`, messageID).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
+}
 func (s *MessageStore) GetMessages(chatID string, limit int, before int64, after int64) ([]Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

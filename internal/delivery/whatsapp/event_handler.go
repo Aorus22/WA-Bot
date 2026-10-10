@@ -375,15 +375,22 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 }
 
 func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
-	// Ignore messages from self to prevent duplicate broadcasts (already handled by LogSentMessage)
-	if evt.Info.IsFromMe {
-		fmt.Printf("[DEBUG] Skipping self-message: %s (chat=%s)\n", evt.Info.ID, evt.Info.Chat.String())
+	// Linked-device echoes may follow messages already persisted by the send
+	// handler. Ignore an existing ID, while allowing messages sent directly
+	// from the paired phone to be stored through the normal chat path.
+	if h.msgStore != nil && h.msgStore.HasMessage(evt.Info.ID) {
+		fmt.Printf("[DEBUG] Skipping duplicate message: %s (chat=%s)\n", evt.Info.ID, evt.Info.Chat.String())
 		return
 	}
 
 	// Extract JIDs
 	var senderJID waTypes.JID
-	if evt.Info.IsGroup {
+	if evt.Info.IsFromMe {
+		senderJID = evt.Info.Sender.ToNonAD()
+		if senderJID.IsEmpty() && h.waClient != nil && h.waClient.CoreClient().Store.ID != nil {
+			senderJID = h.waClient.CoreClient().Store.ID.ToNonAD()
+		}
+	} else if evt.Info.IsGroup {
 		senderJID = evt.Info.Sender.ToNonAD()
 		// If sender is LID, try to resolve to PN JID
 		if senderJID.Server == "lid" {
@@ -448,14 +455,14 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	senderName := evt.Info.PushName
 
 	// If push name is missing, try to get from our contact store
-	if senderName == "" && h.msgStore != nil {
+	if senderName == "" && !evt.Info.IsFromMe && h.msgStore != nil {
 		if storedName, err := h.msgStore.GetContactName(senderJID.String()); err == nil && storedName != "" {
 			senderName = storedName
 		}
 	}
 
 	// Update sender info in background
-	if h.msgStore != nil {
+	if h.msgStore != nil && !evt.Info.IsFromMe {
 		go func() {
 			avatar, _ := h.waClient.GetProfilePictureInfo(context.Background(), senderJID.String())
 			h.msgStore.SaveContact(&repository.Contact{
@@ -506,7 +513,17 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	// Determine what name to show in the Sidebar
 	displayChatName := ""
 	if !evt.Info.IsGroup {
-		displayChatName = senderName
+		if evt.Info.IsFromMe {
+			peerJID := evt.Info.Chat.ToNonAD()
+			if h.msgStore != nil {
+				displayChatName, _ = h.msgStore.GetContactName(peerJID.String())
+			}
+			if displayChatName == "" {
+				displayChatName = peerJID.User
+			}
+		} else {
+			displayChatName = senderName
+		}
 		if displayChatName == "" {
 			displayChatName = senderJID.User
 		}
@@ -550,7 +567,7 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	}
 
 	// Dispatch to AI companion (fire-and-forget)
-	if h.aiClient != nil && messageText != "" {
+	if !evt.Info.IsFromMe && h.aiClient != nil && messageText != "" {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
@@ -559,6 +576,9 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	}
 
 	// --- LOGIC BOT (RUN IN BACKGROUND WITH FILTERS) ---
+	if evt.Info.IsFromMe {
+		return
+	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -837,14 +857,22 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 			}
 		}
 
+		from := senderJID.String()
+		to := "me"
+		status := "received"
+		if evt.Info.IsFromMe {
+			from = "me"
+			to = chatID
+			status = "sent"
+		}
 		msg := &repository.Message{
 			ID:          evt.Info.ID,
 			ChatID:      chatID,
-			From:        senderJID.String(),
-			To:          "me",
+			From:        from,
+			To:          to,
 			Content:     content,
 			Timestamp:   evt.Info.Timestamp.UnixMilli(),
-			Status:      "received",
+			Status:      status,
 			Type:        msgType,
 			MediaURL:    mediaURL,
 			IsAutomatic: false,

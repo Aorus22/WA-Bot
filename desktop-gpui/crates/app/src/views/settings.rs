@@ -24,6 +24,7 @@
 use std::collections::HashMap;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
+use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::{h_flex, Icon, IconName};
 use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_component::switch::Switch;
@@ -71,6 +72,7 @@ pub struct SettingsView {
     pub show_theme_mode_picker: bool,
     window_transparency_slider: Entity<SliderState>,
     _window_transparency_subscription: Subscription,
+    settings_scroll_handle: ScrollHandle,
 
     // Backend settings
     pub settings_loaded: bool,
@@ -146,6 +148,7 @@ impl SettingsView {
             show_theme_mode_picker: false,
             window_transparency_slider,
             _window_transparency_subscription: transparency_subscription,
+            settings_scroll_handle: ScrollHandle::new(),
 
             settings_loaded: false,
             is_loading_settings: false,
@@ -632,6 +635,13 @@ impl Render for SettingsView {
         };
 
         div()
+            .id("settings-root")
+            .relative()
+            .size_full()
+            .bg(window_material::glass_fill(theme.background, window_transparency))
+            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
+            .child(
+                div()
             .id("settings-scroll-area")
             .flex()
             .flex_col()
@@ -639,6 +649,7 @@ impl Render for SettingsView {
             .justify_start()
             .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.settings_scroll_handle)
             .bg(window_material::glass_fill(theme.background, window_transparency))
             .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
             .pt(px(40.0))
@@ -1924,6 +1935,17 @@ impl Render for SettingsView {
                                     ),
                             ),
                     ),
+            )
+            )
+            .child(
+                Scrollbar::vertical(&self.settings_scroll_handle)
+                    .mode(ScrollbarMode::Always)
+                    .styles(|s| {
+                        s.track(|t| t.bg(rgba(0x00000000).into()))
+                            .thumb(|th| th.bg(theme.muted_foreground.opacity(0.35)).radius(px(3.0)).width(px(6.0)))
+                            .thumb_hover(|th| th.bg(theme.muted_foreground.opacity(0.65)).radius(px(4.0)).width(px(8.0)))
+                            .thumb_active(|th| th.bg(theme.primary.opacity(0.8)).radius(px(4.0)).width(px(8.0)))
+                    }),
             )
             // ====================================================
             // 7. EDIT MODAL DIALOG

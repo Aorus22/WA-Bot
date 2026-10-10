@@ -7600,6 +7600,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "flume",
+ "gpui-base",
  "gpui-component",
  "gpui-kit-assets",
  "gpui-pre",
