@@ -320,7 +320,7 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
-    pub async fn send_message(&self, target: &str, message: &str) -> Result<IdResult> {
+    pub async fn send_message(&self, target: &str, message: &str, mentions: &[String]) -> Result<IdResult> {
         let resp = self
             .client
             .post(format!("{}/send-message", self.base_url))
@@ -328,6 +328,7 @@ impl HttpClient {
                 "secret": "default-secret",
                 "target": target,
                 "message": message,
+                "mentions": mentions,
             }))
             .send()
             .await?;
@@ -373,6 +374,7 @@ impl HttpClient {
         chat_id: &str,
         id: &str,
         content: &str,
+        mentions: &[String],
     ) -> Result<StatusResult> {
         let resp = self
             .client
@@ -382,7 +384,21 @@ impl HttpClient {
                 urlencoding(chat_id),
                 urlencoding(id)
             ))
-            .json(&json!({ "content": content }))
+            .json(&json!({ "content": content, "mentions": mentions }))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    pub async fn get_message_receipts(&self, chat_id: &str, id: &str) -> Result<Vec<MessageReceipt>> {
+        let resp = self
+            .client
+            .get(format!(
+                "{}/chats/{}/messages/{}/receipts",
+                self.base_url,
+                urlencoding(chat_id),
+                urlencoding(id)
+            ))
             .send()
             .await?;
         Self::handle_response(resp).await

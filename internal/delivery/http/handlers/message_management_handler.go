@@ -99,7 +99,13 @@ func (mh *MessageManagementHandler) ReplyMessage(w http.ResponseWriter, r *http.
 		return
 	}
 
-	err := mh.handler.client.ReplyMessage(r.Context(), chatID, msgID, req.Content)
+	participant := ""
+	if mh.handler.msgRepo != nil {
+		if original, err := mh.handler.msgRepo.GetMessageByID(msgID); err == nil && original.ChatID == chatID {
+			participant = original.From
+		}
+	}
+	err := mh.handler.client.ReplyMessageWithMentions(r.Context(), chatID, msgID, participant, req.Content, req.Mentions)
 	if err != nil {
 		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return

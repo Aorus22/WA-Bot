@@ -5,13 +5,13 @@ use std::ops::Range;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_base::SelectableText;
-use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_component::input::{InputEvent, InputState, Textarea, TextareaState};
+use gpui_component::scroll::{Scrollbar, ScrollbarMode, ScrollableElement};
 use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
-use wabot_backend_client::dto::{CallType, Chat, Message, ReactionEntry};
+use wabot_backend_client::dto::{CallType, Chat, GroupCache, Message, MessageReceipt, ReactionEntry};
 use wabot_backend_client::multipart::SendMediaBuilder;
 
 use crate::components::{
@@ -35,6 +35,41 @@ use crate::state::chat::ChatStore;
 use crate::theme::manager::{ActiveTokens, AppThemeExt, ThemeManager};
 use crate::window_material;
 use crate::TOKIO_RT;
+
+fn prepare_mention_text(text: &str, group: Option<&GroupCache>) -> (String, Vec<String>) {
+    let Some(group) = group else { return (text.to_string(), Vec::new()) };
+    let mut content = text.to_string();
+    let mut mentions = Vec::new();
+    let mut participants = group.participants.clone();
+    participants.sort_by_key(|participant| std::cmp::Reverse(participant.name.as_deref().unwrap_or("").len()));
+    for participant in participants {
+        let label = participant.name.as_deref().filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| participant.jid.split('@').next().unwrap_or(&participant.jid));
+        let token = format!("@{label}");
+        if content.contains(&token) {
+            content = content.replace(&token, &format!("@{}", participant.jid.split('@').next().unwrap_or(&participant.jid)));
+            if !mentions.contains(&participant.jid) {
+                mentions.push(participant.jid);
+            }
+        }
+    }
+    (content, mentions)
+}
+
+fn render_message_mentions(content: &str, message: &Message, group: Option<&GroupCache>) -> String {
+    let Some(group) = group else { return content.to_string() };
+    let Some(extra) = message.extra.as_ref() else { return content.to_string() };
+    let mut rendered = content.to_string();
+    for jid in &extra.mentions {
+        let participant = group.participants.iter().find(|member| member.jid == *jid || member.jid.split('@').next() == jid.split('@').next());
+        if let Some(participant) = participant {
+            let number = jid.split('@').next().unwrap_or(jid);
+            let label = participant.name.as_deref().filter(|name| !name.trim().is_empty()).unwrap_or(number);
+            rendered = rendered.replace(&format!("@{number}"), &format!("@{label}"));
+        }
+    }
+    rendered
+}
 
 /// Load state of the viewer image.
 #[derive(Clone, Copy, PartialEq)]
@@ -346,6 +381,8 @@ pub struct ChatView {
     pub selected_chat_id: Option<String>,
     pub reply_to: Option<Message>,
     pub editing_message: Option<Message>,
+    pub mention_query: Option<String>,
+    pub group_info: Option<GroupCache>,
     pub is_sending: bool,
     pub is_loading_chats: bool,
     pub is_loading_messages: bool,
@@ -395,6 +432,10 @@ pub struct ChatView {
     pub info_docs: Vec<Message>,
     pub info_links: Vec<Message>,
     pub is_loading_info: bool,
+    pub is_loading_info_members: bool,
+    pub viewed_by_message: Option<Message>,
+    pub viewed_by_receipts: Vec<MessageReceipt>,
+    pub is_loading_viewed_by: bool,
 
     // Chat Search Sheet drawer (Right side)
     pub is_search_sheet_open: bool,
@@ -467,6 +508,8 @@ impl ChatView {
             selected_chat_id: None,
             reply_to: None,
             editing_message: None,
+            mention_query: None,
+            group_info: None,
             is_sending: false,
             is_loading_chats: false,
             is_loading_messages: false,
@@ -502,6 +545,10 @@ impl ChatView {
             info_docs: Vec::new(),
             info_links: Vec::new(),
             is_loading_info: false,
+            is_loading_info_members: false,
+            viewed_by_message: None,
+            viewed_by_receipts: Vec::new(),
+            is_loading_viewed_by: false,
 
             is_search_sheet_open: false,
             search_sheet_query: String::new(),
@@ -562,6 +609,7 @@ impl ChatView {
             |this, input: Entity<InputState>, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.compose_text = input.read(cx).value().to_string();
+                    this.refresh_mention_query();
                     cx.notify();
                 }
             },
@@ -571,6 +619,7 @@ impl ChatView {
             |this, textarea: Entity<TextareaState>, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.compose_text = textarea.read(cx).value().to_string();
+                    this.refresh_mention_query();
                     cx.notify();
                 }
             },
@@ -592,6 +641,50 @@ impl ChatView {
         } else {
             "Type a message..."
         }
+    }
+
+    fn refresh_mention_query(&mut self) {
+        if self.editing_message.is_some()
+            || !self.selected_chat_id.as_deref().is_some_and(|id| id.ends_with("@g.us"))
+        {
+            self.mention_query = None;
+            return;
+        }
+        let Some(at) = self.compose_text.rfind('@') else {
+            self.mention_query = None;
+            return;
+        };
+        let prefix = &self.compose_text[..at];
+        if prefix.chars().last().is_some_and(|ch| !ch.is_whitespace()) {
+            self.mention_query = None;
+            return;
+        }
+        let query = &self.compose_text[at + 1..];
+        if query.chars().any(char::is_whitespace) {
+            self.mention_query = None;
+        } else {
+            self.mention_query = Some(query.to_string());
+        }
+    }
+
+    fn insert_group_mention(&mut self, jid: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(member) = self.group_info.as_ref()
+            .and_then(|group| group.participants.iter().find(|participant| participant.jid == jid))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(at) = self.compose_text.rfind('@') else {
+            return;
+        };
+        let label = member.name.filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| member.jid.split('@').next().unwrap_or(&member.jid).to_string());
+        self.compose_text.replace_range(at.., &format!("@{label} "));
+        self.mention_query = None;
+        let value = self.compose_text.clone();
+        self.set_compose_text(value, window, cx);
+        self.focus_composer(window, cx);
+        cx.notify();
     }
 
     fn set_compose_text(&mut self, value: impl Into<String>, window: &mut Window, cx: &mut Context<Self>) {
@@ -624,12 +717,8 @@ impl ChatView {
     }
 
     fn focus_composer(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_md_mode {
-            if let Some(textarea) = self.compose_textarea.clone() {
-                textarea.update(cx, |state, cx| state.focus(window, cx));
-            }
-        } else if let Some(input) = self.compose_input.clone() {
-            input.update(cx, |state, cx| state.focus(window, cx));
+        if let Some(textarea) = self.compose_textarea.clone() {
+            textarea.update(cx, |state, cx| state.focus(window, cx));
         }
     }
 
@@ -645,7 +734,6 @@ impl ChatView {
         } else {
             "http://127.0.0.1:3000/api".to_string()
         };
-
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let view_weak = this;
             let cx_handle = cx.clone();
@@ -674,6 +762,9 @@ impl ChatView {
     /// Select a chat, mark as read, and load its messages
     pub fn select_chat(&mut self, chat_id: String, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_chat_id = Some(chat_id.clone());
+        self.mention_query = None;
+        self.group_info = None;
+        self.info_sheet_tab = InfoSheetTab::Media;
         self.reply_to = None;
         self.editing_message = None;
         self.update_compose_placeholder(window, cx);
@@ -719,6 +810,9 @@ impl ChatView {
         .detach();
 
         self.load_messages(&chat_id, cx);
+        if chat_id.ends_with("@g.us") {
+            self.load_group_info(&chat_id, cx);
+        }
         self.focus_composer(window, cx);
         cx.notify();
     }
@@ -1096,7 +1190,39 @@ impl ChatView {
         self.load_info_media(cx);
         self.load_info_docs(cx);
         self.load_info_links(cx);
+        if let Some(chat_id) = self.selected_chat_id.clone().filter(|id| id.ends_with("@g.us")) {
+            self.load_group_info(&chat_id, cx);
+        }
         cx.notify();
+    }
+
+    fn load_group_info(&mut self, group_id: &str, cx: &mut Context<Self>) {
+        let group_id = group_id.to_string();
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        self.is_loading_info_members = true;
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let result = TOKIO_RT.spawn(async move { client.get_group(&group_id).await }).await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if let Ok(Ok(info)) = result {
+                                this.group_info = Some(info);
+                            }
+                            this.is_loading_info_members = false;
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        }).detach();
     }
 
     /// Load media for active chat info sheet
@@ -1489,6 +1615,53 @@ impl ChatView {
             }
         })
         .detach();
+    }
+
+    fn open_viewed_by(&mut self, message: Message, cx: &mut Context<Self>) {
+        let chat_id = message.chat_id.clone();
+        let message_id = message.id.clone();
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        self.viewed_by_message = Some(message);
+        self.viewed_by_receipts.clear();
+        self.is_loading_viewed_by = true;
+        self.context_menu = None;
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let (group_result, receipts_result) = tokio::join!(
+                    client.get_group(&chat_id),
+                    client.get_message_receipts(&chat_id, &message_id),
+                );
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if let Ok(group) = group_result {
+                                this.group_info = Some(group);
+                            }
+                            if let Ok(receipts) = receipts_result {
+                                this.viewed_by_receipts = receipts;
+                            }
+                            this.is_loading_viewed_by = false;
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        }).detach();
+        cx.notify();
+    }
+
+    fn close_viewed_by(&mut self, cx: &mut Context<Self>) {
+        self.viewed_by_message = None;
+        self.viewed_by_receipts.clear();
+        self.is_loading_viewed_by = false;
+        cx.notify();
     }
 
     /// Format unix epoch timestamp to readable search date (e.g. "10 Sep 2026")
@@ -2386,6 +2559,12 @@ impl ChatView {
         }
 
         // Case 2: Replying to message or Case 3: Regular send
+        let (mention_text, mention_jids) = prepare_mention_text(&text, self.group_info.as_ref());
+        let wire_text = if self.is_md_mode {
+            encode_markdown(&mention_text)
+        } else {
+            mention_text
+        };
         let reply_to_id = self.reply_to.take().map(|m| m.id);
         self.update_compose_placeholder(window, cx);
         let now_ms = std::time::SystemTime::now()
@@ -2409,7 +2588,19 @@ impl ChatView {
             reply_to_id: reply_to_id.clone(),
             forwarded: None,
             reactions: None,
-            extra: None,
+            extra: if mention_jids.is_empty() {
+                None
+            } else {
+                Some(wabot_backend_client::dto::MessageExtra {
+                    poll: None,
+                    location: None,
+                    contact: None,
+                    view_once: None,
+                    gif: None,
+                    link_preview: None,
+                    mentions: mention_jids.clone(),
+                })
+            },
         };
 
         if cx.has_global::<ChatStore>() {
@@ -2443,6 +2634,7 @@ impl ChatView {
         let sent_text = wire_text.clone();
         let opt_id_clone = temp_id.clone();
         let rep_id = reply_to_id.clone();
+        let sent_mentions = mention_jids.clone();
 
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let view_weak = this;
@@ -2456,7 +2648,7 @@ impl ChatView {
                     let rep_id_clone = r_id.clone();
                     TOKIO_RT
                         .spawn(async move {
-                            client.reply_message(&c_target, &rep_id_clone, &s_text).await
+                            client.reply_message(&c_target, &rep_id_clone, &s_text, &sent_mentions).await
                                 .map(|_| wabot_backend_client::dto::IdResult {
                                     status: "success".to_string(),
                                     id: format!("rep-{}", now_ms),
@@ -2465,7 +2657,7 @@ impl ChatView {
                         .await
                 } else {
                     TOKIO_RT
-                        .spawn(async move { client.send_message(&c_target, &s_text).await })
+                        .spawn(async move { client.send_message(&c_target, &s_text, &sent_mentions).await })
                         .await
                 };
 
@@ -4443,6 +4635,9 @@ impl Render for ChatView {
             "http://127.0.0.1:3000/api".to_string()
         };
 
+        let compose_rows = self.compose_text.split('\n').count().clamp(1, 6);
+        let compose_textarea_height = px(compose_rows as f32 * 20.0 + 12.0);
+
         let (chats_version, archived_count) = if cx.has_global::<ChatStore>() {
             let store = ChatStore::global(cx);
             (store.chats_version, store.chats.iter().filter(|c| c.archived).count())
@@ -5120,7 +5315,7 @@ impl Render for ChatView {
                                 .child(
                                     h_flex()
                                         .px_5()
-                                        .py_3()
+                                        .py_1p5()
                                         .border_b_1()
                                         .border_color(border_color.opacity(0.4))
                                         .bg(window_material::glass_fill(
@@ -5178,7 +5373,7 @@ impl Render for ChatView {
                                                 .gap_3()
                                                 .cursor_pointer()
                                                 .px_2()
-                                                .py_1p5()
+                                                .py_0p5()
                                                 .rounded_xl()
                                                 .hover(|s| s.bg(theme.muted.opacity(0.6)))
                                                 .tooltip(move |window, cx| {
@@ -5384,10 +5579,13 @@ impl Render for ChatView {
                                                         });
                                                         let sender_color = avatar_color_for(&sender_jid);
 
-                                                        let content = r_msg.content.clone();
+                                                        let content = render_message_mentions(&r_msg.content, &r_msg.msg, this.group_info.as_ref());
                                                         let time_str = r_msg.time_str.clone();
                                                         let ticks = r_msg.ticks;
-                                                        let quoted = r_msg.quoted.clone();
+                                                        let reply_to_id = r_msg.msg.reply_to_id.clone();
+                                                        let quoted = r_msg.quoted.clone().or_else(|| reply_to_id.as_ref().map(|_| {
+                                                            ("Message".to_string(), "Open original message".to_string())
+                                                        }));
                                                         let msg_clone = r_msg.msg.clone();
 
                                                         let msg_type = r_msg.msg.message_type.as_str();
@@ -5460,6 +5658,7 @@ impl Render for ChatView {
                                                             .children(if let Some((q_sender, q_line)) = quoted {
                                                                 Some(
                                                                     v_flex()
+                                                                        .cursor_pointer()
                                                                         .mb_1()
                                                                         .px_2p5()
                                                                         .py_1p5()
@@ -5468,6 +5667,14 @@ impl Render for ChatView {
                                                                         .border_color(primary_color)
                                                                         .rounded_r_lg()
                                                                         .overflow_hidden()
+                                                                        .on_mouse_down(MouseButton::Left, cx.listener({
+                                                                            let target = reply_to_id.clone();
+                                                                            move |this, _, _, cx| {
+                                                                                if let Some(target) = target.as_deref() {
+                                                                                    this.navigate_to_message(target, cx);
+                                                                                }
+                                                                            }
+                                                                        }))
                                                                         .child(
                                                                             div()
                                                                                 .text_xs()
@@ -6014,6 +6221,70 @@ impl Render for ChatView {
                                             muted_text,
                                             cx,
                                         ))
+                                        .children(self.mention_query.as_ref().and_then(|query| {
+                                            self.group_info.as_ref().map(|group| {
+                                                let needle = query.to_lowercase();
+                                                let members: Vec<(String, String, bool)> = group.participants.iter()
+                                                    .filter_map(|participant| {
+                                                        let name = participant.name.as_deref()
+                                                            .filter(|name| !name.trim().is_empty())
+                                                            .unwrap_or_else(|| participant.jid.split('@').next().unwrap_or(&participant.jid));
+                                                        if !needle.is_empty()
+                                                            && !name.to_lowercase().contains(&needle)
+                                                            && !participant.jid.to_lowercase().contains(&needle)
+                                                        {
+                                                            return None;
+                                                        }
+                                                        Some((participant.jid.clone(), name.to_string(), participant.is_admin))
+                                                    })
+                                                    .take(8)
+                                                    .collect();
+                                                if members.is_empty() {
+                                                    return None;
+                                                }
+                                                Some(
+                                                    v_flex()
+                                                        .mx_3()
+                                                        .mb_2()
+                                                        .max_h(px(240.0))
+                                                        .overflow_y_scrollbar()
+                                                        .p_1()
+                                                        .rounded_xl()
+                                                        .bg(card_bg)
+                                                        .border_1()
+                                                        .border_color(border_color)
+                                                        .shadow_xl()
+                                                        .children(members.into_iter().map(|(jid, name, is_admin)| {
+                                                            h_flex()
+                                                                .id(SharedString::from(format!("mention-{jid}")))
+                                                                .w_full()
+                                                                .cursor_pointer()
+                                                                .items_center()
+                                                                .gap_3()
+                                                                .px_3()
+                                                                .py_2()
+                                                                .rounded_lg()
+                                                                .hover(|style| style.bg(theme.muted.opacity(0.55)))
+                                                                .child(render_avatar(&jid, &name, "", false, 32.0, &base_url, &theme))
+                                                                .child(
+                                                                    v_flex()
+                                                                        .flex_1()
+                                                                        .child(div().text_sm().text_color(text_color).child(name))
+                                                                        .child(div().text_xs().text_color(muted_text).child(jid.clone())),
+                                                                )
+                                                                .children(if is_admin { Some(div().text_xs().text_color(primary_color).child("admin")) } else { None })
+                                                                .on_mouse_down(MouseButton::Left, cx.listener({
+                                                                    let target_jid = jid.clone();
+                                                                    move |this, _, window, cx| {
+                                                                        this.insert_group_mention(&target_jid, window, cx);
+                                                                    }
+                                                                }))
+                                                                .into_any_element()
+                                                        }))
+                                                        .into_any_element(),
+                                                )
+                                            })
+                                        }).flatten())
                                         // Input Row matching Web
                                         .child(
                                             h_flex()
@@ -6093,25 +6364,14 @@ impl Render for ChatView {
                                                                 }
                                                             }
                                                         }))
-                                                        .child(if self.is_md_mode {
+                                                        .child({
                                                             let state = self.compose_textarea.as_ref().expect("composer textarea initialized");
                                                             Textarea::new(state)
                                                                 .appearance(false)
                                                                 .bordered(false)
                                                                 .w_full()
-                                                                .min_h(px(32.0))
+                                                                .h(compose_textarea_height)
                                                                 .max_h(px(150.0))
-                                                                .text_sm()
-                                                                .text_color(text_color)
-                                                                .into_any_element()
-                                                        } else {
-                                                            let state = self.compose_input.as_ref().expect("composer input initialized");
-                                                            Input::new(state)
-                                                                .id("chat-compose-input")
-                                                                .appearance(false)
-                                                                .bordered(false)
-                                                                .focus_bordered(false)
-                                                                .w_full()
                                                                 .text_sm()
                                                                 .text_color(text_color)
                                                                 .into_any_element()
@@ -6350,7 +6610,28 @@ impl Render for ChatView {
                                                     this.info_sheet_tab = InfoSheetTab::Links;
                                                     cx.notify();
                                                 })),
-                                        ),
+                                        )
+                                        .children(if chat.is_group {
+                                            Some(
+                                                div()
+                                                    .cursor_pointer()
+                                                    .px_3()
+                                                    .py_1p5()
+                                                    .rounded_lg()
+                                                    .text_xs()
+                                                    .font_weight(if self.info_sheet_tab == InfoSheetTab::Members { FontWeight::BOLD } else { FontWeight::NORMAL })
+                                                    .bg(if self.info_sheet_tab == InfoSheetTab::Members { theme.primary.opacity(0.18) } else { rgba(0x00000000).into() })
+                                                    .text_color(if self.info_sheet_tab == InfoSheetTab::Members { primary_color } else { muted_text })
+                                                    .child("Members")
+                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                        this.info_sheet_tab = InfoSheetTab::Members;
+                                                        cx.notify();
+                                                    }))
+                                                    .into_any_element(),
+                                            )
+                                        } else {
+                                            None
+                                        }),
                                 )
                                 // Tab Content
                                 .child(
@@ -6598,7 +6879,52 @@ impl Render for ChatView {
                                                     .into_any_element()
                                             }
                                         }
-                                        InfoSheetTab::Members => div().into_any_element(),
+                                        InfoSheetTab::Members => {
+                                            if self.is_loading_info_members {
+                                                v_flex()
+                                                    .py_8()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(Spinner::new().color(primary_color))
+                                                    .child(div().text_sm().text_color(muted_text).child("Loading members…"))
+                                                    .into_any_element()
+                                            } else if let Some(group) = self.group_info.as_ref() {
+                                                v_flex()
+                                                    .gap_1()
+                                                    .child(div().text_xs().text_color(muted_text).child(format!("{} members", group.participants.len())))
+                                                    .children(group.participants.iter().map(|participant| {
+                                                        let name = participant.name.as_deref()
+                                                            .filter(|name| !name.trim().is_empty())
+                                                            .unwrap_or_else(|| participant.jid.split('@').next().unwrap_or(&participant.jid));
+                                                        h_flex()
+                                                            .w_full()
+                                                            .items_center()
+                                                            .gap_3()
+                                                            .px_2()
+                                                            .py_2()
+                                                            .rounded_lg()
+                                                            .child(render_avatar(&participant.jid, name, "", false, 34.0, &base_url, &theme))
+                                                            .child(
+                                                                v_flex()
+                                                                    .flex_1()
+                                                                    .child(div().text_sm().text_color(text_color).child(name.to_string()))
+                                                                    .child(div().text_xs().text_color(muted_text).child(participant.jid.clone())),
+                                                            )
+                                                            .children(if participant.is_admin {
+                                                                Some(div().text_xs().text_color(primary_color).child("admin"))
+                                                            } else {
+                                                                None
+                                                            })
+                                                    }))
+                                                    .into_any_element()
+                                            } else {
+                                                v_flex()
+                                                    .py_8()
+                                                    .items_center()
+                                                    .child(div().text_sm().text_color(muted_text).child("Group members unavailable"))
+                                                    .into_any_element()
+                                            }
+                                        },
                                     }
                                 ),
                         )
@@ -6623,6 +6949,7 @@ impl Render for ChatView {
             .children(if let Some(ref ctx) = self.context_menu {
                 let msg_id = ctx.msg.id.clone();
                 let chat_id = selected_chat_id.clone().unwrap_or_default();
+                let is_group_chat = chat_id.ends_with("@g.us");
                 let is_from_me = ctx.is_from_me;
                 let msg_content = MessageBubbleHelper::decode_content(&ctx.msg.content);
                 let msg_obj = ctx.msg.clone();
@@ -6690,6 +7017,16 @@ impl Render for ChatView {
                             move |this, _, window, cx| this.start_reply(m.clone(), window, cx)
                         })),
                 );
+
+                if is_from_me && is_group_chat {
+                    menu = menu.child(
+                        menu_row("mm-viewed-by", EYE_SVG, "Viewed by", muted_text, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let message = msg_obj.clone();
+                                move |this, _, _, cx| this.open_viewed_by(message.clone(), cx)
+                            })),
+                    );
+                }
 
                 // Forward
                 menu = menu.child(
@@ -7772,6 +8109,93 @@ impl Render for ChatView {
                 Some(
                     crate::components::motion::fade_in(overlay, "image-viewer-in", 180)
                         .into_any_element(),
+                )
+            } else {
+                None
+            })
+            .children(if self.viewed_by_message.is_some() {
+                let receipts = self.viewed_by_receipts.clone();
+                let group = self.group_info.clone();
+                Some(
+                    div()
+                        .id("viewed-by-backdrop")
+                        .absolute()
+                        .inset_0()
+                        .bg(rgba(0x00000099))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.close_viewed_by(cx)))
+                        .child(
+                            v_flex()
+                                .w(px(380.0))
+                                .max_h(px(520.0))
+                                .p_4()
+                                .gap_3()
+                                .rounded_2xl()
+                                .bg(card_bg)
+                                .border_1()
+                                .border_color(border_color)
+                                .shadow_xl()
+                                .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| cx.stop_propagation()))
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .child(div().text_base().font_weight(FontWeight::BOLD).text_color(text_color).child("Viewed by"))
+                                        .child(
+                                            div()
+                                                .cursor_pointer()
+                                                .p_1()
+                                                .rounded_full()
+                                                .hover(|style| style.bg(theme.muted.opacity(0.5)))
+                                                .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.close_viewed_by(cx))),
+                                        ),
+                                )
+                                .child(if self.is_loading_viewed_by {
+                                    v_flex()
+                                        .py_8()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(Spinner::new().color(primary_color))
+                                        .child(div().text_sm().text_color(muted_text).child("Loading receipts…"))
+                                        .into_any_element()
+                                } else if receipts.is_empty() {
+                                    div()
+                                        .py_8()
+                                        .text_sm()
+                                        .text_color(muted_text)
+                                        .child("No read receipts reported yet.")
+                                        .into_any_element()
+                                } else {
+                                    v_flex()
+                                        .max_h(px(400.0))
+                                        .overflow_y_scrollbar()
+                                        .gap_1()
+                                        .children(receipts.into_iter().map(|receipt| {
+                                            let participant = group.as_ref().and_then(|group| group.participants.iter().find(|member| {
+                                                member.jid == receipt.jid || member.jid.split('@').next() == receipt.jid.split('@').next()
+                                            }));
+                                            let name = participant
+                                                .and_then(|member| member.name.as_deref())
+                                                .filter(|name| !name.trim().is_empty())
+                                                .map(str::to_string)
+                                                .unwrap_or_else(|| receipt.jid.split('@').next().unwrap_or(&receipt.jid).to_string());
+                                            h_flex()
+                                                .items_center()
+                                                .justify_between()
+                                                .gap_3()
+                                                .px_2()
+                                                .py_2()
+                                                .rounded_lg()
+                                                .child(div().text_sm().text_color(text_color).child(name))
+                                                .child(div().text_xs().text_color(muted_text).child(Self::format_chat_time(receipt.read_at)))
+                                                .into_any_element()
+                                        }))
+                                        .into_any_element()
+                                }),
+                        ),
                 )
             } else {
                 None

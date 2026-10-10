@@ -3,9 +3,10 @@ package dto
 import "wa-bot/internal/domain/entity"
 
 type SendMessageRequest struct {
-	Secret  string `json:"secret" validate:"required"`
-	Target  string `json:"target" validate:"required"`
-	Message string `json:"message" validate:"required"`
+	Secret   string   `json:"secret" validate:"required"`
+	Target   string   `json:"target" validate:"required"`
+	Message  string   `json:"message" validate:"required"`
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 type SendMediaRequest struct {
@@ -45,7 +46,8 @@ type EditMessageRequest struct {
 }
 
 type ReplyMessageRequest struct {
-	Content string `json:"content" validate:"required"`
+	Content  string   `json:"content" validate:"required"`
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 type ReactMessageRequest struct {

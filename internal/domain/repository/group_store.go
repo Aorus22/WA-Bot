@@ -65,11 +65,21 @@ func (s *MessageStore) SaveGroupCache(g *GroupCache) error {
 	if participants == nil {
 		participants = []GroupParticipantInfo{}
 	}
-	// Best-effort name resolution from contacts.
+	// Best-effort name resolution from contacts and persisted message push names.
 	for i := range participants {
 		if participants[i].Name == "" {
 			var name string
 			_ = s.db.QueryRow("SELECT name FROM contacts WHERE jid = ?", participants[i].JID).Scan(&name)
+			if name == "" {
+				_ = s.db.QueryRow(`
+					SELECT sender_name FROM messages
+					WHERE (sender_id = ?
+					   OR sender_id = COALESCE((SELECT lid FROM lid_mapping WHERE pn_jid = ?), '')
+					   OR sender_id = COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = ?), ''))
+					  AND trim(ifnull(sender_name, '')) <> ''
+					ORDER BY timestamp DESC LIMIT 1
+				`, participants[i].JID, participants[i].JID, participants[i].JID).Scan(&name)
+			}
 			participants[i].Name = name
 		}
 	}

@@ -234,6 +234,10 @@ func (s *HTTPServer) LogSentMessage(msgID, chatID, from, to, content, msgType, m
 	s.handler.LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL, isAutomatic, replyToID)
 }
 
+func (s *HTTPServer) LogSentMessageWithMentions(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string) {
+	s.handler.LogSentMessageWithMentions(msgID, chatID, from, to, content, msgType, mediaURL, isAutomatic, replyToID, mentions)
+}
+
 func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 	s.handler.SaveAndBroadcastMessage(msg)
 }

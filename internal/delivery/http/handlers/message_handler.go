@@ -50,7 +50,7 @@ func (mh *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("[SEND] Sending message to: %s | Content: %s\n", req.Target, req.Message)
 
-	id, err := mh.handler.client.SendMessageWithPreview(context.Background(), req.Target, req.Message, false)
+	id, err := mh.handler.client.SendMessageWithPreviewAndMentions(context.Background(), req.Target, req.Message, false, req.Mentions)
 	if err != nil {
 		fmt.Printf("[ERR] Failed to send WhatsApp message: %v\n", err)
 		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())

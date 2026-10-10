@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef, useCallback, memo, useMemo } from "react"
-import { Input } from "@/components/ui/input"
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from "react"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video, Mic, Square, Trash2, SendHorizontal, ChevronDown } from "lucide-react"
-import { api, type Chat, type Message } from "@/lib/api"
+import { api, type Chat, type GroupCache, type GroupParticipantInfo, type Message, type MessageReceipt } from "@/lib/api"
 import { useCall } from "@/contexts/CallContext"
 import { cn } from "@/lib/utils"
 import { renderFormattedContent, encodeMarkdown } from "./renderMd"
@@ -20,6 +19,7 @@ import { PollDialog, LocationDialog, ContactDialog, ForwardDialog } from "./Chat
 import { useChatStore } from "@/stores/chatStore"
 import { subscribeWS } from "@/lib/ws-bus"
 import { MapPin, User, BarChart3, ImagePlay } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 interface ChatAreaProps {
     chat: Chat | null
@@ -96,6 +96,34 @@ const formatRecordingTime = (seconds: number) => {
     return `${m}:${s.toString().padStart(2, "0")}`
 }
 
+const participantLabel = (participant: GroupParticipantInfo) => participant.name?.trim() || participant.jid.split("@")[0]
+
+const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
+    let content = text
+    const mentions: string[] = []
+    const candidates = [...members].sort((a, b) => participantLabel(b).length - participantLabel(a).length)
+    for (const member of candidates) {
+        const label = `@${participantLabel(member)}`
+        let offset = 0
+        let replaced = false
+        while ((offset = content.indexOf(label, offset)) !== -1) {
+            const after = content[offset + label.length]
+            const before = content[offset - 1]
+            const boundaryBefore = offset === 0 || /\s/.test(before)
+            const boundaryAfter = after == null || /[\s.,!?;:)]/.test(after)
+            if (boundaryBefore && boundaryAfter) {
+                content = `${content.slice(0, offset)}@${member.jid.split("@")[0]}${content.slice(offset + label.length)}`
+                offset += member.jid.split("@")[0].length + 1
+                replaced = true
+            } else {
+                offset += label.length
+            }
+        }
+        if (replaced && !mentions.includes(member.jid)) mentions.push(member.jid)
+    }
+    return { content, mentions }
+}
+
     export const ChatArea = memo(({
  
     chat, 
@@ -112,6 +140,11 @@ const formatRecordingTime = (seconds: number) => {
     const loadingNewer = entry?.loadingNewer ?? false
     const initialLoad = !(entry?.loaded ?? false)
     const [inputMessage, setInputMessage] = useState("")
+    const [groupInfo, setGroupInfo] = useState<GroupCache | null>(null)
+    const [mentionTrigger, setMentionTrigger] = useState<{ start: number; end: number; query: string } | null>(null)
+    const [viewedByMessage, setViewedByMessage] = useState<Message | null>(null)
+    const [viewedByReceipts, setViewedByReceipts] = useState<MessageReceipt[]>([])
+    const [loadingViewedBy, setLoadingViewedBy] = useState(false)
     const [sending, setSending] = useState(false)
     const [showFavoriteBtn, setShowFavoriteBtn] = useState<string | null>(null)
     const [replyTo, setReplyTo] = useState<Message | null>(null)
@@ -173,6 +206,19 @@ const formatRecordingTime = (seconds: number) => {
 			if (clearTimer) clearTimeout(clearTimer)
 		}
 	}, [chat?.id])
+
+    useEffect(() => {
+        let active = true
+        setGroupInfo(null)
+        setMentionTrigger(null)
+        if (chat?.isGroup) {
+            api.getGroup(chat.id).then(info => {
+                if (active) setGroupInfo(info)
+            }).catch(error => console.warn("Failed to load group members:", error))
+        }
+        return () => { active = false }
+    }, [chat?.id, chat?.isGroup])
+
 	const [emojiOpen, setEmojiOpen] = useState(false)
 	const [stickerOpen, setStickerOpen] = useState(false)
     const [isMediaSheetOpen, setIsMediaSheetOpen] = useState(false)
@@ -197,7 +243,17 @@ const formatRecordingTime = (seconds: number) => {
     const mediaInputRef = useRef<HTMLInputElement>(null)
     const documentInputRef = useRef<HTMLInputElement>(null)
     const audioInputRef = useRef<HTMLInputElement>(null)
-    const inputRef = useRef<HTMLInputElement>(null)
+    const inputRef = useRef<HTMLTextAreaElement>(null)
+
+    useLayoutEffect(() => {
+        const textarea = inputRef.current
+        if (!textarea) return
+        const maxHeight = 150
+        textarea.style.height = "auto"
+        const contentHeight = textarea.scrollHeight
+        textarea.style.height = `${Math.min(contentHeight, maxHeight)}px`
+        textarea.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden"
+    }, [inputMessage])
 
     const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
         if (scrollRef.current) {
@@ -261,6 +317,50 @@ const formatRecordingTime = (seconds: number) => {
             inputRef.current?.focus()
         }
     }, [replyTo, editingMessage])
+
+    const updateMentionTrigger = (value: string, caret: number) => {
+        if (!chat?.isGroup || editingMessage) {
+            setMentionTrigger(null)
+            return
+        }
+        const beforeCaret = value.slice(0, caret)
+        const match = beforeCaret.match(/(?:^|\s)@([^\s@]*)$/)
+        if (!match) {
+            setMentionTrigger(null)
+            return
+        }
+        const query = match[1]
+        const start = caret - query.length - 1
+        setMentionTrigger({ start, end: caret, query })
+    }
+
+    const insertMention = (participant: GroupParticipantInfo) => {
+        if (!mentionTrigger) return
+        const label = `@${participantLabel(participant)} `
+        const next = `${inputMessage.slice(0, mentionTrigger.start)}${label}${inputMessage.slice(mentionTrigger.end)}`
+        const caret = mentionTrigger.start + label.length
+        setInputMessage(next)
+        setMentionTrigger(null)
+        requestAnimationFrame(() => {
+            inputRef.current?.focus()
+            inputRef.current?.setSelectionRange(caret, caret)
+        })
+    }
+
+    const handleViewedBy = async (message: Message) => {
+        setViewedByMessage(message)
+        setViewedByReceipts([])
+        setLoadingViewedBy(true)
+        try {
+            const receipts = await api.getMessageReceipts(message.chatId, message.id)
+            setViewedByReceipts(receipts)
+        } catch (error) {
+            console.error("Failed to load read receipts:", error)
+            toast.error("Gagal memuat Viewed by")
+        } finally {
+            setLoadingViewedBy(false)
+        }
+    }
 
     const loadMessages = async () => {
         if (!chat) return
@@ -386,8 +486,10 @@ const formatRecordingTime = (seconds: number) => {
     const handleSendMessage = async () => {
         if (!inputMessage.trim() || !chat || sending) return
         const raw = inputMessage.trim()
-        const text = isMdMode ? encodeMarkdown(raw) : raw
+        const mentionPayload = buildMentionPayload(raw, groupInfo?.participants ?? [])
+        const text = isMdMode ? encodeMarkdown(mentionPayload.content) : mentionPayload.content
         setInputMessage("")
+        setMentionTrigger(null)
         setSending(true)
 
         try {
@@ -395,7 +497,7 @@ const formatRecordingTime = (seconds: number) => {
                 await api.editMessage(chat.id, editingMessage.id, text)
                 setEditingMessage(null)
             } else if (replyTo) {
-                await api.replyMessage(chat.id, replyTo.id, text)
+                await api.replyMessage(chat.id, replyTo.id, text, mentionPayload.mentions)
                 setReplyTo(null)
             } else {
                 const tempId = "temp-" + Date.now()
@@ -409,11 +511,12 @@ const formatRecordingTime = (seconds: number) => {
                     status: "pending",
                     type: "text"
                 }
+                if (mentionPayload.mentions.length) newMsg.extra = { mentions: mentionPayload.mentions }
 
                 useChatStore.getState().upsertMessage(chat.id, newMsg)
                 setTimeout(() => scrollToBottom(), 50)
 
-                const res = await api.sendMessage(chat.id, text)
+                const res = await api.sendMessage(chat.id, text, mentionPayload.mentions)
                 const store = useChatStore.getState()
                 const entry = store.messagesByChat[chat.id]
                 if (entry?.messages.some(m => m.id === res.id)) {
@@ -852,7 +955,13 @@ const handleReplyMessage = (message: Message) => {
                                     </div>
                                     {msgs.map((message, idx) => {
                                         const isMe = message.from === "me"
-                                        const repliedMsg = messages.find(m => m.id === message.replyToId)
+                                        const repliedMsg = message.replyToId
+                                            ? messages.find(m => m.id === message.replyToId) ?? {
+                                                id: message.replyToId,
+                                                content: "",
+                                                from: "",
+                                            }
+                                            : undefined
                                         const nextMsg = msgs[idx + 1]
                                         const prevMsg = msgs[idx - 1]
                                         const isLastInSequence = !nextMsg || nextMsg.from !== message.from
@@ -867,6 +976,9 @@ const handleReplyMessage = (message: Message) => {
                                                     isFirstInSequence={isFirstInSequence}
                                                     chat={chat}
                                                     repliedMsg={repliedMsg}
+                                                    groupMembers={groupInfo?.participants ?? []}
+                                                    onNavigateToReply={teleportToMessage}
+                                                    onViewedBy={() => handleViewedBy(message)}
                                                     onReply={() => handleReplyMessage(message)}
                                                     onEdit={() => handleEditMessage(message)}
                                                     onDelete={() => handleDeleteMessage(message.id)}
@@ -1045,48 +1157,55 @@ const handleReplyMessage = (message: Message) => {
                                 <Mic className="h-5 w-5" />
                             </Button>
                             <div className="flex-1 relative">
-                        {isMdMode ? (
-                            <Textarea
-                                ref={inputRef as React.Ref<HTMLTextAreaElement>}
-                                placeholder={editingMessage ? "Edit message..." : replyTo ? "Reply to message..." : "Write markdown..."}
-                                value={inputMessage}
-                                onChange={e => setInputMessage(e.target.value)}
-                                onKeyDown={e => {
-                                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                                        e.preventDefault()
-                                        handleSendMessage()
-                                    } else if (e.key === "Escape") {
-                                        e.preventDefault()
-                                        setEditingMessage(null)
-                                        setReplyTo(null)
-                                        setInputMessage("")
-                                    }
-                                }}
-                                className="pr-12 min-h-[44px] max-h-[200px] resize-none bg-muted/50 border-none focus-visible:ring-1 focus-visible:ring-primary/20 rounded-2xl py-3 text-sm"
-                                disabled={sending}
-                                rows={3}
-                            />
-                        ) : (
-                            <Input
-                                ref={inputRef}
-                                placeholder={editingMessage ? "Edit message..." : replyTo ? "Reply to message..." : "Type a message..."}
-                                value={inputMessage}
-                                onChange={e => setInputMessage(e.target.value)}
-                                onKeyDown={e => {
-                                    if (e.key === "Enter" && !e.shiftKey) {
-                                        e.preventDefault()
-                                        handleSendMessage()
-                                    } else if (e.key === "Escape") {
-                                        e.preventDefault()
-                                        setEditingMessage(null)
-                                        setReplyTo(null)
-                                        setInputMessage("")
-                                    }
-                                }}
-                                className="pr-12 min-h-[44px] bg-muted/50 border-none focus-visible:ring-1 focus-visible:ring-primary/20 rounded-2xl py-3"
-                                disabled={sending}
-                            />
-                        )}
+                        {chat.isGroup && mentionTrigger && !editingMessage && (() => {
+                            const query = mentionTrigger.query.toLowerCase()
+                            const matchingMembers = (groupInfo?.participants ?? []).filter(member =>
+                                participantLabel(member).toLowerCase().includes(query) || member.jid.toLowerCase().includes(query),
+                            ).slice(0, 8)
+                            return matchingMembers.length > 0 ? (
+                                <div className="absolute bottom-full left-0 z-40 mb-2 max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl">
+                                    {matchingMembers.map(member => (
+                                        <button
+                                            key={member.jid}
+                                            type="button"
+                                            onMouseDown={event => event.preventDefault()}
+                                            onClick={() => insertMention(member)}
+                                            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-muted"
+                                        >
+                                            <Avatar className="h-8 w-8"><AvatarFallback>{participantLabel(member).slice(0, 1).toUpperCase()}</AvatarFallback></Avatar>
+                                            <span className="min-w-0 flex-1 truncate text-sm">{participantLabel(member)}</span>
+                                            {member.isAdmin && <span className="text-[10px] text-muted-foreground">admin</span>}
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : null
+                        })()}
+                        <Textarea
+                            ref={inputRef}
+                            placeholder={editingMessage ? "Edit message..." : replyTo ? "Reply to message..." : isMdMode ? "Write markdown..." : "Type a message..."}
+                            value={inputMessage}
+                            onChange={e => {
+                                setInputMessage(e.target.value)
+                                updateMentionTrigger(e.target.value, e.currentTarget.selectionStart ?? e.target.value.length)
+                            }}
+                            onKeyDown={e => {
+                                const send = isMdMode
+                                    ? e.key === "Enter" && (e.ctrlKey || e.metaKey)
+                                    : e.key === "Enter" && !e.shiftKey
+                                if (send) {
+                                    e.preventDefault()
+                                    handleSendMessage()
+                                } else if (e.key === "Escape") {
+                                    e.preventDefault()
+                                    setEditingMessage(null)
+                                    setReplyTo(null)
+                                    setInputMessage("")
+                                }
+                            }}
+                            className="pr-12 min-h-[44px] max-h-[150px] resize-none overflow-y-hidden bg-muted/50 border-none focus-visible:ring-1 focus-visible:ring-primary/20 rounded-2xl py-3 text-sm"
+                            disabled={sending}
+                            rows={1}
+                        />
                         <Button size="icon" onClick={handleSendMessage} disabled={!inputMessage.trim() || sending} className={cn("absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 rounded-xl transition-all duration-300", inputMessage.trim() ? "bg-primary text-primary-foreground scale-100 shadow-md" : "bg-transparent text-muted-foreground scale-90")}>
                             <Send className="h-4 w-4" />
                         </Button>
@@ -1164,6 +1283,31 @@ const handleReplyMessage = (message: Message) => {
                 onClose={() => setIsSearchOpen(false)}
                 onResultClick={teleportToMessage}
             />
+            <Dialog open={viewedByMessage !== null} onOpenChange={open => { if (!open) setViewedByMessage(null) }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Viewed by</DialogTitle>
+                    </DialogHeader>
+                    {loadingViewedBy ? (
+                        <p className="py-5 text-center text-sm text-muted-foreground">Loading receipts…</p>
+                    ) : viewedByReceipts.length === 0 ? (
+                        <p className="py-5 text-center text-sm text-muted-foreground">No read receipts reported yet.</p>
+                    ) : (
+                        <div className="max-h-80 space-y-1 overflow-y-auto">
+                            {viewedByReceipts.map(receipt => {
+                                const participant = groupInfo?.participants.find(member => member.jid === receipt.jid || member.jid.split("@")[0] === receipt.jid.split("@")[0])
+                                const name = participant ? participantLabel(participant) : receipt.jid.split("@")[0]
+                                return (
+                                    <div key={receipt.jid} className="flex items-center justify-between gap-4 rounded-lg px-2 py-2">
+                                        <span className="truncate text-sm">{name}</span>
+                                        <time className="shrink-0 text-xs text-muted-foreground">{new Date(receipt.readAt).toLocaleString()}</time>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     )
 })

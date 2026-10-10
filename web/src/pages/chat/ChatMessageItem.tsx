@@ -19,6 +19,8 @@ export const ChatMessageItem = memo(({
 	chat,
 	repliedMsg,
 	onReply,
+	onNavigateToReply,
+	onViewedBy,
 	onEdit,
 	onDelete,
 	onImageClick,
@@ -27,6 +29,7 @@ export const ChatMessageItem = memo(({
 	renderFormattedContent,
 	getMediaUrl,
 	getAvatarUrl,
+	groupMembers,
 	isHighlighted,
 	onReact,
 	onForward,
@@ -38,6 +41,13 @@ export const ChatMessageItem = memo(({
 	const startX = useRef(0)
 	const startY = useRef(0)
 	const threshold = 60
+	const mentionJids: string[] = message.extra?.mentions ?? []
+	const displayContent = (message.content || "").replace(/@(\d+)/g, (token: string, number: string) => {
+		const mentionedJid = mentionJids.find((jid) => jid.split("@")[0] === number)
+		if (!mentionedJid) return token
+		const participant = groupMembers?.find((member: any) => member.jid === mentionedJid || member.jid.split("@")[0] === number)
+		return participant ? `@${participant.name || participant.jid.split("@")[0]}` : token
+	})
 
 	const applySwipe = (x: number) => {
 		swipeRef.current = x
@@ -140,9 +150,9 @@ export const ChatMessageItem = memo(({
 						{repliedMsg && (
 						<div
 						        className="mb-0 p-2 bg-black/5 dark:bg-white/5 border-l-4 border-primary text-[12px] opacity-80 cursor-pointer hover:opacity-100 transition-opacity relative z-10 max-w-[65vw] sm:max-w-[320px] overflow-hidden"
-						        onClick={() => document.getElementById(repliedMsg.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+						        onClick={() => onNavigateToReply?.(repliedMsg.id)}
 						>							<p className="font-bold text-primary truncate">{repliedMsg.from === "me" ? "You" : repliedMsg.senderName || "Unknown"}</p>
-							<p className="truncate opacity-70">{repliedMsg.content}</p>
+							<p className="truncate opacity-70">{repliedMsg.content || "Open original message"}</p>
 						</div>
 					)}
 
@@ -287,7 +297,7 @@ export const ChatMessageItem = memo(({
 								</div>
 							)}
 							{message.content && !["[Image]", "[Video]", "[Sticker]", "[Document]", "[Audio]", "[Voice Message]", "[GIF]", "[Lokasi]", "[Lokasi Langsung]", "[Kontak]", "[Sekali Lihat]"].includes(message.content) && !isDocument && !isAudio && !isPoll && !isLocation && !isContact && (
-							        <div className={cn("break-words [word-break:break-word] leading-relaxed relative z-10", !isMarkdownContent(message.content) && "whitespace-pre-wrap")}>{renderFormattedContent(message.content)}</div>
+								        <div className={cn("break-words [word-break:break-word] leading-relaxed relative z-10", !isMarkdownContent(displayContent) && "whitespace-pre-wrap")}>{renderFormattedContent(displayContent)}</div>
 							)}
 							{!(isAudio && isMedia) && (
 								<div className={cn("flex items-center gap-1.5 mt-1 justify-end", "text-[10px] font-medium opacity-50 uppercase tracking-tight")}>
@@ -394,6 +404,9 @@ export const ChatMessageItem = memo(({
 													<button onClick={onEdit} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Edit3 className="h-4 w-4 text-orange-500" /><span className="font-medium">Edit</span></button>
 													<button onClick={onDelete} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors text-destructive"><Trash2 className="h-4 w-4" /><span className="font-medium">Delete for everyone</span></button>
 												</>
+											)}
+											{isMe && chat?.isGroup && (
+												<button onClick={onViewedBy} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><span className="w-4 text-center text-primary">✓✓</span><span className="font-medium">Viewed by</span></button>
 											)}
 										</div>
 									</PopoverContent>

@@ -133,6 +133,22 @@ func (ch *ChatHandler) GetMessageContext(w http.ResponseWriter, r *http.Request)
 
 	ch.handler.sendJSON(w, messages)
 }
+
+func (ch *ChatHandler) GetMessageReceipts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if ch.handler.msgRepo == nil {
+		ch.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+	vars := mux.Vars(r)
+	receipts, err := ch.handler.msgRepo.GetMessageReceipts(vars["chatId"], vars["messageId"])
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ch.handler.sendJSON(w, receipts)
+}
+
 func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

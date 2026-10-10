@@ -163,6 +163,8 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 		h.handleMessage(v)
 	case *events.Receipt:
 		h.handleReceipt(v)
+	case *events.Contact:
+		h.handleContact(v)
 	case *events.HistorySync:
 		if h.historySync != nil {
 			if err := h.historySync.StageData(v.Data); err != nil {
@@ -355,10 +357,6 @@ func (h *WhatsAppEventHandler) persistAndBroadcastChatState(state repository.Cha
 }
 
 func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
-	if h.httpServer == nil {
-		return
-	}
-
 	status := "sent"
 	if evt.Type == events.ReceiptTypeDelivered {
 		status = "delivered"
@@ -368,9 +366,68 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 		return
 	}
 
+	if evt.Type == events.ReceiptTypeRead && h.msgStore != nil && evt.IsGroup {
+		reader := evt.Sender.ToNonAD()
+		if reader.Server == "lid" {
+			alt := evt.SenderAlt.ToNonAD()
+			if alt.Server == "s.whatsapp.net" {
+				reader = alt
+			} else if resolved := h.msgStore.ResolveChatID(reader.String()); resolved != reader.String() {
+				if parsed, err := waTypes.ParseJID(resolved); err == nil {
+					reader = parsed
+				}
+			}
+		}
+		for _, msgID := range evt.MessageIDs {
+			_, err := h.msgStore.SaveReadReceipt(evt.Chat.String(), string(msgID), reader.String(), evt.Timestamp.UnixMilli())
+			if err != nil {
+				fmt.Printf("[RECEIPT] Failed to save read receipt for %s: %v\n", msgID, err)
+			}
+		}
+	}
+	if h.httpServer == nil {
+		return
+	}
+
 	for _, msgID := range evt.MessageIDs {
 		h.httpServer.UpdateMessageStatus(msgID, status)
 		fmt.Printf("✅ Updated status for %s to %s\n", msgID, status)
+	}
+}
+
+func (h *WhatsAppEventHandler) handleContact(evt *events.Contact) {
+	if h.msgStore == nil || evt == nil || evt.Action == nil {
+		return
+	}
+	name := strings.TrimSpace(evt.Action.GetFullName())
+	if name == "" {
+		name = strings.TrimSpace(evt.Action.GetFirstName())
+	}
+	if name == "" {
+		name = strings.TrimSpace(evt.Action.GetUsername())
+	}
+	if name == "" {
+		return
+	}
+	jids := []waTypes.JID{evt.JID.ToNonAD()}
+	for _, raw := range []string{evt.Action.GetPnJID(), evt.Action.GetLidJID()} {
+		if jid, err := waTypes.ParseJID(raw); err == nil && !jid.IsEmpty() {
+			jids = append(jids, jid.ToNonAD())
+		}
+	}
+	seen := make(map[string]struct{}, len(jids))
+	for _, jid := range jids {
+		if jid.IsEmpty() {
+			continue
+		}
+		value := jid.String()
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		if err := h.msgStore.UpdateContactName(value, name); err != nil {
+			fmt.Printf("[CONTACT] Failed to save contact name for %s: %v\n", value, err)
+		}
 	}
 }
 
@@ -625,6 +682,9 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 		forwarded := false
 		if ci := getContextInfo(payload); ci != nil {
 			forwarded = ci.GetIsForwarded()
+			if len(ci.GetMentionedJID()) > 0 {
+				extra.Mentions = append([]string(nil), ci.GetMentionedJID()...)
+			}
 		}
 
 		if payload.GetImageMessage() != nil {
@@ -887,7 +947,7 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 				return ""
 			}(),
 		}
-		if extra != (repository.MessageExtra{}) {
+		if extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 {
 			msg.Extra = &extra
 		}
 		// Keep the serialized original proto for lossless forwarding.

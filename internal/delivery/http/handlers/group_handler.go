@@ -4,12 +4,14 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 	"go.mau.fi/whatsmeow"
 	waTypes "go.mau.fi/whatsmeow/types"
 
+	"wa-bot/internal/domain/repository"
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
@@ -47,12 +49,71 @@ func (gh *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cache = whatsappInfra.BuildGroupCache(info, ownJIDOf(gh))
-		if serr := gh.handler.msgRepo.SaveGroupCache(cache); serr != nil {
-			gh.handler.sendError(w, http.StatusInternalServerError, serr.Error())
-			return
-		}
+	}
+	ctx, cancel := gh.groupCtx(r)
+	defer cancel()
+	gh.enrichParticipantNames(ctx, cache)
+	if err := gh.handler.msgRepo.SaveGroupCache(cache); err != nil {
+		gh.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	gh.handler.sendJSON(w, cache)
+}
+
+func (gh *GroupHandler) enrichParticipantNames(ctx context.Context, group *repository.GroupCache) {
+	if group == nil || gh.handler.client == nil {
+		return
+	}
+	client := gh.handler.client.CoreClient()
+	if client == nil || client.Store == nil {
+		return
+	}
+	ownJID := ownJIDOf(gh).ToNonAD().String()
+	for i := range group.Participants {
+		participant := &group.Participants[i]
+		if strings.TrimSpace(participant.Name) != "" {
+			continue
+		}
+		if participant.JID == ownJID && ownJID != "" {
+			participant.Name = "You"
+			continue
+		}
+		if gh.handler.msgRepo != nil {
+			if name, err := gh.handler.msgRepo.GetContactName(participant.JID); err == nil && strings.TrimSpace(name) != "" {
+				participant.Name = strings.TrimSpace(name)
+				continue
+			}
+		}
+		jid, err := waTypes.ParseJID(participant.JID)
+		if err != nil || client.Store.Contacts == nil {
+			continue
+		}
+		contact, err := client.Store.Contacts.GetContact(ctx, jid)
+		if err != nil || !contact.Found {
+			continue
+		}
+		name := strings.TrimSpace(contact.FullName)
+		if name == "" {
+			name = strings.TrimSpace(contact.PushName)
+		}
+		if name == "" {
+			name = strings.TrimSpace(contact.FirstName)
+		}
+		if name == "" {
+			name = strings.TrimSpace(contact.BusinessName)
+		}
+		if name == "" {
+			continue
+		}
+		participant.Name = name
+		if gh.handler.msgRepo != nil {
+			_ = gh.handler.msgRepo.SaveContact(&repository.Contact{
+				ID:   participant.JID,
+				Name: name,
+				JID:  participant.JID,
+			})
+		}
+	}
 }
 
 func ownJIDOf(gh *GroupHandler) waTypes.JID {

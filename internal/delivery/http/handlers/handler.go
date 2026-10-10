@@ -304,6 +304,26 @@ func (h *Handler) LogSentMessage(msgID, chatID, from, to, content, msgType, medi
 	h.SaveAndBroadcastMessage(msg)
 }
 
+func (h *Handler) LogSentMessageWithMentions(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string) {
+	msg := &repository.Message{
+		ID:          msgID,
+		ChatID:      chatID,
+		From:        from,
+		To:          to,
+		Content:     content,
+		Timestamp:   time.Now().UnixMilli(),
+		Status:      "sent",
+		Type:        msgType,
+		MediaURL:    mediaURL,
+		IsAutomatic: isAutomatic,
+		ReplyToID:   replyToID,
+	}
+	if len(mentions) > 0 {
+		msg.Extra = &repository.MessageExtra{Mentions: append([]string(nil), mentions...)}
+	}
+	h.SaveAndBroadcastMessage(msg)
+}
+
 type wsHub interface {
 	BroadcastMessage(msgType string, payload interface{})
 	SendMessageToUser(userID string, msgType string, payload interface{})

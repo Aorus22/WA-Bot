@@ -116,6 +116,16 @@ type MessageExtra struct {
 	ViewOnce    *ViewOnceMeta    `json:"viewOnce,omitempty"`
 	GIF         bool             `json:"gif,omitempty"`
 	LinkPreview *LinkPreviewMeta `json:"linkPreview,omitempty"`
+	Mentions    []string         `json:"mentions,omitempty"`
+}
+
+// MessageReceipt records a read receipt reported by WhatsApp for an outgoing
+// group message. ReadAt is a Unix timestamp in milliseconds.
+type MessageReceipt struct {
+	MessageID string `json:"messageId"`
+	ChatID    string `json:"chatId"`
+	JID       string `json:"jid"`
+	ReadAt    int64  `json:"readAt"`
 }
 
 type Message struct {
@@ -259,6 +269,14 @@ func (s *MessageStore) initLocked() error {
                         created_at INTEGER DEFAULT (strftime('%s', 'now')),
                         FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
                 )`,
+		`CREATE TABLE IF NOT EXISTS message_read_receipts (
+			message_id TEXT NOT NULL,
+			chat_id TEXT NOT NULL,
+			participant_jid TEXT NOT NULL,
+			read_at INTEGER NOT NULL,
+			PRIMARY KEY (message_id, participant_jid)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_read_receipts_chat ON message_read_receipts(chat_id, message_id)`,
 		`CREATE TABLE IF NOT EXISTS favorite_stickers (
                         id TEXT PRIMARY KEY,
                         media_url TEXT,
@@ -436,7 +454,7 @@ func decodeMessageMeta(msg *Message, forwarded int, reactionsJSON, extraJSON str
 	}
 	if extraJSON != "" {
 		var extra MessageExtra
-		if json.Unmarshal([]byte(extraJSON), &extra) == nil && extra != (MessageExtra{}) {
+		if json.Unmarshal([]byte(extraJSON), &extra) == nil && (extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0) {
 			msg.Extra = &extra
 		}
 	}
@@ -882,6 +900,28 @@ func (s *MessageStore) SaveContact(contact *Contact) error {
 	return err
 }
 
+// UpdateContactName refreshes a contact's local display name without erasing a
+// previously cached profile-picture URL.
+func (s *MessageStore) UpdateContactName(jid, name string) error {
+	jid = strings.TrimSpace(jid)
+	name = strings.TrimSpace(name)
+	if jid == "" || name == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, err := s.db.Exec(`UPDATE contacts SET name = ?, updated_at = ? WHERE jid = ?`, name, time.Now().Unix(), jid)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated > 0 {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT OR IGNORE INTO contacts (id, name, jid, avatar, updated_at) VALUES (?, ?, ?, '', ?)`, jid, name, jid, time.Now().Unix())
+	return err
+}
+
 func (s *MessageStore) UpdateChatLastMessage(chatID, content string, timestamp int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1190,6 +1230,65 @@ func (s *MessageStore) GetMessageSender(msgID string) (string, error) {
 	return sender, err
 }
 
+// SaveReadReceipt stores a receipt only for an outgoing group message in the
+// stated chat. WhatsApp may replay receipts, so the first timestamp per
+// participant is retained.
+func (s *MessageStore) SaveReadReceipt(chatID, msgID, participantJID string, readAt int64) (bool, error) {
+	participantJID = strings.TrimSpace(participantJID)
+	if participantJID == "" || !strings.HasSuffix(chatID, "@g.us") {
+		return false, nil
+	}
+	if readAt <= 0 {
+		readAt = time.Now().UnixMilli()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var isOutgoingGroup bool
+	err := s.db.QueryRow(`SELECT EXISTS(
+		SELECT 1 FROM messages m JOIN chats c ON c.id = m.chat_id
+		WHERE m.id = ? AND m.chat_id = ? AND m.sender_id = 'me' AND c.is_group = 1
+	)`, msgID, chatID).Scan(&isOutgoingGroup)
+	if err != nil || !isOutgoingGroup {
+		return false, err
+	}
+	result, err := s.db.Exec(`INSERT OR IGNORE INTO message_read_receipts
+		(message_id, chat_id, participant_jid, read_at) VALUES (?, ?, ?, ?)`, msgID, chatID, participantJID, readAt)
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	return count > 0, err
+}
+
+// GetMessageReceipts returns only receipts WhatsApp actually reported for an
+// outgoing message in this group.
+func (s *MessageStore) GetMessageReceipts(chatID, msgID string) ([]MessageReceipt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT r.message_id, r.chat_id, r.participant_jid, r.read_at
+		FROM message_read_receipts r
+		JOIN messages m ON m.id = r.message_id AND m.chat_id = r.chat_id
+		JOIN chats c ON c.id = r.chat_id
+		WHERE r.chat_id = ? AND r.message_id = ? AND m.sender_id = 'me' AND c.is_group = 1
+		ORDER BY r.read_at ASC`, chatID, msgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	receipts := make([]MessageReceipt, 0)
+	for rows.Next() {
+		var receipt MessageReceipt
+		if err := rows.Scan(&receipt.MessageID, &receipt.ChatID, &receipt.JID, &receipt.ReadAt); err != nil {
+			return nil, err
+		}
+		receipts = append(receipts, receipt)
+	}
+	return receipts, rows.Err()
+}
+
 func (s *MessageStore) Close() error {
 	return s.db.Close()
 }
@@ -1200,10 +1299,20 @@ func (s *MessageStore) GetContactName(jid string) (string, error) {
 
 	var name string
 	err := s.db.QueryRow("SELECT name FROM contacts WHERE jid = ?", jid).Scan(&name)
-	if err != nil {
-		return "", err
+	if err == nil && name != "" {
+		return name, nil
 	}
-	return name, nil
+	// History-synced messages preserve WhatsApp push names even when the
+	// corresponding contact was not added to the local contacts table.
+	err = s.db.QueryRow(`
+		SELECT sender_name FROM messages
+		WHERE (sender_id = ?
+		   OR sender_id = COALESCE((SELECT lid FROM lid_mapping WHERE pn_jid = ?), '')
+		   OR sender_id = COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = ?), ''))
+		  AND trim(ifnull(sender_name, '')) <> ''
+		ORDER BY timestamp DESC LIMIT 1
+	`, jid, jid, jid).Scan(&name)
+	return name, err
 }
 
 func (s *MessageStore) GetChatMedia(chatID string, limit int, before int64) ([]Message, error) {

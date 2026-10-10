@@ -26,6 +26,10 @@ type MessageLogger interface {
 	LogSentMessage(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string)
 }
 
+type MentionMessageLogger interface {
+	LogSentMessageWithMentions(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string)
+}
+
 type QREvent struct {
 	Event string
 	Code  string
@@ -85,6 +89,14 @@ func (w *WhatsAppClient) log(msgID string, to string, content string, msgType st
 	}
 }
 
+func (w *WhatsAppClient) logWithMentions(msgID, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string) {
+	if logger, ok := w.logger.(MentionMessageLogger); ok {
+		logger.LogSentMessageWithMentions(msgID, to, "me", to, content, msgType, mediaURL, isAutomatic, replyToID, mentions)
+		return
+	}
+	w.log(msgID, to, content, msgType, mediaURL, isAutomatic, replyToID)
+}
+
 func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string, isAutomatic bool) (string, error) {
 	targetJID, err := waTypes.ParseJID(to)
 	if err != nil {
@@ -105,12 +117,22 @@ func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string
 // http(s) URL it attaches a scraped link preview, mirroring the official
 // clients. Falls back to a plain message when scraping fails.
 func (w *WhatsAppClient) SendMessageWithPreview(ctx context.Context, to string, text string, isAutomatic bool) (string, error) {
+	return w.SendMessageWithPreviewAndMentions(ctx, to, text, isAutomatic, nil)
+}
+
+// SendMessageWithPreviewAndMentions sends text with optional WhatsApp mention
+// metadata while preserving the link-preview behavior of SendMessageWithPreview.
+func (w *WhatsAppClient) SendMessageWithPreviewAndMentions(ctx context.Context, to, text string, isAutomatic bool, mentions []string) (string, error) {
+	mentions = normalizeMentionJIDs(mentions)
 	rawURL := FirstURLInText(text)
-	if rawURL == "" {
+	if rawURL == "" && len(mentions) == 0 {
 		return w.SendMessage(ctx, to, text, isAutomatic)
 	}
-	preview := ScrapeLinkPreview(ctx, rawURL)
-	if preview == nil {
+	var preview *LinkPreview
+	if rawURL != "" {
+		preview = ScrapeLinkPreview(ctx, rawURL)
+	}
+	if rawURL != "" && preview == nil && len(mentions) == 0 {
 		return w.SendMessage(ctx, to, text, isAutomatic)
 	}
 
@@ -119,20 +141,46 @@ func (w *WhatsAppClient) SendMessageWithPreview(ctx context.Context, to string, 
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 	et := &waProto.ExtendedTextMessage{
-		Text:        proto.String(text),
-		MatchedText: proto.String(preview.URL),
-		Title:       proto.String(preview.Title),
-		Description: proto.String(preview.Description),
+		Text: proto.String(text),
 	}
-	if len(preview.JPEGThumbnail) > 0 {
+	if preview != nil {
+		et.MatchedText = proto.String(preview.URL)
+		et.Title = proto.String(preview.Title)
+		et.Description = proto.String(preview.Description)
+	}
+	if len(mentions) > 0 {
+		et.ContextInfo = &waProto.ContextInfo{MentionedJID: mentions}
+	}
+	if preview != nil && len(preview.JPEGThumbnail) > 0 {
 		et.JPEGThumbnail = preview.JPEGThumbnail
 	}
 	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{ExtendedTextMessage: et})
 	if err == nil {
-		w.log(resp.ID, targetJID.String(), text, "text", "", isAutomatic, "")
+		w.logWithMentions(resp.ID, targetJID.String(), text, "text", "", isAutomatic, "", mentions)
 		return resp.ID, nil
 	}
 	return "", err
+}
+
+func normalizeMentionJIDs(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		jid, err := waTypes.ParseJID(strings.TrimSpace(value))
+		if err != nil || jid.IsEmpty() || jid.Server == waTypes.GroupServer || jid.Server == waTypes.BroadcastServer {
+			continue
+		}
+		jid = jid.ToNonAD()
+		if _, exists := seen[jid.String()]; exists {
+			continue
+		}
+		seen[jid.String()] = struct{}{}
+		result = append(result, jid.String())
+	}
+	return result
 }
 
 func (w *WhatsAppClient) SendMessageToJID(ctx context.Context, to waTypes.JID, text string, isAutomatic bool) (string, error) {
@@ -388,21 +436,38 @@ func (w *WhatsAppClient) EditMessage(ctx context.Context, to string, msgID strin
 }
 
 func (w *WhatsAppClient) ReplyMessage(ctx context.Context, to string, msgID string, text string) error {
+	return w.ReplyMessageWithMentions(ctx, to, msgID, "", text, nil)
+}
+
+func (w *WhatsAppClient) ReplyMessageWithMentions(ctx context.Context, to, msgID, participant, text string, mentions []string) error {
 	targetJID, err := waTypes.ParseJID(to)
 	if err != nil {
 		return err
 	}
 
+	mentions = normalizeMentionJIDs(mentions)
+	contextInfo := &waProto.ContextInfo{
+		StanzaID:     proto.String(msgID),
+		MentionedJID: mentions,
+	}
+	if targetJID.Server == waTypes.GroupServer {
+		if participant == "me" || participant == "" {
+			if ownJID := w.client.Store.ID; ownJID != nil {
+				participant = ownJID.ToNonAD().String()
+			}
+		}
+		if parsed, parseErr := waTypes.ParseJID(participant); parseErr == nil && !parsed.IsEmpty() {
+			contextInfo.Participant = proto.String(parsed.ToNonAD().String())
+		}
+	}
 	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
 		ExtendedTextMessage: &waProto.ExtendedTextMessage{
-			Text: proto.String(text),
-			ContextInfo: &waProto.ContextInfo{
-				StanzaID: proto.String(msgID),
-			},
+			Text:        proto.String(text),
+			ContextInfo: contextInfo,
 		},
 	})
 	if err == nil {
-		w.log(resp.ID, targetJID.String(), text, "text", "", false, msgID)
+		w.logWithMentions(resp.ID, targetJID.String(), text, "text", "", false, msgID, mentions)
 	}
 	return err
 }

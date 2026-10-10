@@ -79,6 +79,17 @@ pub struct MessageExtra {
     pub view_once: Option<ViewOnceMeta>,
     pub gif: Option<bool>,
     pub link_preview: Option<LinkPreviewMeta>,
+    #[serde(default)]
+    pub mentions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageReceipt {
+    pub message_id: String,
+    pub chat_id: String,
+    pub jid: String,
+    pub read_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

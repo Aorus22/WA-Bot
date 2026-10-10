@@ -71,6 +71,14 @@ export type MessageExtra = {
 	viewOnce?: ViewOnceMeta
 	gif?: boolean
 	linkPreview?: LinkPreviewMeta
+	mentions?: string[]
+}
+
+export type MessageReceipt = {
+	messageId: string
+	chatId: string
+	jid: string
+	readAt: number
 }
 
 export type Message = {
@@ -524,11 +532,15 @@ class ApiClient {	private baseUrl: string
 		})
 	}
 
-	async replyMessage(chatId: string, id: string, content: string): Promise<{ status: string }> {
+	async replyMessage(chatId: string, id: string, content: string, mentions: string[] = []): Promise<{ status: string }> {
 		return this.request<{ status: string }>(`/chats/${chatId}/messages/${id}/reply`, {
 			method: "POST",
-			body: JSON.stringify({ content }),
+			body: JSON.stringify({ content, mentions }),
 		})
+	}
+
+	async getMessageReceipts(chatId: string, id: string): Promise<MessageReceipt[]> {
+		return this.request<MessageReceipt[]>(`/chats/${chatId}/messages/${id}/receipts`)
 	}
 
 	/** Subscribe to a 1:1 contact's availability updates. */
@@ -939,13 +951,14 @@ class ApiClient {	private baseUrl: string
 		})
 	}
 
-	async sendMessage(target: string, message: string): Promise<{ status: string; id: string }> {
+	async sendMessage(target: string, message: string, mentions: string[] = []): Promise<{ status: string; id: string }> {
 		return this.request<{ status: string; id: string }>("/send-message", {
 			method: "POST",
 			body: JSON.stringify({
 				secret: import.meta.env.VITE_API_SECRET || "default-secret",
 				target,
 				message,
+				mentions,
 			}),
 		})
 	}
