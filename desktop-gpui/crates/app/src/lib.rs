@@ -19,4 +19,5 @@ pub mod router;
 pub mod state;
 pub mod theme;
 pub mod views;
+pub mod window_material;
 

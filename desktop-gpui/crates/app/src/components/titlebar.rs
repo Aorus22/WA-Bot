@@ -1,7 +1,7 @@
 //! Frameless window title bar with drag area and window control buttons.
 
 use gpui::{
-    div, px, rgb, svg, App, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    div, prelude::FluentBuilder as _, px, rgb, svg, App, InteractiveElement, IntoElement, MouseButton, ParentElement,
     RenderOnce, Styled, Window, WindowControlArea,
 };
 use gpui_component::h_flex;
@@ -9,7 +9,8 @@ use gpui_component::h_flex;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::icons::{MAXIMIZE_SVG, MINIMIZE_SVG, RESTORE_SVG, X_SVG};
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 
 pub const TITLEBAR_HEIGHT: f32 = 48.0;
 
@@ -111,19 +112,25 @@ impl RenderOnce for AppTitleBar {
             return div().into_any_element();
         }
         let theme = cx.app_theme();
+        let window_transparency = ThemeManager::global(cx).window_transparency;
         let is_max = is_window_maximized(window);
+        let framed = window_material::is_framed_window(window);
 
         h_flex()
             .id("app-titlebar")
             .w_full()
             .h(px(TITLEBAR_HEIGHT))
-            .bg(theme.background)
+            .bg(window_material::glass_fill(theme.background, window_transparency))
             .border_b_1()
             .border_color(theme.border.opacity(0.4))
             .items_center()
             .justify_between()
             .pl_3()
             .flex_shrink_0()
+            .when(framed, |s| {
+                s.rounded_tl(px(window_material::WINDOW_CORNER_RADIUS))
+                    .rounded_tr(px(window_material::WINDOW_CORNER_RADIUS))
+            })
             // NOTE: Do not set window_control_area(Drag) here so children remain interactive!
             // Left app label
             .child(
@@ -144,7 +151,10 @@ impl RenderOnce for AppTitleBar {
                 div()
                     .flex_1()
                     .h_full()
-                    .window_control_area(WindowControlArea::Drag),
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(MouseButton::Left, |_, window, _| {
+                        window.start_window_move();
+                    }),
             )
             // Right window controls matching webterm exactly
             .child(

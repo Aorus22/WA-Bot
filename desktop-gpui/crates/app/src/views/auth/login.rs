@@ -10,7 +10,8 @@ use gpui_component::{
 };
 
 use crate::state::auth::{AuthState, LoginTab};
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 use super::qr::QrCodeView;
 
 pub struct LoginView {
@@ -29,8 +30,11 @@ impl LoginView {
 }
 
 impl Render for LoginView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
+        let window_transparency = ThemeManager::global(cx).window_transparency;
         let active_tab = if cx.has_global::<AuthState>() {
             AuthState::global(cx).active_tab
         } else {
@@ -40,7 +44,11 @@ impl Render for LoginView {
         v_flex()
             .id("login-view")
             .size_full()
-            .bg(theme.background)
+            .bg(window_material::glass_fill(theme.background, window_transparency))
+            .when(framed, |s| {
+                s.rounded_bl(px(window_material::WINDOW_CORNER_RADIUS))
+                    .rounded_br(px(window_material::WINDOW_CORNER_RADIUS))
+            })
             .items_center()
             .p_4()
             // Scrolls when the column is taller than the window (popover,

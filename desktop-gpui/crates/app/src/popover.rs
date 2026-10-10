@@ -17,12 +17,13 @@ use std::time::{Duration, Instant};
 
 use gpui::layer_shell::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions};
 use gpui::{
-    div, point, AnimationExt as _, px, size, AnyView, AnyWindowHandle, App, AppContext, Bounds, Context, Global,
+    div, point, AnimationExt as _, px, size, AnyView, AnyWindowHandle, App, AppContext, Bounds, Context, Global, Pixels,
     InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement,
     Render, Styled, Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
 
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::ThemeManager;
+use crate::window_material;
 
 /// Popover content size in logical pixels.
 pub const POPOVER_WIDTH: f32 = 880.0;
@@ -412,6 +413,36 @@ impl Render for Backdrop {
     }
 }
 
+/// Approximates a rounded rect with horizontal strips: the compositor blur
+/// protocols only take rectangles.
+fn rounded_blur_regions(width: f32, height: f32, radius: f32) -> Vec<Bounds<Pixels>> {
+    if width <= 0.0 || height <= 0.0 {
+        return Vec::new();
+    }
+    let radius = radius.max(0.0).min(width / 2.0).min(height / 2.0);
+    if radius == 0.0 {
+        return vec![Bounds { origin: point(px(0.), px(0.)), size: size(px(width), px(height)) }];
+    }
+
+    let segments = radius.ceil().clamp(1.0, 10.0) as usize;
+    let band = radius / segments as f32;
+    let mut regions = Vec::with_capacity(segments * 2 + 1);
+    for segment in 0..segments {
+        let offset = segment as f32 * band;
+        let from_corner = radius - offset;
+        let inset = radius - (radius * radius - from_corner * from_corner).max(0.0).sqrt();
+        let strip_width = (width - inset * 2.0).max(0.0);
+        for y in [offset, height - offset - band] {
+            regions.push(Bounds { origin: point(px(inset), px(y)), size: size(px(strip_width), px(band)) });
+        }
+    }
+    let middle = height - radius * 2.0;
+    if middle > 0.0 {
+        regions.push(Bounds { origin: point(px(0.), px(radius)), size: size(px(width), px(middle)) });
+    }
+    regions
+}
+
 /// Rounded card around the app UI. gpui cannot clip children to a rounded
 /// rect, so the content is inset by a few pixels: a rectangular child corner
 /// then falls inside the arc instead of poking out of it.
@@ -420,8 +451,22 @@ pub struct PopoverFrame {
 }
 
 impl Render for PopoverFrame {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.app_theme();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Blur only what the rounded card covers, not the transparent corners.
+        let viewport = window.viewport_size();
+        window_material::set_blur_regions(window, &rounded_blur_regions(
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            CARD_RADIUS,
+        ));
+        let (background, border, transparency) = {
+            let theme = ThemeManager::global(cx);
+            (
+                theme.tokens.background,
+                theme.tokens.border,
+                theme.window_transparency,
+            )
+        };
         // The card is a fresh window on every toggle, so this plays on each
         // open: it fades in while sliding out from the panel edge it hangs
         // from (the layer surface clips the part still "behind" the panel).
@@ -435,9 +480,9 @@ impl Render for PopoverFrame {
             .relative()
             .size_full()
             .rounded(px(CARD_RADIUS))
-            .bg(theme.background)
+            .bg(window_material::glass_fill(background, transparency))
             .border_1()
-            .border_color(theme.border)
+            .border_color(border)
             .p(px(5.0))
             .overflow_hidden()
             .child(self.child.clone())

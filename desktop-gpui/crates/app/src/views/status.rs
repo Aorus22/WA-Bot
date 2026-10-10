@@ -1,5 +1,6 @@
 //! Status view matching Web StatusPage 1:1.
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
@@ -8,7 +9,8 @@ use wabot_backend_client::dto::StatusGroup;
 use crate::components::toast;
 use crate::icons::*;
 use crate::state::auth::AuthState;
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 use crate::TOKIO_RT;
 
 const BACKGROUNDS: &[u32] = &[
@@ -268,8 +270,11 @@ impl StatusView {
 }
 
 impl Render for StatusView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
+        let window_transparency = ThemeManager::global(cx).window_transparency;
         let border_color = theme.border;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -294,7 +299,8 @@ impl Render for StatusView {
             .id("status-view")
             .size_full()
             .overflow_hidden()
-            .bg(bg_color)
+            .bg(window_material::glass_fill(bg_color, window_transparency))
+            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
             .relative()
             // --- Left Sidebar (340px) ---
             .child(
@@ -304,7 +310,6 @@ impl Render for StatusView {
                     .flex_shrink_0()
                     .border_r_1()
                     .border_color(border_color)
-                    .bg(bg_color)
                     // Sidebar Header
                     .child(
                         h_flex()
@@ -581,6 +586,7 @@ impl Render for StatusView {
                     } else {
                         theme.muted.opacity(0.1)
                     })
+                    .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                     .children(if let Some(group) = self.viewing_group.clone() {
                         let total = group.statuses.len();
                         let current_idx = self.viewing_index.min(total.saturating_sub(1));

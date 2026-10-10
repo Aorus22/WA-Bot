@@ -6,4 +6,4 @@ Exec=__BINDIR__/wabot
 Icon=wa-bot
 Terminal=false
 Categories=Network;InstantMessaging;
-StartupWMClass=dev.wabot.popover
+StartupWMClass=wa-bot

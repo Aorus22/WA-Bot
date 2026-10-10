@@ -22,11 +22,16 @@
 //!   - Active backend API endpoint and settings status.
 
 use std::collections::HashMap;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_component::{Icon, IconName};
+use gpui_component::{h_flex, Icon, IconName};
+use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
+use gpui_component::switch::Switch;
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::HistorySyncStatus;
-use wabot_settings::{ChatLayout, DesktopSettings, ThemeMode as SettingsThemeMode};
+use wabot_settings::{
+    ChatLayout, DesktopSettings, MAX_WINDOW_TRANSPARENCY, ThemeMode as SettingsThemeMode,
+};
 
 use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
 use crate::components::toast;
@@ -35,6 +40,7 @@ use crate::router::{AppRoute, Router};
 use crate::state::auth::{AuthState, AuthStatus};
 use crate::theme::color::parse_hex_hsla;
 use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 use std::borrow::Cow;
 
 use crate::theme::preset::{all_presets, ThemePreset};
@@ -63,6 +69,8 @@ pub struct EditModalState {
 pub struct SettingsView {
     pub theme_mode_filter: String,
     pub show_theme_mode_picker: bool,
+    window_transparency_slider: Entity<SliderState>,
+    _window_transparency_subscription: Subscription,
 
     // Backend settings
     pub settings_loaded: bool,
@@ -98,6 +106,29 @@ pub struct SettingsView {
 impl SettingsView {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let modal_focus_handle = cx.focus_handle();
+        let window_transparency = ThemeManager::global(cx).window_transparency;
+        let window_transparency_slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(MAX_WINDOW_TRANSPARENCY as f32)
+                .step(1.0)
+                .default_value(window_transparency as f32)
+        });
+        let transparency_subscription = cx.subscribe(
+            &window_transparency_slider,
+            |_: &mut Self,
+             _: Entity<SliderState>,
+             event: &SliderEvent,
+             cx: &mut Context<Self>| match event {
+                SliderEvent::Change(SliderValue::Single(value)) => {
+                    ThemeManager::preview_window_transparency(value.round() as u8, cx);
+                }
+                SliderEvent::Release(SliderValue::Single(value)) => {
+                    ThemeManager::apply_window_transparency(value.round() as u8, cx);
+                }
+                _ => {}
+            },
+        );
 
         // Load initial theme mode filter from settings
         let theme_mode_filter = if let Ok(settings) = DesktopSettings::load() {
@@ -113,6 +144,8 @@ impl SettingsView {
         let mut view = Self {
             theme_mode_filter,
             show_theme_mode_picker: false,
+            window_transparency_slider,
+            _window_transparency_subscription: transparency_subscription,
 
             settings_loaded: false,
             is_loading_settings: false,
@@ -534,8 +567,10 @@ impl SettingsView {
 }
 
 impl Render for SettingsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
         let card_bg = theme.card;
         let border_color = theme.border;
         let text_color = theme.foreground;
@@ -547,6 +582,8 @@ impl Render for SettingsView {
         let layout_pref_now = crate::layout_pref::preference(cx);
         let theme_mgr = ThemeManager::global(cx);
         let active_preset_name = theme_mgr.active_preset.name.clone();
+        let window_transparency = theme_mgr.window_transparency;
+        let window_blur_enabled = theme_mgr.window_blur_enabled;
 
         // Filter theme presets
         let mode_filter = self.theme_mode_filter.clone();
@@ -602,6 +639,8 @@ impl Render for SettingsView {
             .justify_start()
             .size_full()
             .overflow_y_scroll()
+            .bg(window_material::glass_fill(theme.background, window_transparency))
+            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
             .pt(px(40.0))
             .pb(px(60.0))
             .px_4()
@@ -653,7 +692,6 @@ impl Render for SettingsView {
                                     .rounded_lg()
                                     .border_1()
                                     .border_color(border_color)
-                                    .bg(card_bg)
                                     .overflow_hidden()
                                     // Row 1: Theme Mode Filter
                                     .child(
@@ -756,6 +794,109 @@ impl Render for SettingsView {
                                             } else {
                                                 None
                                             }),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Window transparency slider.
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                h_flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_row()
+                                                            .items_center()
+                                                            .gap_3()
+                                                            .child(Icon::new(IconName::Eye).text_color(muted_text))
+                                                            .child(
+                                                                div()
+                                                                    .flex()
+                                                                    .flex_col()
+                                                                    .child(
+                                                                        div()
+                                                                            .text_sm()
+                                                                            .font_weight(FontWeight::MEDIUM)
+                                                                            .text_color(text_color)
+                                                                            .child("Window transparency"),
+                                                                    )
+                                                                    .child(
+                                                                        div()
+                                                                            .text_xs()
+                                                                            .text_color(muted_text)
+                                                                            .child("Adjust how much of the desktop shows through"),
+                                                                    ),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        h_flex()
+                                                            .w(px(280.0))
+                                                            .items_center()
+                                                            .gap_3()
+                                                            .child(
+                                                                div()
+                                                                    .w(px(42.0))
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .text_align(TextAlign::Right)
+                                                                    .child(format!("{window_transparency}%")),
+                                                            )
+                                                            .child(
+                                                                Slider::new(&self.window_transparency_slider)
+                                                                    .flex_1(),
+                                                            ),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Blur uses the compositor's default strength.
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .justify_between()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .gap_3()
+                                                    .child(Icon::new(IconName::Eye).text_color(muted_text))
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(text_color)
+                                                                    .child("Backdrop blur"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .child("Blur strength is controlled by COSMIC"),
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                Switch::new("window-backdrop-blur")
+                                                    .checked(window_blur_enabled)
+                                                    .on_change(|enabled, _, cx| {
+                                                        ThemeManager::apply_window_blur_enabled(*enabled, cx);
+                                                    }),
+                                            ),
                                     )
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Row: Chat layout (pages vs sidebar)
@@ -980,7 +1121,6 @@ impl Render for SettingsView {
                                     .rounded_lg()
                                     .border_1()
                                     .border_color(border_color)
-                                    .bg(card_bg)
                                     .overflow_hidden()
                                     // Row 1: Connection & Logout
                                     .child(
@@ -1215,7 +1355,6 @@ impl Render for SettingsView {
                                     .rounded_lg()
                                     .border_1()
                                     .border_color(border_color)
-                                    .bg(card_bg)
                                     .overflow_hidden()
                                     // Header row
                                     .child(
@@ -1379,7 +1518,6 @@ impl Render for SettingsView {
                                     .rounded_lg()
                                     .border_1()
                                     .border_color(border_color)
-                                    .bg(card_bg)
                                     .overflow_hidden()
                                     .child(
                                         div()
@@ -1464,7 +1602,6 @@ impl Render for SettingsView {
                                     .rounded_lg()
                                     .border_1()
                                     .border_color(border_color)
-                                    .bg(card_bg)
                                     .overflow_hidden()
                                     // Header
                                     .child(
@@ -1747,7 +1884,6 @@ impl Render for SettingsView {
                                     .rounded_lg()
                                     .border_1()
                                     .border_color(border_color)
-                                    .bg(card_bg)
                                     .overflow_hidden()
                                     .child(
                                         div()

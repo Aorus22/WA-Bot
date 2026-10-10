@@ -9,7 +9,8 @@ use gpui_component::{v_flex, Icon, IconName};
 
 use crate::components::motion;
 use crate::router::{AppRoute, Router};
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 
 pub const SIDEBAR_WIDTH: f32 = 68.0;
 
@@ -23,8 +24,11 @@ impl NavigationSidebar {
 }
 
 impl RenderOnce for NavigationSidebar {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.app_theme();
+        let window_transparency = ThemeManager::global(cx).window_transparency;
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
         let current_prefix = if cx.has_global::<Router>() {
             Router::global(cx).current_route.path_prefix()
         } else {
@@ -35,12 +39,15 @@ impl RenderOnce for NavigationSidebar {
             .id("nav-sidebar")
             .w(px(SIDEBAR_WIDTH))
             .h_full()
-            .bg(theme.background)
+            .bg(window_material::glass_fill(theme.background, window_transparency))
             .border_r_1()
             .border_color(theme.border.opacity(0.4))
             .items_center()
             .py_6()
             .flex_shrink_0()
+            .when(framed, |s| {
+                s.rounded_bl(px(window_material::WINDOW_CORNER_RADIUS))
+            })
             .justify_between()
             .child(
                 // Top nav items

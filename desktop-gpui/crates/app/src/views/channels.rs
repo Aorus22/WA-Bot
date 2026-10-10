@@ -1,5 +1,6 @@
 //! Channels view matching Web ChannelsPage 1:1.
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::{h_flex, v_flex, Icon, IconName};
@@ -9,7 +10,8 @@ use wabot_backend_client::dto::{Channel, ChannelMessage, ChannelPreview};
 use crate::components::toast;
 use crate::icons::*;
 use crate::state::auth::AuthState;
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 use crate::TOKIO_RT;
 
 const QUICK_REACTIONS: &[&str] = &["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -434,8 +436,11 @@ impl ChannelsView {
 }
 
 impl Render for ChannelsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
+        let window_transparency = ThemeManager::global(cx).window_transparency;
         let border_color = theme.border;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -454,7 +459,8 @@ impl Render for ChannelsView {
             .id("channels-view")
             .size_full()
             .overflow_hidden()
-            .bg(bg_color)
+            .bg(window_material::glass_fill(bg_color, window_transparency))
+            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
             .relative()
             // --- Left Sidebar (340px) ---
             .child(
@@ -464,7 +470,6 @@ impl Render for ChannelsView {
                     .flex_shrink_0()
                     .border_r_1()
                     .border_color(border_color)
-                    .bg(bg_color)
                     // Header
                     .child(
                         h_flex()
@@ -706,7 +711,6 @@ impl Render for ChannelsView {
                     .flex_1()
                     .h_full()
                     .overflow_hidden()
-                    .bg(bg_color)
                     .children(if let Some(channel) = self.selected_channel.clone() {
                         let a_url = resolve_avatar_url(
                             channel.avatar.as_deref().unwrap_or(""),
@@ -728,7 +732,6 @@ impl Render for ChannelsView {
                                         .items_center()
                                         .border_b_1()
                                         .border_color(border_color)
-                                        .bg(bg_color)
                                         .child(
                                             h_flex()
                                                 .items_center()

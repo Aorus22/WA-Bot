@@ -2,7 +2,9 @@
 
 use gpui::{App, BorrowAppContext, Global, Hsla, Window};
 use gpui_component::{Theme, ThemeMode as GpuiThemeMode};
-use wabot_settings::{DesktopSettings, ThemeMode as SettingsThemeMode};
+use wabot_settings::{
+    DesktopSettings, MAX_WINDOW_TRANSPARENCY, ThemeMode as SettingsThemeMode,
+};
 
 use super::color::parse_hex_hsla;
 use super::gtk::{self, GTK_PRESET_NAME};
@@ -85,6 +87,8 @@ impl ActiveTokens {
 pub struct ThemeManager {
     pub active_preset: ThemePreset,
     pub mode: SettingsThemeMode,
+    pub window_transparency: u8,
+    pub window_blur_enabled: bool,
     pub tokens: ActiveTokens,
     /// The desktop (GTK) palette, when the user's GTK config provides one.
     pub gtk_preset: Option<ThemePreset>,
@@ -109,6 +113,8 @@ impl ThemeManager {
         Self {
             active_preset: preset,
             mode: settings.theme_mode,
+            window_transparency: settings.window_transparency.min(MAX_WINDOW_TRANSPARENCY),
+            window_blur_enabled: settings.window_blur_enabled,
             tokens,
             gtk_preset,
             gtk_key: gtk::current_key(),
@@ -181,6 +187,49 @@ impl ThemeManager {
         cx.refresh_windows();
     }
 
+    fn change_window_transparency(&mut self, value: u8, persist: bool, cx: &mut App) {
+        let value = value.min(MAX_WINDOW_TRANSPARENCY);
+        let changed = self.window_transparency != value;
+        self.window_transparency = value;
+
+        if persist {
+            if let Ok(mut settings) = DesktopSettings::load() {
+                settings.window_transparency = value;
+                let _ = settings.save();
+            }
+        }
+
+        if changed {
+            cx.refresh_windows();
+        }
+    }
+
+    pub fn preview_window_transparency(value: u8, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| {
+            this.change_window_transparency(value, false, cx);
+        });
+    }
+
+    pub fn apply_window_transparency(value: u8, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| {
+            this.change_window_transparency(value, true, cx);
+        });
+    }
+
+    pub fn change_window_blur_enabled(&mut self, enabled: bool, cx: &mut App) {
+        if self.window_blur_enabled == enabled {
+            return;
+        }
+        self.window_blur_enabled = enabled;
+
+        if let Ok(mut settings) = DesktopSettings::load() {
+            settings.window_blur_enabled = enabled;
+            let _ = settings.save();
+        }
+
+        cx.refresh_windows();
+    }
+
     /// Re-read the GTK config when it changed on disk (the desktop switched
     /// theme or dark/light). Keeps the palette list fresh and, when the
     /// desktop theme is the active one, restyles the app.
@@ -213,6 +262,13 @@ impl ThemeManager {
     pub fn apply_mode(mode: SettingsThemeMode, window: Option<&mut Window>, cx: &mut App) {
         cx.update_global::<Self, _>(|this, cx| {
             this.change_mode(mode, window, cx);
+        });
+    }
+
+    /// Change backdrop blur without borrowing the global manager at call sites.
+    pub fn apply_window_blur_enabled(enabled: bool, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| {
+            this.change_window_blur_enabled(enabled, cx);
         });
     }
 }

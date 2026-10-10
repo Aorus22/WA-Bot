@@ -1,7 +1,7 @@
 //! Main application shell view.
 
 use gpui::{
-    div, AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window,
+    div, prelude::FluentBuilder as _, px, AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window,
 };
 use gpui_component::{h_flex, v_flex};
 
@@ -11,7 +11,8 @@ use crate::components::motion;
 use crate::components::nav_sidebar::NavigationSidebar;
 use crate::components::titlebar::AppTitleBar;
 use crate::router::{AppRoute, Router};
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 use crate::views::calls::CallsView;
 use crate::views::channels::ChannelsView;
 use crate::views::chat::ChatView;
@@ -59,7 +60,7 @@ impl AppShellView {
 }
 
 impl Render for AppShellView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
         let current_route = if cx.has_global::<Router>() {
             Router::global(cx).current_route.clone()
@@ -74,7 +75,6 @@ impl Render for AppShellView {
             .id("app-shell")
             .relative()
             .size_full()
-            .bg(theme.background)
             .text_color(theme.foreground)
             .overflow_hidden()
             .child(AppTitleBar::new())
@@ -97,7 +97,7 @@ impl Render for AppShellView {
                                         div()
                                             .relative()
                                             .size_full()
-                                            .child(self.render_route_outlet(&current_route, cx)),
+                                    .child(self.render_route_outlet(&current_route, window, cx)),
                                         route_key,
                                         motion::BASE_MS,
                                         10.0,
@@ -110,8 +110,14 @@ impl Render for AppShellView {
 }
 
 impl AppShellView {
-    fn render_route_outlet(&self, route: &AppRoute, cx: &App) -> AnyElement {
+    fn render_route_outlet(&self, route: &AppRoute, window: &Window, cx: &App) -> AnyElement {
         let theme = cx.app_theme();
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
+        let page_background = window_material::glass_fill(
+            theme.background,
+            ThemeManager::global(cx).window_transparency,
+        );
 
         match route {
             AppRoute::Chat | AppRoute::ChatDetail(_) => {
@@ -129,6 +135,8 @@ impl AppShellView {
             AppRoute::Triggers | AppRoute::TriggerDetail(_) | AppRoute::TriggerNew => {
                 v_flex()
                     .size_full()
+                    .bg(page_background)
+                    .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                     .items_center()
                     .justify_center()
                     .gap_3()
@@ -139,6 +147,8 @@ impl AppShellView {
             AppRoute::Cron | AppRoute::CronDetail(_) | AppRoute::CronNew => {
                 v_flex()
                     .size_full()
+                    .bg(page_background)
+                    .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                     .items_center()
                     .justify_center()
                     .gap_3()
@@ -152,6 +162,8 @@ impl AppShellView {
             | AppRoute::WebhookLogs => {
                 v_flex()
                     .size_full()
+                    .bg(page_background)
+                    .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                     .items_center()
                     .justify_center()
                     .gap_3()
@@ -162,6 +174,8 @@ impl AppShellView {
             AppRoute::Documentation => {
                 v_flex()
                     .size_full()
+                    .bg(page_background)
+                    .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                     .items_center()
                     .justify_center()
                     .gap_3()

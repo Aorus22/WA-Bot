@@ -85,6 +85,17 @@ fn default_theme_preset() -> String {
     "default-dark".to_string()
 }
 
+pub const DEFAULT_WINDOW_TRANSPARENCY: u8 = 28;
+pub const MAX_WINDOW_TRANSPARENCY: u8 = 70;
+
+fn default_window_transparency() -> u8 {
+    DEFAULT_WINDOW_TRANSPARENCY
+}
+
+fn default_window_blur_enabled() -> bool {
+    true
+}
+
 /// Desktop settings: UI preferences only (see module docs for the boundary).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesktopSettings {
@@ -107,6 +118,12 @@ pub struct DesktopSettings {
     pub last_backend_url: Option<String>,
     #[serde(default)]
     pub window_state: Option<WindowState>,
+    /// How much of the desktop shows through app surfaces, from 0 to 70 percent.
+    #[serde(default = "default_window_transparency")]
+    pub window_transparency: u8,
+    /// Whether to request the compositor's default backdrop blur.
+    #[serde(default = "default_window_blur_enabled")]
+    pub window_blur_enabled: bool,
 
     #[serde(skip)]
     pub custom_base: Option<PathBuf>,
@@ -121,6 +138,8 @@ impl Default for DesktopSettings {
             backend_path_override: None,
             last_backend_url: None,
             window_state: None,
+            window_transparency: default_window_transparency(),
+            window_blur_enabled: default_window_blur_enabled(),
             custom_base: None,
         }
     }
@@ -188,6 +207,7 @@ impl DesktopSettings {
         if let Some(ws) = self.window_state {
             self.window_state = ws.normalized();
         }
+        self.window_transparency = self.window_transparency.min(MAX_WINDOW_TRANSPARENCY);
         // Relative backend overrides are meaningless across cwd changes.
         if let Some(p) = &self.backend_path_override {
             if !p.is_absolute() {

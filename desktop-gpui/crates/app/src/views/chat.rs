@@ -30,7 +30,8 @@ use super::viewer_math::{
 use crate::state::auth::AuthState;
 use crate::state::call::CallManager;
 use crate::state::chat::ChatStore;
-use crate::theme::manager::{ActiveTokens, AppThemeExt};
+use crate::theme::manager::{ActiveTokens, AppThemeExt, ThemeManager};
+use crate::window_material;
 use crate::TOKIO_RT;
 
 /// Load state of the viewer image.
@@ -4282,6 +4283,9 @@ impl Render for ChatView {
             self.preview_needs_focus = false;
         }
         let theme = *cx.app_theme();
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
+        let window_transparency = ThemeManager::global(cx).window_transparency;
         let border_color = theme.border;
         let bg_color = theme.background;
         let card_bg = theme.card;
@@ -4402,7 +4406,6 @@ impl Render for ChatView {
         h_flex()
             .size_full()
             .overflow_hidden()
-            .bg(bg_color)
             .relative()
             // ====================================================
             // LEFT SIDEBAR: CONVERSATIONS LIST
@@ -4415,7 +4418,7 @@ impl Render for ChatView {
                     .h_full()
                     .border_r_1()
                     .border_color(border_color.opacity(0.4))
-                    .bg(bg_color)
+                    .bg(window_material::glass_fill(bg_color, window_transparency))
                     .flex_shrink_0()
                     // Sidebar Header
                     .child(
@@ -4956,7 +4959,11 @@ impl Render for ChatView {
                     .h_full()
                     .overflow_hidden()
                     .when(!show_right, |el| el.hidden())
-                    .bg(theme.chat.map(|c| c.chat_bg).unwrap_or(bg_color))
+                    .bg(window_material::glass_fill(
+                        theme.chat.map(|c| c.chat_bg).unwrap_or(bg_color),
+                        window_transparency,
+                    ))
+                    .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                     .children(if let Some(ref active_chat) = selected_chat {
                         let chat_name = active_chat.name.clone();
                         let chat_jid = active_chat.id.clone();
@@ -4972,7 +4979,10 @@ impl Render for ChatView {
                                         .py_3()
                                         .border_b_1()
                                         .border_color(border_color.opacity(0.4))
-                                        .bg(theme.chat.map(|c| c.header).unwrap_or(bg_color))
+                                        .bg(window_material::glass_fill(
+                                            theme.chat.map(|c| c.header).unwrap_or(bg_color),
+                                            window_transparency,
+                                        ))
                                         .items_center()
                                         .justify_between()
                                         .gap_1()
@@ -5747,6 +5757,7 @@ impl Render for ChatView {
                                         .border_t_1()
                                         .border_color(border_color.opacity(0.4))
                                         .bg(bg_color)
+                                        .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                                         // Reply Preview Banner
                                         .children(if let Some(ref r_msg) = self.reply_to {
                                             let r_sender = if r_msg.from == "me" { "You" } else { r_msg.sender_name.as_deref().unwrap_or("Sender") };
@@ -6086,6 +6097,7 @@ impl Render for ChatView {
                         .border_l_1()
                         .border_color(border_color.opacity(0.4))
                         .bg(bg_color)
+                        .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
                         .flex_shrink_0()
                         // Header
                         .child(

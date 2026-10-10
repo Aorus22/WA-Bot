@@ -1,5 +1,6 @@
 //! Calls view matching Web CallHistoryPage 1:1.
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
@@ -10,7 +11,8 @@ use crate::icons::*;
 use crate::router::{AppRoute, Router};
 use crate::state::auth::AuthState;
 use crate::state::call::CallManager;
-use crate::theme::manager::AppThemeExt;
+use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::window_material;
 use crate::TOKIO_RT;
 
 const PAGE_SIZE: usize = 25;
@@ -325,8 +327,11 @@ impl CallsView {
 }
 
 impl Render for CallsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
+        let framed = !crate::popover::is_popover(cx)
+            && window_material::is_framed_window(window);
+        let window_transparency = ThemeManager::global(cx).window_transparency;
         let border_color = theme.border;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -369,7 +374,8 @@ impl Render for CallsView {
             .id("calls-view")
             .size_full()
             .overflow_hidden()
-            .bg(bg_color)
+            .bg(window_material::glass_fill(bg_color, window_transparency))
+            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
             .relative()
             // --- Left Sidebar (360px) ---
             .child(
@@ -379,7 +385,6 @@ impl Render for CallsView {
                     .flex_shrink_0()
                     .border_r_1()
                     .border_color(border_color)
-                    .bg(bg_color)
                     // Sidebar Header
                     .child(
                         v_flex()
@@ -786,7 +791,6 @@ impl Render for CallsView {
                     .flex_1()
                     .h_full()
                     .overflow_hidden()
-                    .bg(bg_color)
                     .children(if let Some(log) = self.selected_log.clone() {
                         let missed = is_missed(&log);
                         let is_video = matches!(log.call_type, CallType::Video | CallType::GroupVideo);

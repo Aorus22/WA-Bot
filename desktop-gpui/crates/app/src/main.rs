@@ -5,12 +5,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use gpui::{
     point, px, size, AnyWindowHandle, App, AppContext, Application, Bounds, Styled, TitlebarOptions,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
+    WindowBounds, WindowDecorations, WindowKind, WindowOptions,
 };
 use gpui_reqwest_client::ReqwestClient;
 use wabot_app::{
     components::{connection_banner::ConnectionState, toast::ToastBus},
-    backend, popover,
+    backend, popover, window_material,
     router::Router,
     state::auth::{AuthState, AuthStatus},
     state::call::CallManager,
@@ -158,7 +158,9 @@ fn main() {
                         })),
                         titlebar: None,
                         app_id: Some("dev.wabot.popover".to_string()),
-                        window_background: WindowBackgroundAppearance::Transparent,
+                        window_background: window_material::background_appearance(
+                            ThemeManager::global(cx).window_blur_enabled,
+                        ),
                         kind: WindowKind::LayerShell(popover::card_layer_options(&placement)),
                         ..Default::default()
                     }
@@ -166,6 +168,11 @@ fn main() {
                     WindowOptions {
                         window_bounds: Some(window_bounds),
                         window_min_size: Some(size(px(800.0), px(540.0))),
+                        app_id: Some("wa-bot".to_string()),
+                        window_background: window_material::background_appearance(
+                            ThemeManager::global(cx).window_blur_enabled,
+                        ),
+                        window_decorations: Some(WindowDecorations::Client),
                         titlebar: Some(TitlebarOptions {
                             title: Some("WA Bot Desktop".into()),
                             appears_transparent: true,
@@ -229,14 +236,14 @@ fn main() {
                     let framed = cx.new(|_| popover::PopoverFrame { child: gate_view.into() });
                     cx.new(|cx| {
                         let mut root = gpui_component::Root::new(framed, window, cx)
-                            .bordered(false)
                             .bg(gpui::transparent_black());
                         root.text_style().font_fallbacks = Some(emoji_fallbacks());
                         root
                     })
                 } else {
                     cx.new(|cx| {
-                        let mut root = gpui_component::Root::new(gate_view, window, cx);
+                        let mut root = gpui_component::Root::new(gate_view, window, cx)
+                            .bg(gpui::transparent_black());
                         root.text_style().font_fallbacks = Some(emoji_fallbacks());
                         root
                     })
