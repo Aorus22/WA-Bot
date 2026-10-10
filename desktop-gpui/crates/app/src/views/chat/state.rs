@@ -54,3 +54,11 @@ pub struct RenderMessage {
     pub ticks: MessageTicks,
     pub quoted: Option<(String, String)>, // (sender_name, first_line)
 }
+
+/// An image pasted into the composer, waiting to be sent (with the typed text
+/// as its caption) when the user hits send.
+#[derive(Clone)]
+pub struct PendingAttachment {
+    pub file_name: String,
+    pub image: std::sync::Arc<Image>,
+}

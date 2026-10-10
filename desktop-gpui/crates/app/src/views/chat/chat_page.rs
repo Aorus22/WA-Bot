@@ -102,6 +102,8 @@ pub struct ChatView {
     pub compose_field_focus: FocusHandle,
     pub active_compose_field: usize,
     pub is_sending_attachment: bool,
+    /// Pasted image staged in the composer until send.
+    pub pending_attachment: Option<PendingAttachment>,
 
     // Full-screen image preview
     pub preview_image_url: Option<String>,
@@ -220,6 +222,7 @@ impl ChatView {
             compose_field_focus: cx.focus_handle(),
             active_compose_field: 0,
             is_sending_attachment: false,
+            pending_attachment: None,
             join_group_link: String::new(),
             join_group_focus: cx.focus_handle(),
             is_joining_group: false,

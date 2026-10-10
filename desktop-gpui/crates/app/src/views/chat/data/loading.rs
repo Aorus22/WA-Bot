@@ -46,6 +46,7 @@ impl ChatView {
         self.info_sheet_tab = InfoSheetTab::Media;
         self.reply_to = None;
         self.editing_message = None;
+        self.pending_attachment = None;
         self.update_compose_placeholder(window, cx);
         self.context_menu = None;
         self.chat_context_menu = None;

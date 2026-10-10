@@ -57,7 +57,6 @@ impl ChatView {
         };
         self.attach_panel = AttachPanel::None;
         self.is_sending_attachment = true;
-        let base_url = Self::compose_base_url(cx);
 
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let cx_handle = cx.clone();
@@ -109,28 +108,59 @@ impl ChatView {
                     return;
                 };
 
-                // Optimistic bubble, like the web client's temp message.
-                let content = kind.optimistic_content(&file_name, &media_type);
-                let msg_type = kind.optimistic_type(&media_type).to_string();
-                let mut temp_id = String::new();
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = this.upgrade() {
                         view.update(cx, |this, cx| {
-                            temp_id = this.push_optimistic_attachment(
-                                cx,
-                                &chat_id,
-                                content.clone(),
-                                &msg_type,
+                            this.send_attachment_bytes(
+                                chat_id.clone(),
+                                file_name.clone(),
+                                media_type.clone(),
+                                bytes,
+                                String::new(),
                                 None,
+                                kind,
+                                cx,
                             );
-                            cx.notify();
                         });
                     }
                 });
-                if temp_id.is_empty() {
-                    return;
-                }
+            }
+        })
+        .detach();
+        cx.notify();
+    }
 
+    /// Send `bytes` as a media message with an optimistic local bubble. Shared by the
+    /// file picker and image paste; `caption` rides along with the media.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn send_attachment_bytes(
+        &mut self,
+        chat_id: String,
+        file_name: String,
+        media_type: String,
+        bytes: Vec<u8>,
+        caption: String,
+        mime_type: Option<String>,
+        kind: MediaKind,
+        cx: &mut Context<Self>,
+    ) {
+        let base_url = Self::compose_base_url(cx);
+        self.is_sending_attachment = true;
+        let content = if caption.is_empty() {
+            kind.optimistic_content(&file_name, &media_type)
+        } else {
+            caption.clone()
+        };
+        let msg_type = kind.optimistic_type(&media_type).to_string();
+        let temp_id = self.push_optimistic_attachment(cx, &chat_id, content, &msg_type, None);
+        if temp_id.is_empty() {
+            self.is_sending_attachment = false;
+            return;
+        }
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
                 let client = HttpClient::new(&base_url);
                 let target = chat_id.clone();
                 let file_for_send = file_name.clone();
@@ -142,14 +172,17 @@ impl ChatView {
                                 .send_audio(&target, bytes, &file_for_send, false, None, None)
                                 .await
                         } else {
-                            client
-                                .send_media(SendMediaBuilder::new(
-                                    &target,
-                                    media_for_send,
-                                    bytes,
-                                    file_for_send,
-                                ))
-                                .await
+                            let mut builder = SendMediaBuilder::new(
+                                &target,
+                                media_for_send,
+                                bytes,
+                                file_for_send,
+                            )
+                            .caption(caption);
+                            if let Some(mime) = mime_type {
+                                builder = builder.mime_type(mime);
+                            }
+                            client.send_media(builder).await
                         }
                     })
                     .await;
@@ -439,6 +472,10 @@ impl ChatView {
     /// Send current message in compose bar (supports regular send, reply, and edit)
     pub fn send_current_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.compose_text.trim().to_string();
+        if self.pending_attachment.is_some() && self.editing_message.is_none() {
+            self.send_pending_attachment(window, cx);
+            return;
+        }
         if text.is_empty() || self.is_sending {
             return;
         }
