@@ -25,7 +25,6 @@ web/dist
 
 # Desktop apps (not needed for backend image)
 desktop/
-desktop-gtk/
 desktop-gpui/
 
 # Tooling / workspace state

@@ -1,18 +1,15 @@
 # WA Bot — perintah build (Windows dan Linux)
 # Jalankan dari root repo:
-#   make install      pasang dependensi FE + Go backend dan Go desktop-gtk
+#   make install      pasang dependensi FE + Electron + Go backend
 #   make install-electron pasang dependency Electron ke desktop/node_modules
 #   make be           build backend -> wa-bot-backend[.exe] di root
 #   make dist-fe      build frontend -> web/dist lalu disalin ke frontend/dist
-#   make desktop-gtk  build aplikasi desktop GTK -> compiled/wa-bot-desktop[.exe]
 #   make desktop-electron build aplikasi Electron -> compiled/electron
 #   make gpui-linux   build aplikasi desktop GPUI Linux -> compiled/gpui-linux
 #   make gpui-windows build aplikasi desktop GPUI Windows -> compiled/gpui-windows
 #
 # Catatan:
 #   - Backend memakai mattn/go-sqlite3 sehingga butuh gcc/CGO di semua OS.
-#   - Linux: pasang dulu libgtk-4-dev + libadwaita-1-dev untuk target desktop-gtk.
-#   - Windows: target desktop-gtk memakai MSYS2 via desktop-gtk/environment.ps1.
 #   - Desktop GPUI (Linux): butuh alsa, libx11, libxkbcommon (lihat desktop-gpui/scripts/build-linux.sh).
 #   - Desktop GPUI (Windows): butuh target x86_64-pc-windows-gnu atau MSVC (lihat desktop-gpui/scripts/build-windows.sh).
 
@@ -56,17 +53,16 @@ else
     BUILD_GPUI_WINDOWS = bash desktop-gpui/scripts/build-windows.sh
 endif
 
-.PHONY: help install install-electron be dist-fe desktop-gtk desktop-electron \
+.PHONY: help install install-electron be dist-fe desktop-electron \
 	gpui-linux gpui-windows make-gpui-linux make-gpui-windows make\:gpui-linux make\:gpui-windows \
 	desktop-gpui-linux desktop-gpui-windows
 
 help:
 	@echo Target yang tersedia:
-	@echo   make install          - install dependency FE, Electron, backend, dan desktop-gtk
+	@echo   make install          - install dependency FE, Electron, dan backend
 	@echo   make install-electron - install dependency ke desktop/node_modules
 	@echo   make be               - build backend menjadi wa-bot-backend$(EXE_EXT)
 	@echo   make dist-fe          - build frontend, hasil di web/dist dan frontend/dist
-	@echo   make desktop-gtk      - build aplikasi desktop GTK ke folder compiled
 	@echo   make desktop-electron - build aplikasi Electron ke compiled/electron
 	@echo   make gpui-linux       - build rilis desktop GPUI Linux ke compiled/gpui-linux
 	@echo   make gpui-windows     - build rilis desktop GPUI Windows ke compiled/gpui-windows
@@ -76,7 +72,6 @@ install:
 	$(NPM_INSTALL_WEB)
 	$(MAKE) install-electron
 	go mod download
-	cd desktop-gtk && go mod download
 
 install-electron:
 	$(NPM_INSTALL_DESKTOP)
@@ -93,16 +88,6 @@ dist-fe:
 desktop-electron: be dist-fe
 	$(NPM_BUILD_ELECTRON)
 	@echo Hasil Electron siap: compiled/electron
-
-ifeq ($(HOST_OS),windows)
-desktop-gtk:
-	powershell -NoProfile -ExecutionPolicy Bypass -File "desktop-gtk/scripts/build-gtk.ps1"
-else
-desktop-gtk:
-	mkdir -p compiled
-	cd desktop-gtk && go vet ./...
-	cd desktop-gtk && go build -trimpath -ldflags "-s -w" -o ../compiled/wa-bot-desktop .
-endif
 
 # Target rilis desktop GPUI
 gpui-linux:
