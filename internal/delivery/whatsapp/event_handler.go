@@ -386,7 +386,7 @@ func (h *WhatsAppEventHandler) handleMarkChatAsRead(evt *events.MarkChatAsRead) 
 		return
 	}
 	if changed && !evt.FromFullSync {
-		h.broadcastChatEvent("chat_update", chatID, "unread", map[string]interface{}{"unread": 1})
+		h.broadcastChatEvent("chat_update", chatID, map[string]interface{}{"unread": 1})
 	}
 }
 
@@ -402,7 +402,7 @@ func (h *WhatsAppEventHandler) handleDeleteChat(evt *events.DeleteChat) {
 		return
 	}
 	if changed && !evt.FromFullSync {
-		h.broadcastChatEvent("chat_deleted", evt.JID.ToNonAD().String(), "deleted", nil)
+		h.broadcastChatEvent("chat_deleted", evt.JID.ToNonAD().String(), nil)
 	}
 }
 
@@ -417,7 +417,7 @@ func (h *WhatsAppEventHandler) handleClearChat(evt *events.ClearChat) {
 		return
 	}
 	if !evt.FromFullSync {
-		h.broadcastChatEvent("chat_cleared", evt.JID.ToNonAD().String(), "cleared", nil)
+		h.broadcastChatEvent("chat_cleared", evt.JID.ToNonAD().String(), nil)
 	}
 }
 
@@ -439,7 +439,7 @@ func (h *WhatsAppEventHandler) handleDeleteForMe(evt *events.DeleteForMe) {
 		"chatId": h.msgStore.ResolveChatID(chatID),
 		"id":     evt.MessageID,
 	})
-	h.broadcastChatEvent("chat_update", chatID, "message_deleted", map[string]interface{}{"lastMsg": lastMsg})
+	h.broadcastChatEvent("chat_update", chatID, map[string]interface{}{"lastMsg": lastMsg})
 }
 
 // handlePushName follows a contact renaming themselves.
@@ -529,14 +529,13 @@ func (h *WhatsAppEventHandler) clearChatUnread(chatID string, broadcast bool) {
 		return
 	}
 	if broadcast {
-		h.broadcastChatEvent("chat_update", chatID, "read", map[string]interface{}{"unread": 0})
+		h.broadcastChatEvent("chat_update", chatID, map[string]interface{}{"unread": 0})
 	}
 }
 
 // broadcastChatEvent sends a targeted chat event keyed by the chat's resolved
-// ID so clients patch their list in place. Clients that only know the generic
-// chats_changed event (web, gtk) still get it with the same reason and refetch.
-func (h *WhatsAppEventHandler) broadcastChatEvent(eventType, chatID, reason string, fields map[string]interface{}) {
+// ID so clients patch their list in place instead of refetching it.
+func (h *WhatsAppEventHandler) broadcastChatEvent(eventType, chatID string, fields map[string]interface{}) {
 	if h.httpServer == nil {
 		return
 	}
@@ -545,7 +544,6 @@ func (h *WhatsAppEventHandler) broadcastChatEvent(eventType, chatID, reason stri
 		payload[k] = v
 	}
 	h.httpServer.BroadcastMessage(eventType, payload)
-	h.httpServer.BroadcastMessage("chats_changed", map[string]string{"reason": reason})
 }
 
 func (h *WhatsAppEventHandler) persistAndBroadcastChatState(state repository.ChatState) {
