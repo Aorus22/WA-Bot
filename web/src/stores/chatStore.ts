@@ -22,6 +22,12 @@ interface ChatStore {
 	setChatsLoading: (v: boolean) => void
 	upsertChat: (chat: Chat) => void
 	patchChatState: (state: ChatState) => void
+	/** In-place patch of a chat row (unread badge, preview); absent fields are untouched. */
+	patchChat: (chatId: string, patch: Partial<Pick<Chat, "unread" | "lastMsg">>) => void
+	/** Chat deleted on another device: drop it and its cached messages. */
+	removeChat: (chatId: string) => void
+	/** Chat cleared on another device: keep it listed but empty. */
+	clearChat: (chatId: string) => void
 	invalidateMessages: () => void
 
 	ensureChatState: (chatId: string) => void
@@ -103,6 +109,39 @@ export const useChatStore = create<ChatStore>((set) => ({
 					: chat
 			),
 		})),
+
+	patchChat: (chatId, patch) =>
+		set((state) => ({
+			chats: state.chats.map((chat) =>
+				chat.id === chatId ? { ...chat, ...patch } : chat
+			),
+		})),
+
+	removeChat: (chatId) =>
+		set((state) => {
+			const messagesByChat = { ...state.messagesByChat }
+			delete messagesByChat[chatId]
+			return {
+				chats: state.chats.filter((chat) => chat.id !== chatId),
+				messagesByChat,
+			}
+		}),
+
+	clearChat: (chatId) =>
+		set((state) => {
+			const prev = state.messagesByChat[chatId]
+			return {
+				chats: state.chats.map((chat) =>
+					chat.id === chatId ? { ...chat, lastMsg: "", unread: 0 } : chat
+				),
+				messagesByChat: prev
+					? {
+							...state.messagesByChat,
+							[chatId]: { ...prev, messages: [], hasMore: false, hasMoreNext: false },
+						}
+					: state.messagesByChat,
+			}
+		}),
 
 	invalidateMessages: () =>
 		set((state) => ({

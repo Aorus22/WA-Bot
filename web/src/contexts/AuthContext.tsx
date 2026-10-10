@@ -152,6 +152,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 					useChatStore.getState().patchChatState(message.payload)
 				}
 				break
+			case "chat_update":
+				if (message.payload?.chatId) {
+					const { chatId, unread, lastMsg } = message.payload
+					useChatStore.getState().patchChat(chatId, {
+						...(typeof unread === "number" ? { unread } : {}),
+						...(typeof lastMsg === "string" ? { lastMsg } : {}),
+					})
+				}
+				break
+			case "chat_deleted":
+				if (message.payload?.chatId) {
+					useChatStore.getState().removeChat(message.payload.chatId)
+				}
+				break
+			case "chat_cleared":
+				if (message.payload?.chatId) {
+					useChatStore.getState().clearChat(message.payload.chatId)
+				}
+				break
 			case "chats_changed":
 				useChatStore.getState().invalidateMessages()
 				api.getChats()

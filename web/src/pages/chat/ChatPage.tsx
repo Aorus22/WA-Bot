@@ -57,6 +57,14 @@ export function ChatPage() {
 		}
 	}, [chatId, chats])
 
+	// The open chat was deleted on another device: leave it (the effect above
+	// then clears the selection once the URL has no chat id).
+	useEffect(() => {
+		if (chatId && selectedChat?.id === chatId && chats.length > 0 && !chats.some(c => c.id === chatId)) {
+			navigate("/chat")
+		}
+	}, [chatId, chats, selectedChat?.id, navigate])
+
 	// Sidebar resize (desktop only)
 	const [sidebarWidth, setSidebarWidth] = useState(400)
 	const isResizing = useRef(false)
