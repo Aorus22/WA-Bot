@@ -42,6 +42,7 @@ qrcode = { workspace = true }
 anyhow = { workspace = true }
 flume = { workspace = true }
 parking_lot = { workspace = true }
+notify-rust = { workspace = true }
 
 [package.metadata.deb]
 name = "wa-bot"

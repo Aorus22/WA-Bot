@@ -7606,6 +7606,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "gpui-pre-reqwest-client",
+ "notify-rust",
  "parking_lot",
  "qrcode",
  "raw-window-handle",

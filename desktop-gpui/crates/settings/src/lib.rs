@@ -98,6 +98,10 @@ fn default_window_blur_enabled() -> bool {
     true
 }
 
+fn default_notifications_enabled() -> bool {
+    true
+}
+
 /// Desktop settings: UI preferences only (see module docs for the boundary).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesktopSettings {
@@ -129,6 +133,9 @@ pub struct DesktopSettings {
     /// Whether to request the compositor's default backdrop blur.
     #[serde(default = "default_window_blur_enabled")]
     pub window_blur_enabled: bool,
+    /// Whether incoming messages raise an OS notification.
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
 
     #[serde(skip)]
     pub custom_base: Option<PathBuf>,
@@ -146,6 +153,7 @@ impl Default for DesktopSettings {
             settings_version: SETTINGS_SCHEMA_VERSION,
             window_transparency: default_window_transparency(),
             window_blur_enabled: default_window_blur_enabled(),
+            notifications_enabled: default_notifications_enabled(),
             custom_base: None,
         }
     }

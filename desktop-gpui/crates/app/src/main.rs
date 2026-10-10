@@ -77,6 +77,9 @@ fn main() {
             let is_dark = theme_manager.is_dark();
             cx.set_global(theme_manager);
             cx.set_global(wabot_app::layout_pref::ChatLayoutPref(settings.chat_layout));
+            cx.set_global(wabot_app::notifications::NotificationPref(
+                settings.notifications_enabled,
+            ));
 
             // Stop the bundled backend (if this process started it) on quit.
             cx.on_app_quit(|_| async {
@@ -311,6 +314,10 @@ fn main() {
                 while let Ok(event) = ws_rx.recv_async().await {
                     let _ = cx.update(|cx| {
                         let mut needs_refresh = false;
+                        // Before the store applies it, so a repeat is still recognisable.
+                        if let wabot_backend_client::ws::WsEvent::NewMessage(msg) = &event {
+                            wabot_app::notifications::notify_new_message(msg, cx);
+                        }
                         if cx.has_global::<AuthState>() {
                             if AuthState::global_mut(cx).handle_ws_event(&event) {
                                 needs_refresh = true;

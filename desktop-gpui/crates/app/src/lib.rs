@@ -14,6 +14,7 @@ pub mod components;
 pub mod icons;
 pub mod layout_pref;
 pub mod localtime;
+pub mod notifications;
 pub mod popover;
 pub mod router;
 pub mod state;

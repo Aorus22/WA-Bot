@@ -583,6 +583,7 @@ impl Render for SettingsView {
         let tag_bg = theme.muted;
 
         let layout_pref_now = crate::layout_pref::preference(cx);
+        let notifications_now = crate::notifications::enabled(cx);
         let theme_mgr = ThemeManager::global(cx);
         let active_preset_name = theme_mgr.active_preset.name.clone();
         let window_transparency = theme_mgr.window_transparency;
@@ -977,6 +978,50 @@ impl Render for SettingsView {
                                                                 crate::layout_pref::set(cx, value);
                                                             }))
                                                     })),
+                                            ),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Row: OS notifications for incoming messages
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .justify_between()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .gap_3()
+                                                    .child(Icon::new(IconName::Bell).text_color(muted_text))
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(text_color)
+                                                                    .child("Notifications"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .child("Show a desktop notification for new messages while the app is not focused"),
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                Switch::new("os-notifications")
+                                                    .checked(notifications_now)
+                                                    .on_change(|enabled, _, cx| {
+                                                        crate::notifications::set_enabled(cx, *enabled);
+                                                    }),
                                             ),
                                     )
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
