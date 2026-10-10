@@ -190,6 +190,7 @@ func InitializeApp() (*App, error) {
 	}
 	seedCancel()
 	httpServer.SetSettingsRepo(settingsRepo)
+	eventHandler.SetSettingsRepo(settingsRepo)
 
 	// Gemini service, gated by the DB-backed gemini_api_key setting.
 	var geminiService *ai.GeminiService

@@ -35,17 +35,18 @@ type AccountEvents interface {
 }
 
 type WhatsAppEventHandler struct {
-	accounts    AccountEvents
-	handlerUC   HandlerUseCaseInterface
-	waService   *WhatsAppService
-	stateRepo   repository.UserStateRepository
-	waClient    *whatsappInfra.WhatsAppClient
-	msgStore    *repository.MessageStore
-	httpServer  HTTPServer
-	storage     repository.StorageRepository
-	luaService  LuaService
-	aiClient    *ai.AIClient
-	historySync *HistorySyncService
+	accounts     AccountEvents
+	handlerUC    HandlerUseCaseInterface
+	waService    *WhatsAppService
+	stateRepo    repository.UserStateRepository
+	waClient     *whatsappInfra.WhatsAppClient
+	msgStore     *repository.MessageStore
+	httpServer   HTTPServer
+	storage      repository.StorageRepository
+	luaService   LuaService
+	aiClient     *ai.AIClient
+	historySync  *HistorySyncService
+	settingsRepo repository.SettingsRepository
 }
 
 type LuaService interface {
@@ -83,6 +84,10 @@ func (h *WhatsAppEventHandler) SetLuaService(luaService LuaService) {
 
 func (h *WhatsAppEventHandler) SetAIClient(client *ai.AIClient) {
 	h.aiClient = client
+}
+
+func (h *WhatsAppEventHandler) SetSettingsRepo(repo repository.SettingsRepository) {
+	h.settingsRepo = repo
 }
 
 func (h *WhatsAppEventHandler) SetAccountEvents(a AccountEvents) {
@@ -177,6 +182,20 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 		h.handleMute(v)
 	case *events.Archive:
 		h.handleArchive(v)
+	case *events.MarkChatAsRead:
+		h.handleMarkChatAsRead(v)
+	case *events.DeleteChat:
+		h.handleDeleteChat(v)
+	case *events.ClearChat:
+		h.handleClearChat(v)
+	case *events.DeleteForMe:
+		h.handleDeleteForMe(v)
+	case *events.PushName:
+		h.handlePushName(v)
+	case *events.UserAbout:
+		h.handleUserAbout(v)
+	case *events.UnarchiveChatsSetting:
+		h.handleUnarchiveChatsSetting(v)
 	case *events.GroupInfo:
 		h.handleGroupInfo(v)
 	case *events.JoinedGroup:
@@ -346,6 +365,189 @@ func (h *WhatsAppEventHandler) handleArchive(evt *events.Archive) {
 	h.persistAndBroadcastChatState(state)
 }
 
+// handleMarkChatAsRead clears the unread badge when the chat was read on
+// another device (app-state sync).
+func (h *WhatsAppEventHandler) handleMarkChatAsRead(evt *events.MarkChatAsRead) {
+	if evt.Action == nil {
+		return
+	}
+	chatID := evt.JID.ToNonAD().String()
+	if evt.Action.GetRead() {
+		h.clearChatUnread(chatID, !evt.FromFullSync)
+		return
+	}
+	// Marked unread on another device: our own unread flag.
+	if h.msgStore == nil {
+		return
+	}
+	changed, err := h.msgStore.MarkChatUnread(chatID)
+	if err != nil {
+		fmt.Printf("[READ_SYNC] Failed to mark %s unread: %v\n", chatID, err)
+		return
+	}
+	if changed && !evt.FromFullSync {
+		h.broadcastChatEvent("chat_update", chatID, "unread", map[string]interface{}{"unread": 1})
+	}
+}
+
+// handleDeleteChat hides a chat deleted on another device. The chat and its
+// messages stay in the DB, flagged deleted_at; a newer message revives it.
+func (h *WhatsAppEventHandler) handleDeleteChat(evt *events.DeleteChat) {
+	if h.msgStore == nil {
+		return
+	}
+	changed, err := h.msgStore.MarkChatDeleted(evt.JID.ToNonAD().String(), evt.Timestamp.UnixMilli())
+	if err != nil {
+		fmt.Printf("[CHAT_SYNC] Failed to mark %s deleted: %v\n", evt.JID, err)
+		return
+	}
+	if changed && !evt.FromFullSync {
+		h.broadcastChatEvent("chat_deleted", evt.JID.ToNonAD().String(), "deleted", nil)
+	}
+}
+
+// handleClearChat empties a chat cleared on another device; messages are
+// flagged deleted_at, not removed.
+func (h *WhatsAppEventHandler) handleClearChat(evt *events.ClearChat) {
+	if h.msgStore == nil {
+		return
+	}
+	if err := h.msgStore.MarkChatCleared(evt.JID.ToNonAD().String(), evt.Timestamp.UnixMilli()); err != nil {
+		fmt.Printf("[CHAT_SYNC] Failed to mark %s cleared: %v\n", evt.JID, err)
+		return
+	}
+	if !evt.FromFullSync {
+		h.broadcastChatEvent("chat_cleared", evt.JID.ToNonAD().String(), "cleared", nil)
+	}
+}
+
+// handleDeleteForMe hides a message deleted for the user on another device;
+// the row is kept, flagged deleted_at.
+func (h *WhatsAppEventHandler) handleDeleteForMe(evt *events.DeleteForMe) {
+	if h.msgStore == nil {
+		return
+	}
+	chatID, lastMsg, err := h.msgStore.MarkMessageDeleted(evt.MessageID, evt.Timestamp.UnixMilli())
+	if err != nil {
+		fmt.Printf("[CHAT_SYNC] Failed to mark message %s deleted: %v\n", evt.MessageID, err)
+		return
+	}
+	if chatID == "" || evt.FromFullSync || h.httpServer == nil {
+		return
+	}
+	h.httpServer.BroadcastMessage("message_deleted", map[string]string{
+		"chatId": h.msgStore.ResolveChatID(chatID),
+		"id":     evt.MessageID,
+	})
+	h.broadcastChatEvent("chat_update", chatID, "message_deleted", map[string]interface{}{"lastMsg": lastMsg})
+}
+
+// handlePushName follows a contact renaming themselves.
+func (h *WhatsAppEventHandler) handlePushName(evt *events.PushName) {
+	if h.msgStore == nil || strings.TrimSpace(evt.NewPushName) == "" {
+		return
+	}
+	seen := map[string]struct{}{}
+	for _, jid := range []waTypes.JID{evt.JID.ToNonAD(), evt.JIDAlt.ToNonAD()} {
+		if jid.IsEmpty() {
+			continue
+		}
+		id := jid.String()
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		renamed, err := h.msgStore.ApplyPushName(id, evt.OldPushName, evt.NewPushName)
+		if err != nil {
+			fmt.Printf("[CONTACT] Failed to apply push name for %s: %v\n", id, err)
+			continue
+		}
+		if renamed && h.httpServer != nil {
+			h.httpServer.BroadcastMessage("chat_name_update", map[string]interface{}{
+				"chatId": id,
+				"name":   strings.TrimSpace(evt.NewPushName),
+				"avatar": "",
+			})
+		}
+	}
+}
+
+// handleUserAbout stores a contact's updated about text.
+func (h *WhatsAppEventHandler) handleUserAbout(evt *events.UserAbout) {
+	if h.msgStore == nil || evt.JID.IsEmpty() {
+		return
+	}
+	if err := h.msgStore.SaveContactAbout(evt.JID.ToNonAD().String(), evt.Status); err != nil {
+		fmt.Printf("[CONTACT] Failed to save about for %s: %v\n", evt.JID, err)
+	}
+}
+
+// settingUnarchiveOnMessage is the app setting mirroring WhatsApp's "Keep
+// chats archived" (inverted). Unset means WhatsApp's default: unarchive.
+const settingUnarchiveOnMessage = "unarchive_on_new_message"
+
+func (h *WhatsAppEventHandler) handleUnarchiveChatsSetting(evt *events.UnarchiveChatsSetting) {
+	if h.settingsRepo == nil || evt.Action == nil {
+		return
+	}
+	val := "false"
+	if evt.Action.GetUnarchiveChats() {
+		val = "true"
+	}
+	if err := h.settingsRepo.Set(context.Background(), settingUnarchiveOnMessage, val); err != nil {
+		fmt.Printf("[SETTINGS] Failed to save %s: %v\n", settingUnarchiveOnMessage, err)
+	}
+}
+
+// unarchiveOnIncoming brings an archived chat back to the list when a new
+// message arrives, unless the user keeps chats archived or the chat is muted
+// (WhatsApp leaves muted chats archived).
+func (h *WhatsAppEventHandler) unarchiveOnIncoming(chatID string) {
+	if h.msgStore == nil {
+		return
+	}
+	if h.settingsRepo != nil {
+		if val, err := h.settingsRepo.Get(context.Background(), settingUnarchiveOnMessage); err == nil && val == "false" {
+			return
+		}
+	}
+	state, err := h.msgStore.GetChatState(chatID)
+	if err != nil || !state.Archived || state.MuteMode != "off" {
+		return
+	}
+	state.Archived = false
+	h.persistAndBroadcastChatState(state)
+}
+
+// clearChatUnread zeroes the stored unread count and tells clients to refresh.
+func (h *WhatsAppEventHandler) clearChatUnread(chatID string, broadcast bool) {
+	if h.msgStore == nil || chatID == "" {
+		return
+	}
+	if err := h.msgStore.MarkAsRead(chatID); err != nil {
+		fmt.Printf("[READ_SYNC] Failed to clear unread for %s: %v\n", chatID, err)
+		return
+	}
+	if broadcast {
+		h.broadcastChatEvent("chat_update", chatID, "read", map[string]interface{}{"unread": 0})
+	}
+}
+
+// broadcastChatEvent sends a targeted chat event keyed by the chat's resolved
+// ID so clients patch their list in place. Clients that only know the generic
+// chats_changed event (web, gtk) still get it with the same reason and refetch.
+func (h *WhatsAppEventHandler) broadcastChatEvent(eventType, chatID, reason string, fields map[string]interface{}) {
+	if h.httpServer == nil {
+		return
+	}
+	payload := map[string]interface{}{"chatId": h.msgStore.ResolveChatID(chatID)}
+	for k, v := range fields {
+		payload[k] = v
+	}
+	h.httpServer.BroadcastMessage(eventType, payload)
+	h.httpServer.BroadcastMessage("chats_changed", map[string]string{"reason": reason})
+}
+
 func (h *WhatsAppEventHandler) persistAndBroadcastChatState(state repository.ChatState) {
 	if err := h.msgStore.UpdateChatState(state); err != nil {
 		fmt.Printf("[CHAT_STATE] Failed to persist %s: %v\n", state.ChatID, err)
@@ -357,10 +559,20 @@ func (h *WhatsAppEventHandler) persistAndBroadcastChatState(state repository.Cha
 }
 
 func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
+	// A read receipt from our own account means we read the chat on another
+	// device: "read-self" when read receipts are off in privacy settings,
+	// otherwise a plain "read" sent by our own JID. Clear the chat's unread
+	// badge; the messages are incoming, so there is no tick to update.
+	if evt.IsFromMe && (evt.Type == events.ReceiptTypeRead || evt.Type == events.ReceiptTypeReadSelf) {
+		fmt.Printf("[READ_SYNC] %s read on another device (%d msgs)\n", evt.Chat, len(evt.MessageIDs))
+		h.clearChatUnread(evt.Chat.ToNonAD().String(), true)
+		return
+	}
+
 	status := "sent"
 	if evt.Type == events.ReceiptTypeDelivered {
 		status = "delivered"
-	} else if evt.Type == events.ReceiptTypeRead || evt.Type == events.ReceiptTypeReadSelf {
+	} else if evt.Type == events.ReceiptTypeRead {
 		status = "read"
 	} else {
 		return
@@ -959,6 +1171,9 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 			h.httpServer.SaveAndBroadcastMessage(msg)
 		} else {
 			h.msgStore.SaveMessage(msg)
+		}
+		if !evt.Info.IsFromMe {
+			h.unarchiveOnIncoming(chatID)
 		}
 	}
 }

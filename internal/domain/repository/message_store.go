@@ -170,6 +170,7 @@ type Contact struct {
 	Name   string `json:"name"`
 	JID    string `json:"jid"`
 	Avatar string `json:"avatar"`
+	About  string `json:"about,omitempty"`
 }
 
 func NewMessageStore(dbPath string) (*MessageStore, error) {
@@ -351,6 +352,11 @@ func (s *MessageStore) initLocked() error {
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN reactions TEXT")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN extra_meta TEXT")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN fwd_proto BLOB")
+	// Soft-delete markers (ms epoch). Deleting a chat/message on the phone only
+	// flags the row here; the data is kept.
+	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN deleted_at INTEGER")
+	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN deleted_at INTEGER")
+	_, _ = s.db.Exec("ALTER TABLE contacts ADD COLUMN about TEXT")
 	_, _ = s.db.Exec("UPDATE chats SET unread = 0 WHERE unread IS NULL")
 	_, _ = s.db.Exec("UPDATE chats SET archived = 0 WHERE archived IS NULL")
 	_, _ = s.db.Exec("UPDATE chats SET mute_mode = 'off' WHERE mute_mode IS NULL OR mute_mode = ''")
@@ -565,6 +571,11 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 		return err
 	}
 
+	// A message newer than a phone-side delete brings the chat back.
+	if _, err = tx.Exec(`UPDATE chats SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL AND deleted_at < ?`, msg.ChatID, msg.Timestamp); err != nil {
+		return err
+	}
+
 	// Insert message
 	var reactionsJSON any
 	if msg.Reactions != nil {
@@ -627,7 +638,8 @@ func (s *MessageStore) GetMessages(chatID string, limit int, before int64, after
 		)
 		SELECT ` + messageColumns + `
 		FROM messages
-		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)`
+		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND deleted_at IS NULL`
 
 	if before > 0 {
 		query = baseQuery + ` AND timestamp < ? ORDER BY timestamp DESC, rowid DESC LIMIT ?`
@@ -675,6 +687,7 @@ func (s *MessageStore) SearchMessages(chatID string, query string, limit int) ([
 		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND deleted_at IS NULL
 		AND content LIKE ?
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -773,6 +786,7 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			c.muted_until,
                         c.id as original_id
                     FROM chats c
+                    WHERE c.deleted_at IS NULL
                 ),
                 grouped_chats AS (
                     SELECT 
@@ -859,7 +873,7 @@ func (s *MessageStore) GetContacts() ([]Contact, error) {
 	defer s.mu.RUnlock()
 
 	query := `
-                SELECT id, name, jid, ifnull(avatar, '') as avatar
+                SELECT id, name, jid, ifnull(avatar, '') as avatar, ifnull(about, '') as about
                 FROM contacts
                 ORDER BY name ASC
         `
@@ -878,6 +892,7 @@ func (s *MessageStore) GetContacts() ([]Contact, error) {
 			&contact.Name,
 			&contact.JID,
 			&contact.Avatar,
+			&contact.About,
 		)
 		if err != nil {
 			return nil, err
@@ -893,8 +908,9 @@ func (s *MessageStore) SaveContact(contact *Contact) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(`
-                INSERT OR REPLACE INTO contacts (id, name, jid, avatar, updated_at)
+                INSERT INTO contacts (id, name, jid, avatar, updated_at)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET name = excluded.name, jid = excluded.jid, avatar = excluded.avatar, updated_at = excluded.updated_at
         `, contact.ID, contact.Name, contact.JID, contact.Avatar, time.Now().Unix())
 
 	return err
@@ -948,6 +964,164 @@ func (s *MessageStore) MarkAsRead(chatID string) error {
 	`, time.Now().Unix(), chatID, chatID, chatID)
 
 	return err
+}
+
+// MarkChatDeleted soft-deletes a chat that was deleted on another device: the
+// chat is hidden and its messages up to tsMs are flagged, but nothing is
+// removed. It returns false when the chat has newer activity than the delete
+// (e.g. a replayed old event), in which case nothing changes.
+func (s *MessageStore) MarkChatDeleted(chatID string, tsMs int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var last sql.NullInt64
+	if err := s.db.QueryRow(`
+		SELECT MAX(last_time) FROM chats
+		WHERE id = ?
+		   OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		   OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?)
+	`, chatID, chatID, chatID).Scan(&last); err != nil {
+		return false, err
+	}
+	if !last.Valid || last.Int64 > tsMs {
+		return false, nil
+	}
+	if err := s.flagChatMessagesLocked(chatID, tsMs); err != nil {
+		return false, err
+	}
+	_, err := s.db.Exec(`
+		UPDATE chats SET deleted_at = ?, unread = 0, last_msg = '', updated_at = ?
+		WHERE id = ?
+		   OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		   OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?)
+	`, tsMs, time.Now().Unix(), chatID, chatID, chatID)
+	return err == nil, err
+}
+
+// MarkChatCleared soft-deletes every message up to tsMs in a chat that was
+// cleared on another device; the chat itself stays in the list, empty.
+func (s *MessageStore) MarkChatCleared(chatID string, tsMs int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.flagChatMessagesLocked(chatID, tsMs); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`
+		UPDATE chats SET unread = 0, updated_at = ?,
+			last_msg = COALESCE((SELECT content FROM messages WHERE chat_id = chats.id AND deleted_at IS NULL ORDER BY timestamp DESC LIMIT 1), '')
+		WHERE id = ?
+		   OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		   OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?)
+	`, time.Now().Unix(), chatID, chatID, chatID)
+	return err
+}
+
+func (s *MessageStore) flagChatMessagesLocked(chatID string, tsMs int64) error {
+	_, err := s.db.Exec(`
+		UPDATE messages SET deleted_at = ?
+		WHERE deleted_at IS NULL AND timestamp <= ?
+		  AND (chat_id = ?
+		    OR chat_id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		    OR chat_id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?))
+	`, tsMs, tsMs, chatID, chatID, chatID)
+	return err
+}
+
+// MarkMessageDeleted soft-deletes one message ("delete for me" on another
+// device) and refreshes its chat's preview. It returns the message's chat ID
+// and the chat's new preview, or "" when the message is unknown or already
+// flagged.
+func (s *MessageStore) MarkMessageDeleted(msgID string, tsMs int64) (chatID, lastMsg string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.db.QueryRow(`SELECT chat_id FROM messages WHERE id = ? AND deleted_at IS NULL`, msgID).Scan(&chatID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	if _, err := s.db.Exec(`UPDATE messages SET deleted_at = ? WHERE id = ?`, tsMs, msgID); err != nil {
+		return "", "", err
+	}
+	err = s.db.QueryRow(`SELECT COALESCE((SELECT content FROM messages WHERE chat_id = ? AND deleted_at IS NULL ORDER BY timestamp DESC LIMIT 1), '')`, chatID).Scan(&lastMsg)
+	if err != nil {
+		return "", "", err
+	}
+	_, err = s.db.Exec(`UPDATE chats SET last_msg = ? WHERE id = ?`, lastMsg, chatID)
+	return chatID, lastMsg, err
+}
+
+// ApplyPushName propagates a contact's new push name (display name chosen by
+// the contact) to the stored contact and 1:1 chat name. A name the user set
+// themselves (address book) is left alone: only a name that is empty, the raw
+// JID or the previous push name is replaced. It returns true if the chat name
+// changed.
+func (s *MessageStore) ApplyPushName(jid, oldName, newName string) (bool, error) {
+	jid = strings.TrimSpace(jid)
+	newName = strings.TrimSpace(newName)
+	if jid == "" || newName == "" {
+		return false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().Unix()
+	result, err := s.db.Exec(`UPDATE contacts SET name = ?, updated_at = ? WHERE jid = ? AND (name = '' OR name = jid OR name = ?)`, newName, now, jid, oldName)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		if _, err := s.db.Exec(`INSERT OR IGNORE INTO contacts (id, name, jid, avatar, updated_at) VALUES (?, ?, ?, '', ?)`, jid, newName, jid, now); err != nil {
+			return false, err
+		}
+	}
+	result, err = s.db.Exec(`UPDATE chats SET name = ?, updated_at = ? WHERE id = ? AND is_group = 0 AND (name = '' OR name = id OR name = ?)`, newName, now, jid, oldName)
+	if err != nil {
+		return false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
+}
+
+// SaveContactAbout stores a contact's "about" text.
+func (s *MessageStore) SaveContactAbout(jid, about string) error {
+	jid = strings.TrimSpace(jid)
+	if jid == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, err := s.db.Exec(`UPDATE contacts SET about = ? WHERE jid = ?`, about, jid)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n > 0 {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT OR IGNORE INTO contacts (id, name, jid, avatar, about, updated_at) VALUES (?, '', ?, '', ?, ?)`, jid, jid, about, time.Now().Unix())
+	return err
+}
+
+// MarkChatUnread flags a chat as unread (marked unread on another device). A
+// chat that already has unread messages is left as is; it returns whether
+// anything changed.
+func (s *MessageStore) MarkChatUnread(chatID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`
+		UPDATE chats SET unread = 1, updated_at = ?
+		WHERE ifnull(unread, 0) = 0 AND (id = ?
+		   OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		   OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?))
+	`, time.Now().Unix(), chatID, chatID, chatID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
 }
 
 func (s *MessageStore) UpdateChatAvatar(chatID, avatarURL string) error {
@@ -1170,6 +1344,7 @@ func (s *MessageStore) GetRecentIncoming(chatID string, limit int) ([]IncomingRe
 		)
 		SELECT id, sender_id FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND deleted_at IS NULL
 		AND sender_id != 'me'
 		AND sender_id != ''
 		ORDER BY timestamp DESC LIMIT ?
@@ -1333,6 +1508,7 @@ func (s *MessageStore) GetChatMedia(chatID string, limit int, before int64) ([]M
 		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND deleted_at IS NULL
 		AND msg_type IN ('image', 'video', 'gif')
 		AND media_url IS NOT NULL
 		AND media_url != ''`
@@ -1370,6 +1546,7 @@ func (s *MessageStore) GetChatDocs(chatID string, limit int, before int64) ([]Me
 		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND deleted_at IS NULL
 		AND msg_type = 'document'
 		AND media_url IS NOT NULL
 		AND media_url != ''`
@@ -1407,6 +1584,7 @@ func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]M
 		SELECT ` + messageColumns + `
 		FROM messages
 		WHERE chat_id IN (SELECT id FROM linked_chats WHERE id IS NOT NULL)
+		AND deleted_at IS NULL
 		AND msg_type = 'text'
 		AND content LIKE '%http%://%'
 	`
