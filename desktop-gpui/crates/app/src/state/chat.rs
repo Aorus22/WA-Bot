@@ -310,6 +310,45 @@ impl ChatStore {
                 self.set_presence(chat_id, presence);
                 true
             }
+            WsEvent::ChatUpdate { chat_id, unread, last_msg } => {
+                if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
+                    if let Some(unread) = unread {
+                        chat.unread = *unread;
+                    }
+                    if let Some(last_msg) = last_msg {
+                        chat.last_msg = last_msg.clone();
+                    }
+                    self.chats_version = self.chats_version.wrapping_add(1);
+                    true
+                } else {
+                    false
+                }
+            }
+            WsEvent::ChatDeleted { chat_id } => {
+                let before = self.chats.len();
+                self.chats.retain(|c| c.id != *chat_id);
+                self.messages_by_chat.remove(chat_id);
+                if self.active_chat_id.as_deref() == Some(chat_id.as_str()) {
+                    self.active_chat_id = None;
+                }
+                self.chats_version = self.chats_version.wrapping_add(1);
+                self.messages_version = self.messages_version.wrapping_add(1);
+                self.chats.len() != before
+            }
+            WsEvent::ChatCleared { chat_id } => {
+                if let Some(entry) = self.messages_by_chat.get_mut(chat_id) {
+                    entry.messages.clear();
+                    entry.has_more = false;
+                    entry.has_more_next = false;
+                    self.messages_version = self.messages_version.wrapping_add(1);
+                }
+                if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
+                    chat.last_msg.clear();
+                    chat.unread = 0;
+                    self.chats_version = self.chats_version.wrapping_add(1);
+                }
+                true
+            }
             WsEvent::ChatsChanged { .. } => {
                 self.chats_loaded = false;
                 true
@@ -430,6 +469,50 @@ mod tests {
         assert_eq!(store.chats[0].id, "chat-1");
         assert_eq!(store.chats[1].id, "chat-2");
         assert_eq!(store.chats[0].unread, 1);
+    }
+
+    fn store_with_chat(id: &str, unread: u32) -> ChatStore {
+        let mut store = ChatStore::default();
+        let chat: Chat = serde_json::from_value(serde_json::json!({
+            "id": id, "name": "n", "lastMsg": "hi", "unread": unread
+        }))
+        .unwrap();
+        store.set_chats(vec![chat]);
+        store
+    }
+
+    #[test]
+    fn test_ws_chat_update_patches_only_given_fields() {
+        let mut store = store_with_chat("a@s.whatsapp.net", 3);
+        store.handle_ws_event(&WsEvent::ChatUpdate {
+            chat_id: "a@s.whatsapp.net".into(),
+            unread: Some(0),
+            last_msg: None,
+        });
+        assert_eq!(store.chats[0].unread, 0);
+        assert_eq!(store.chats[0].last_msg, "hi");
+
+        store.handle_ws_event(&WsEvent::ChatUpdate {
+            chat_id: "a@s.whatsapp.net".into(),
+            unread: None,
+            last_msg: Some("bye".into()),
+        });
+        assert_eq!(store.chats[0].unread, 0);
+        assert_eq!(store.chats[0].last_msg, "bye");
+    }
+
+    #[test]
+    fn test_ws_chat_deleted_and_cleared() {
+        let mut store = store_with_chat("a@s.whatsapp.net", 2);
+        store.upsert_message("a@s.whatsapp.net", make_test_msg("m1", 1, "x", "received"));
+
+        store.handle_ws_event(&WsEvent::ChatCleared { chat_id: "a@s.whatsapp.net".into() });
+        assert!(store.messages_by_chat["a@s.whatsapp.net"].messages.is_empty());
+        assert_eq!((store.chats[0].unread, store.chats[0].last_msg.as_str()), (0, ""));
+
+        store.handle_ws_event(&WsEvent::ChatDeleted { chat_id: "a@s.whatsapp.net".into() });
+        assert!(store.chats.is_empty());
+        assert!(!store.messages_by_chat.contains_key("a@s.whatsapp.net"));
     }
 
     #[test]

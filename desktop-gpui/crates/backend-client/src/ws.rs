@@ -55,6 +55,20 @@ pub enum WsEvent {
         chat_id: String,
         name: String,
     },
+    /// Partial in-place patch of a chat row; absent fields are untouched.
+    ChatUpdate {
+        chat_id: String,
+        unread: Option<u32>,
+        last_msg: Option<String>,
+    },
+    /// Chat deleted on another device (the backend keeps the data).
+    ChatDeleted {
+        chat_id: String,
+    },
+    /// Chat cleared on another device: still listed, but empty.
+    ChatCleared {
+        chat_id: String,
+    },
     ChatsChanged {
         reason: String,
     },
@@ -92,6 +106,14 @@ pub enum WsEvent {
 }
 
 impl WsMessage {
+    fn chat_id_field(&self) -> String {
+        self.payload
+            .get("chatId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
     pub fn to_event(&self) -> WsEvent {
         match self.msg_type.as_str() {
             "qr_code" => {
@@ -227,6 +249,21 @@ impl WsMessage {
                     .unwrap_or_default()
                     .to_string(),
             },
+            "chat_update" => WsEvent::ChatUpdate {
+                chat_id: self.chat_id_field(),
+                unread: self
+                    .payload
+                    .get("unread")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32),
+                last_msg: self
+                    .payload
+                    .get("lastMsg")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            },
+            "chat_deleted" => WsEvent::ChatDeleted { chat_id: self.chat_id_field() },
+            "chat_cleared" => WsEvent::ChatCleared { chat_id: self.chat_id_field() },
             "chats_changed" => WsEvent::ChatsChanged {
                 reason: self
                     .payload
@@ -446,5 +483,34 @@ impl WsClient {
 
     pub fn stop(&self) {
         self.is_running.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(msg_type: &str, payload: serde_json::Value) -> WsEvent {
+        WsMessage { msg_type: msg_type.into(), payload }.to_event()
+    }
+
+    #[test]
+    fn parses_targeted_chat_events() {
+        assert_eq!(
+            event("chat_update", serde_json::json!({"chatId": "a@s.whatsapp.net", "unread": 0})),
+            WsEvent::ChatUpdate { chat_id: "a@s.whatsapp.net".into(), unread: Some(0), last_msg: None }
+        );
+        assert_eq!(
+            event("chat_update", serde_json::json!({"chatId": "a@s.whatsapp.net", "lastMsg": ""})),
+            WsEvent::ChatUpdate { chat_id: "a@s.whatsapp.net".into(), unread: None, last_msg: Some(String::new()) }
+        );
+        assert_eq!(
+            event("chat_deleted", serde_json::json!({"chatId": "a@s.whatsapp.net"})),
+            WsEvent::ChatDeleted { chat_id: "a@s.whatsapp.net".into() }
+        );
+        assert_eq!(
+            event("chat_cleared", serde_json::json!({"chatId": "a@s.whatsapp.net"})),
+            WsEvent::ChatCleared { chat_id: "a@s.whatsapp.net".into() }
+        );
     }
 }
