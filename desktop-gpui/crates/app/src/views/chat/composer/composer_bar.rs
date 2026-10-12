@@ -206,76 +206,60 @@ impl ChatView {
                 muted_text,
                 cx,
             ))
-            .children(self.mention_query.as_ref().and_then(|query| {
-                self.group_info.as_ref().map(|group| {
-                    let needle = query.to_lowercase();
-                    let members: Vec<(String, String, bool)> = group.participants.iter()
-                        .filter_map(|participant| {
-                            let name = participant.name.as_deref()
-                                .filter(|name| !name.trim().is_empty())
-                                .unwrap_or_else(|| participant.jid.split('@').next().unwrap_or(&participant.jid));
-                            if !needle.is_empty()
-                                && !name.to_lowercase().contains(&needle)
-                                && !participant.jid.to_lowercase().contains(&needle)
-                            {
-                                return None;
-                            }
-                            Some((participant.jid.clone(), name.to_string(), participant.is_admin))
-                        })
-                        .take(8)
-                        .collect();
-                    if members.is_empty() {
-                        return None;
-                    }
-                    Some(
-                        v_flex()
-                            .occlude()
-                            .mx_3()
-                            .mb_2()
-                            .max_h(px(240.0))
-                            .overflow_y_scrollbar()
-                            .p_1()
-                            .rounded_xl()
-                            .bg(card_bg)
-                            .border_1()
-                            .border_color(border_color)
-                            .shadow_xl()
-                            .children(members.into_iter().map(|(jid, name, is_admin)| {
-                                h_flex()
-                                    .id(SharedString::from(format!("mention-{jid}")))
-                                    .w_full()
-                                    .cursor_pointer()
-                                    .items_center()
-                                    .gap_3()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .hover(|style| style.bg(theme.muted.opacity(0.55)))
-                                    .child(render_avatar(&jid, &name, "", false, 32.0, &base_url, &theme))
-                                    .child(
-                                        v_flex()
-                                            .flex_1()
-                                            .child(div().text_sm().text_color(text_color).child(name))
-                                            .child(div().text_xs().text_color(muted_text).child(jid.clone())),
-                                    )
-                                    .children(if is_admin { Some(div().text_xs().text_color(primary_color).child("admin")) } else { None })
-                                    .on_mouse_down(MouseButton::Left, cx.listener({
-                                        let target_jid = jid.clone();
-                                        move |this, _, window, cx| {
-                                            this.insert_group_mention(&target_jid, window, cx);
-                                        }
-                                    }))
-                                    .into_any_element()
-                            }))
-                            .with_animation(
-                                "mention-list-in",
-                                crate::components::motion::enter(crate::components::motion::FAST_MS),
-                                |el, d| el.opacity(d),
-                            )
-                            .into_any_element(),
-                    )
+            .children({
+                let members = self.mention_candidates();
+                let selected = self.mention_index.min(members.len().saturating_sub(1));
+                (!members.is_empty()).then(|| {
+                    v_flex()
+                        .id("mention-list")
+                        .occlude()
+                        .mx_3()
+                        .mb_2()
+                        .max_h(px(240.0))
+                        .overflow_y_scroll()
+                        .track_scroll(&self.mention_scroll)
+                        .p_1()
+                        .rounded_xl()
+                        .bg(card_bg)
+                        .border_1()
+                        .border_color(border_color)
+                        .shadow_xl()
+                        .children(members.into_iter().enumerate().map(|(index, (jid, name, is_admin))| {
+                            h_flex()
+                                .id(SharedString::from(format!("mention-{jid}")))
+                                .w_full()
+                                .cursor_pointer()
+                                .items_center()
+                                .gap_3()
+                                .px_3()
+                                .py_2()
+                                .rounded_lg()
+                                .when(index == selected, |row| row.bg(primary_color.opacity(0.18)))
+                                .hover(|style| style.bg(theme.muted.opacity(0.55)))
+                                .child(render_avatar(&jid, &name, "", false, 32.0, &base_url, &theme))
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .child(div().text_sm().text_color(text_color).child(name))
+                                        .child(div().text_xs().text_color(muted_text).child(jid.clone())),
+                                )
+                                .children(if is_admin { Some(div().text_xs().text_color(primary_color).child("admin")) } else { None })
+                                .on_mouse_down(MouseButton::Left, cx.listener({
+                                    let target_jid = jid.clone();
+                                    move |this, _, window, cx| {
+                                        this.insert_group_mention(&target_jid, window, cx);
+                                    }
+                                }))
+                                .into_any_element()
+                        }))
+                        .with_animation(
+                            "mention-list-in",
+                            crate::components::motion::enter(crate::components::motion::FAST_MS),
+                            |el, d| el.opacity(d),
+                        )
+                        .into_any_element()
                 })
-            }).flatten())
+            })
             // Input Row matching Web
             .child(
                 h_flex()

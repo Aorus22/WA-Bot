@@ -152,7 +152,12 @@ impl RenderOnce for AppTitleBar {
                     .flex_1()
                     .h_full()
                     .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |_, window, _| {
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        // The compositor takes over the drag and swallows the
+                        // release, so a selection begun by this press would
+                        // stay armed and grow with the pointer afterwards.
+                        gpui_base::GlobalState::suppress_text_selection(cx);
+                        window.defer(cx, |window, cx| gpui_base::TextSelection::clear(window, cx));
                         window.start_window_move();
                     }),
             )

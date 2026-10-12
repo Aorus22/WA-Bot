@@ -15,6 +15,7 @@ impl ChatView {
         if self.viewed_by_message.is_some() {
             let receipts = self.viewed_by_receipts.clone();
             let group = self.group_info.clone();
+            let base_url = Self::compose_base_url(cx);
             Some(crate::components::motion::modal_in(
                 div()
                     .id("viewed-by-backdrop")
@@ -89,7 +90,14 @@ impl ChatView {
                                             .px_2()
                                             .py_2()
                                             .rounded_lg()
-                                            .child(div().text_sm().text_color(text_color).child(name))
+                                            .child(
+                                                h_flex()
+                                                    .min_w_0()
+                                                    .items_center()
+                                                    .gap_3()
+                                                    .child(render_avatar(&receipt.jid, &name, "", false, 36.0, &base_url, &theme))
+                                                    .child(div().text_sm().text_color(text_color).child(name)),
+                                            )
                                             .child(div().text_xs().text_color(muted_text).child(Self::format_chat_time(receipt.read_at)))
                                             .into_any_element()
                                     }))

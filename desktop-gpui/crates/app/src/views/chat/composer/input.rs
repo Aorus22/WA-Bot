@@ -45,6 +45,27 @@ impl ChatView {
             },
         );
 
+        // Key bindings (Enter sends, arrows move the caret) run before any key
+        // listener on an element, so the @-list has to intercept them here.
+        let view = cx.entity().downgrade();
+        self._mention_key_interceptor = Some(cx.intercept_keystrokes(move |event, window, cx| {
+            let key = &event.keystroke;
+            if key.modifiers.shift || key.modifiers.control || key.modifiers.alt || key.modifiers.platform {
+                return;
+            }
+            let Some(view) = view.upgrade() else { return };
+            let consumed = view.update(cx, |this, cx| {
+                let focused = this
+                    .compose_textarea
+                    .as_ref()
+                    .is_some_and(|textarea| textarea.read(cx).focus_handle(cx).is_focused(window));
+                focused && this.handle_mention_key(key.key.as_str(), window, cx)
+            });
+            if consumed {
+                cx.stop_propagation();
+            }
+        }));
+
         self.compose_input = Some(input);
         self.compose_textarea = Some(textarea);
         self._compose_input_subscription = Some(input_subscription);
@@ -132,8 +153,58 @@ impl ChatView {
         if query.chars().any(char::is_whitespace) {
             self.mention_query = None;
         } else {
+            if self.mention_query.as_deref() != Some(query) {
+                self.mention_index = 0;
+            }
             self.mention_query = Some(query.to_string());
         }
+    }
+
+    /// Members the @-list offers for the current query: (jid, label, is_admin).
+    pub(crate) fn mention_candidates(&self) -> Vec<(String, String, bool)> {
+        let (Some(query), Some(group)) = (self.mention_query.as_ref(), self.group_info.as_ref()) else {
+            return Vec::new();
+        };
+        let needle = query.to_lowercase();
+        group.participants.iter()
+            .filter_map(|participant| {
+                let name = participant.name.as_deref()
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| participant.jid.split('@').next().unwrap_or(&participant.jid));
+                if !needle.is_empty()
+                    && !name.to_lowercase().contains(&needle)
+                    && !participant.jid.to_lowercase().contains(&needle)
+                {
+                    return None;
+                }
+                Some((participant.jid.clone(), name.to_string(), participant.is_admin))
+            })
+            .take(8)
+            .collect()
+    }
+
+    /// Arrow keys, Tab/Enter and Escape drive the @-list while it is open.
+    /// Returns whether the key was consumed.
+    pub(crate) fn handle_mention_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let candidates = self.mention_candidates();
+        if candidates.is_empty() {
+            return false;
+        }
+        let count = candidates.len();
+        match key {
+            "down" => self.mention_index = (self.mention_index + 1) % count,
+            "up" => self.mention_index = (self.mention_index + count - 1) % count,
+            "enter" | "tab" => {
+                let jid = candidates[self.mention_index.min(count - 1)].0.clone();
+                self.insert_group_mention(&jid, window, cx);
+                return true;
+            }
+            "escape" => self.mention_query = None,
+            _ => return false,
+        }
+        self.mention_scroll.scroll_to_item(self.mention_index);
+        cx.notify();
+        true
     }
 
     pub(crate) fn insert_group_mention(&mut self, jid: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -168,9 +239,12 @@ impl ChatView {
             });
         }
         if let Some(textarea) = self.compose_textarea.clone() {
+            // set_value leaves the caret at the start; typing continues at the end.
+            let end = value.len();
             textarea.update(cx, |state, cx| {
                 state.set_value(value.clone(), window, cx);
                 state.set_placeholder(placeholder, window, cx);
+                state.set_selected_range(end..end, cx);
             });
         }
     }
