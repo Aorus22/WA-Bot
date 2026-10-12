@@ -241,6 +241,7 @@ impl ChatView {
             message_type: msg_type.to_string(),
             media_url,
             is_automatic: None,
+            notification_suppressed: false,
             sender_name: Some("You".to_string()),
             reply_to_id: self.reply_to.as_ref().map(|r| r.id.clone()),
             forwarded: None,
@@ -575,6 +576,7 @@ impl ChatView {
             message_type: "text".to_string(),
             media_url: None,
             is_automatic: None,
+            notification_suppressed: false,
             sender_name: Some("You".to_string()),
             reply_to_id: reply_to_id.clone(),
             forwarded: None,
@@ -590,6 +592,8 @@ impl ChatView {
                     gif: None,
                     link_preview: None,
                     mentions: mention_jids.clone(),
+                    mention_names: Default::default(),
+                    mentions_me: false,
                 })
             },
         };

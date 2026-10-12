@@ -87,6 +87,7 @@ impl ChatStore {
                 last_msg: if !chat.last_msg.is_empty() { chat.last_msg } else { existing.last_msg.clone() },
                 last_time: if chat.last_time != 0 { chat.last_time } else { existing.last_time },
                 unread: chat.unread,
+                has_unread_mention: chat.unread > 0 && chat.has_unread_mention,
                 is_active: chat.is_active,
                 is_group: chat.is_group || existing.is_group,
                 archived: chat.archived,
@@ -226,11 +227,16 @@ impl ChatStore {
     pub fn mark_chat_read(&mut self, chat_id: &str) {
         if let Some(chat) = self.chats.iter_mut().find(|c| c.id == chat_id) {
             chat.unread = 0;
+            chat.has_unread_mention = false;
             self.chats_version = self.chats_version.wrapping_add(1);
         }
     }
 
     pub fn handle_ws_event(&mut self, event: &WsEvent) -> bool {
+        self.handle_ws_event_with_visibility(event, true)
+    }
+
+    pub fn handle_ws_event_with_visibility(&mut self, event: &WsEvent, chat_is_visible: bool) -> bool {
         match event {
             // Another account may link next: drop everything cached from this one.
             WsEvent::LoggedOut => {
@@ -263,14 +269,17 @@ impl ChatStore {
             }
             WsEvent::NewMessage(msg) => {
                 let chat_id = msg.chat_id.clone();
+                let mentions_me = msg.extra.as_ref().is_some_and(|extra| extra.mentions_me);
+                let unread_here = !chat_is_visible || self.active_chat_id.as_deref() != Some(&chat_id);
                 self.upsert_message(&chat_id, *msg.clone());
 
                 if let Some(pos) = self.chats.iter().position(|c| c.id == chat_id) {
                     let mut existing = self.chats.remove(pos);
                     existing.last_msg = msg.content.clone();
                     existing.last_time = msg.timestamp;
-                    if self.active_chat_id.as_deref() != Some(&chat_id) {
+                    if unread_here {
                         existing.unread += 1;
+                        existing.has_unread_mention |= mentions_me;
                     }
                     self.chats.insert(0, existing);
                 } else {
@@ -280,7 +289,8 @@ impl ChatStore {
                         avatar: String::new(),
                         last_msg: msg.content.clone(),
                         last_time: msg.timestamp,
-                        unread: if self.active_chat_id.as_deref() == Some(&chat_id) { 0 } else { 1 },
+                        unread: if unread_here { 1 } else { 0 },
+                        has_unread_mention: unread_here && mentions_me,
                         is_active: true,
                         is_group: chat_id.contains("@g.us"),
                         archived: false,
@@ -314,6 +324,7 @@ impl ChatStore {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
                     if let Some(unread) = unread {
                         chat.unread = *unread;
+                        if *unread == 0 { chat.has_unread_mention = false; }
                     }
                     if let Some(last_msg) = last_msg {
                         chat.last_msg = last_msg.clone();
@@ -345,6 +356,7 @@ impl ChatStore {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
                     chat.last_msg.clear();
                     chat.unread = 0;
+                    chat.has_unread_mention = false;
                     self.chats_version = self.chats_version.wrapping_add(1);
                 }
                 true
@@ -375,6 +387,7 @@ mod tests {
             message_type: "text".to_string(),
             media_url: None,
             is_automatic: None,
+            notification_suppressed: false,
             sender_name: None,
             reply_to_id: None,
             forwarded: None,
@@ -425,6 +438,7 @@ mod tests {
             last_msg: "Hello".to_string(),
             last_time: 100,
             unread: 0,
+            has_unread_mention: false,
             is_active: false,
             is_group: false,
             archived: false,
@@ -439,6 +453,7 @@ mod tests {
             last_msg: "Hey".to_string(),
             last_time: 200,
             unread: 0,
+            has_unread_mention: false,
             is_active: false,
             is_group: false,
             archived: false,
@@ -458,6 +473,7 @@ mod tests {
             last_msg: "New message from Alice".to_string(),
             last_time: 300,
             unread: 1,
+            has_unread_mention: false,
             is_active: false,
             is_group: false,
             archived: false,
@@ -479,6 +495,60 @@ mod tests {
         .unwrap();
         store.set_chats(vec![chat]);
         store
+    }
+
+    fn mention_message(id: &str, mentions_me: bool) -> WsEvent {
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id": id, "chatId": "group@g.us", "from": "peer", "status": "received",
+            "extra": {"mentions": ["123@lid"], "mentionsMe": mentions_me}
+        })).unwrap();
+        WsEvent::NewMessage(Box::new(message))
+    }
+
+    #[test]
+    fn unread_mention_survives_newer_messages_and_clears_on_read() {
+        let mut store = ChatStore::new();
+        store.handle_ws_event(&mention_message("mention", true));
+        assert!(store.chats[0].has_unread_mention);
+        store.handle_ws_event(&mention_message("other-member", false));
+        assert!(store.chats[0].has_unread_mention);
+        store.mark_chat_read("group@g.us");
+        assert!(!store.chats[0].has_unread_mention);
+        store.handle_ws_event(&mention_message("plain-after-read", false));
+        assert!(!store.chats[0].has_unread_mention);
+        store.handle_ws_event(&mention_message("new-mention", true));
+        store.handle_ws_event(&WsEvent::ChatUpdate { chat_id: "group@g.us".into(), unread: Some(0), last_msg: None });
+        assert!(!store.chats[0].has_unread_mention);
+    }
+
+    #[test]
+    fn mentions_in_the_open_chat_do_not_raise_a_sidebar_badge() {
+        let mut store = ChatStore::new();
+        store.active_chat_id = Some("group@g.us".into());
+        store.handle_ws_event(&mention_message("mention", true));
+        assert!(!store.chats[0].has_unread_mention);
+        assert_eq!(store.chats[0].unread, 0);
+    }
+
+    #[test]
+    fn mentions_in_a_hidden_conversation_remain_unread() {
+        let mut store = ChatStore::new();
+        store.active_chat_id = Some("group@g.us".into());
+        store.handle_ws_event_with_visibility(&mention_message("mention", true), false);
+        assert!(store.chats[0].has_unread_mention);
+        assert_eq!(store.chats[0].unread, 1);
+    }
+
+    #[test]
+    fn unread_mention_is_restored_from_chat_list_and_cleared_with_chat() {
+        let chat: Chat = serde_json::from_value(serde_json::json!({
+            "id": "group@g.us", "unread": 3, "hasUnreadMention": true
+        })).unwrap();
+        let mut store = ChatStore::new();
+        store.set_chats(vec![chat]);
+        assert!(store.chats[0].has_unread_mention);
+        store.handle_ws_event(&WsEvent::ChatCleared { chat_id: "group@g.us".into() });
+        assert!(!store.chats[0].has_unread_mention);
     }
 
     #[test]

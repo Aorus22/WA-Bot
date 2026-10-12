@@ -94,6 +94,7 @@ mod tests {
             last_msg: "Hi".to_string(),
             last_time,
             unread: 0,
+            has_unread_mention: false,
             is_active: false,
             is_group: false,
             archived,

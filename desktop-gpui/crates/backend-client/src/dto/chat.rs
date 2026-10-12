@@ -15,6 +15,8 @@ pub struct Chat {
     #[serde(default)]
     pub unread: u32,
     #[serde(default)]
+    pub has_unread_mention: bool,
+    #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
     pub is_group: bool,

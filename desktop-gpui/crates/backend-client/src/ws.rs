@@ -135,10 +135,12 @@ impl WsMessage {
             },
             "logged_out" => WsEvent::LoggedOut,
             "new_message" => {
-                if let Ok(msg) = serde_json::from_value::<Message>(self.payload.clone()) {
-                    WsEvent::NewMessage(Box::new(msg))
-                } else {
-                    WsEvent::Raw(self.clone())
+                match serde_json::from_value::<Message>(self.payload.clone()) {
+                    Ok(msg) => WsEvent::NewMessage(Box::new(msg)),
+                    Err(error) => {
+                        eprintln!("[websocket] invalid incoming message: {error}");
+                        WsEvent::Raw(self.clone())
+                    }
                 }
             }
             "message_status" => WsEvent::MessageStatus {
@@ -492,6 +494,20 @@ mod tests {
 
     fn event(msg_type: &str, payload: serde_json::Value) -> WsEvent {
         WsMessage { msg_type: msg_type.into(), payload }.to_event()
+    }
+
+    #[test]
+    fn new_messages_preserve_backend_notification_policy() {
+        for suppressed in [false, true] {
+            let WsEvent::NewMessage(msg) = event("new_message", serde_json::json!({
+                "id": "m1", "chatId": "123@g.us", "notificationSuppressed": suppressed
+            })) else { panic!("expected new_message") };
+            assert_eq!(msg.notification_suppressed, suppressed);
+        }
+        let WsEvent::NewMessage(msg) = event("new_message", serde_json::json!({
+            "id": "m1", "chatId": "123@g.us"
+        })) else { panic!("expected legacy new_message") };
+        assert!(!msg.notification_suppressed);
     }
 
     #[test]

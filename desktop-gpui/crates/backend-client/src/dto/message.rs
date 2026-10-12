@@ -81,6 +81,10 @@ pub struct MessageExtra {
     pub link_preview: Option<LinkPreviewMeta>,
     #[serde(default)]
     pub mentions: Vec<String>,
+    #[serde(default)]
+    pub mention_names: HashMap<String, String>,
+    #[serde(default)]
+    pub mentions_me: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -111,6 +115,8 @@ pub struct Message {
     pub message_type: String,
     pub media_url: Option<String>,
     pub is_automatic: Option<bool>,
+    #[serde(default)]
+    pub notification_suppressed: bool,
     pub sender_name: Option<String>,
     pub reply_to_id: Option<String>,
     pub forwarded: Option<bool>,

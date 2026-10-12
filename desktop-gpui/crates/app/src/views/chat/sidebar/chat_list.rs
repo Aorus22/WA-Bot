@@ -353,19 +353,42 @@ impl ChatView {
                                             )
                                             .children(if unread > 0 {
                                                 Some(
-                                                    div()
-                                                        .px_1()
-                                                        .h(px(UNREAD_BADGE_SIZE))
-                                                        .min_w(px(UNREAD_BADGE_SIZE))
-                                                        .rounded_full()
-                                                        .bg(rgb(0x00a884))
-                                                        .text_xs()
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .text_color(rgb(0xffffff))
-                                                        .flex()
+                                                    h_flex()
+                                                        .gap_1p5()
                                                         .items_center()
-                                                        .justify_center()
-                                                        .child(format!("{}", unread)),
+                                                        .children(if chat.has_unread_mention {
+                                                            Some(
+                                                                div()
+                                                                    .id(SharedString::from(format!("unread-mention-{}", chat.id)))
+                                                                    .size(px(UNREAD_BADGE_SIZE))
+                                                                    .flex_shrink_0()
+                                                                    .rounded_full()
+                                                                    .bg(rgb(0x00a884))
+                                                                    .text_xs()
+                                                                    .font_weight(FontWeight::BOLD)
+                                                                    .text_color(rgb(0x111b21))
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_center()
+                                                                    .tooltip(|window, cx| Tooltip::new("Unread mention").build(window, cx))
+                                                                    .child("@"),
+                                                            )
+                                                        } else { None })
+                                                        .child(
+                                                            div()
+                                                                .px_1()
+                                                                .h(px(UNREAD_BADGE_SIZE))
+                                                                .min_w(px(UNREAD_BADGE_SIZE))
+                                                                .rounded_full()
+                                                                .bg(rgb(0x00a884))
+                                                                .text_xs()
+                                                                .font_weight(FontWeight::BOLD)
+                                                                .text_color(rgb(0x111b21))
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .child(format!("{}", unread)),
+                                                        ),
                                                 )
                                             } else {
                                                 None

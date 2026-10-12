@@ -314,9 +314,21 @@ fn main() {
                 while let Ok(event) = ws_rx.recv_async().await {
                     let _ = cx.update(|cx| {
                         let mut needs_refresh = false;
+                        let chat_is_visible = wabot_app::notifications::chat_is_visible(cx);
                         // Before the store applies it, so a repeat is still recognisable.
                         if let wabot_backend_client::ws::WsEvent::NewMessage(msg) = &event {
                             wabot_app::notifications::notify_new_message(msg, cx);
+                            // Only a visible conversation counts as read. The
+                            // resident daemon keeps its selection after hiding.
+                            let is_reading = chat_is_visible
+                                && cx.try_global::<ChatStore>().is_some_and(|store| {
+                                    store.active_chat_id.as_deref() == Some(&msg.chat_id)
+                                });
+                            if is_reading && msg.status == "received" {
+                                let client = HttpClient::new(&AuthState::global(cx).base_url);
+                                let chat_id = msg.chat_id.clone();
+                                TOKIO_RT.spawn(async move { let _ = client.mark_as_read(&chat_id).await; });
+                            }
                         }
                         if cx.has_global::<AuthState>() {
                             if AuthState::global_mut(cx).handle_ws_event(&event) {
@@ -324,7 +336,7 @@ fn main() {
                             }
                         }
                         if cx.has_global::<ChatStore>() {
-                            if ChatStore::global_mut(cx).handle_ws_event(&event) {
+                            if ChatStore::global_mut(cx).handle_ws_event_with_visibility(&event, chat_is_visible) {
                                 needs_refresh = true;
                             }
                         }

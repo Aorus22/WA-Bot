@@ -128,6 +128,9 @@ impl ChatView {
     /// Pages layout: leave the open chat and return to the chat list.
     pub fn back_to_list(&mut self, cx: &mut Context<Self>) {
         self.selected_chat_id = None;
+        if cx.has_global::<ChatStore>() {
+            ChatStore::global_mut(cx).active_chat_id = None;
+        }
         self.context_menu = None;
         self.chat_context_menu = None;
         self.preview_image_url = None;

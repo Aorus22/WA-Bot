@@ -110,13 +110,15 @@ type LinkPreviewMeta struct {
 // MessageExtra carries type-specific metadata for poll/location/contact/
 // view-once/gif/link-preview messages.
 type MessageExtra struct {
-	Poll        *PollMeta        `json:"poll,omitempty"`
-	Location    *LocationMeta    `json:"location,omitempty"`
-	Contact     *ContactMeta     `json:"contact,omitempty"`
-	ViewOnce    *ViewOnceMeta    `json:"viewOnce,omitempty"`
-	GIF         bool             `json:"gif,omitempty"`
-	LinkPreview *LinkPreviewMeta `json:"linkPreview,omitempty"`
-	Mentions    []string         `json:"mentions,omitempty"`
+	Poll         *PollMeta         `json:"poll,omitempty"`
+	Location     *LocationMeta     `json:"location,omitempty"`
+	Contact      *ContactMeta      `json:"contact,omitempty"`
+	ViewOnce     *ViewOnceMeta     `json:"viewOnce,omitempty"`
+	GIF          bool              `json:"gif,omitempty"`
+	LinkPreview  *LinkPreviewMeta  `json:"linkPreview,omitempty"`
+	Mentions     []string          `json:"mentions,omitempty"`
+	MentionNames map[string]string `json:"mentionNames,omitempty"`
+	MentionsMe   bool              `json:"mentionsMe,omitempty"`
 }
 
 // MessageReceipt records a read receipt reported by WhatsApp for an outgoing
@@ -151,18 +153,19 @@ type Message struct {
 }
 
 type Chat struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Avatar     string `json:"avatar"`
-	LastMsg    string `json:"lastMsg"`
-	LastTime   int64  `json:"lastTime"`
-	Unread     int    `json:"unread"`
-	IsActive   bool   `json:"isActive"`
-	IsGroup    bool   `json:"isGroup"`
-	Archived   bool   `json:"archived"`
-	PinnedAt   *int64 `json:"pinnedAt"`
-	MuteMode   string `json:"muteMode"`
-	MutedUntil *int64 `json:"mutedUntil"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Avatar           string `json:"avatar"`
+	LastMsg          string `json:"lastMsg"`
+	LastTime         int64  `json:"lastTime"`
+	Unread           int    `json:"unread"`
+	IsActive         bool   `json:"isActive"`
+	IsGroup          bool   `json:"isGroup"`
+	Archived         bool   `json:"archived"`
+	PinnedAt         *int64 `json:"pinnedAt"`
+	MuteMode         string `json:"muteMode"`
+	MutedUntil       *int64 `json:"mutedUntil"`
+	HasUnreadMention bool   `json:"hasUnreadMention"`
 }
 
 type Contact struct {
@@ -1473,7 +1476,11 @@ func (s *MessageStore) GetContactName(jid string) (string, error) {
 	defer s.mu.RUnlock()
 
 	var name string
-	err := s.db.QueryRow("SELECT name FROM contacts WHERE jid = ?", jid).Scan(&name)
+	err := s.db.QueryRow(`SELECT name FROM contacts
+		WHERE (jid = ? OR jid IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		OR jid IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?))
+		AND trim(COALESCE(name, '')) <> '' AND name <> jid
+		ORDER BY CASE WHEN jid = ? THEN 0 ELSE 1 END LIMIT 1`, jid, jid, jid, jid).Scan(&name)
 	if err == nil && name != "" {
 		return name, nil
 	}

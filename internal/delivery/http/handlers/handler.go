@@ -339,6 +339,7 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 		if h.msgRepo.HasMessage(msg.ID) {
 			return
 		}
+		h.enrichMessageMentions(msg, h.ownMentionJIDs())
 		if err := h.msgRepo.SaveMessage(msg); err != nil {
 			fmt.Printf("Failed to save message: %v\n", err)
 			return
@@ -347,19 +348,27 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 
 		if hub, ok := h.hub.(wsHub); ok && hub != nil {
 			resolvedChatID := h.msgRepo.ResolveChatID(msg.ChatID)
+			// Capture this before WhatsApp's unarchive-on-message update. The
+			// desktop daemon may not have loaded any chat rows yet.
+			notificationSuppressed, err := h.msgRepo.ChatNotificationsSuppressed(resolvedChatID)
+			if err != nil {
+				fmt.Printf("Failed to read chat notification policy: %v\n", err)
+				notificationSuppressed = true
+			}
 			payload := map[string]interface{}{
-				"id":          msg.ID,
-				"chatId":      resolvedChatID,
-				"from":        msg.From,
-				"to":          msg.To,
-				"content":     msg.Content,
-				"timestamp":   msg.Timestamp,
-				"status":      msg.Status,
-				"type":        msg.Type,
-				"mediaUrl":    msg.MediaURL,
-				"isAutomatic": msg.IsAutomatic,
-				"senderName":  msg.SenderName,
-				"chatName":    msg.ChatName,
+				"id":                     msg.ID,
+				"chatId":                 resolvedChatID,
+				"from":                   msg.From,
+				"to":                     msg.To,
+				"content":                msg.Content,
+				"timestamp":              msg.Timestamp,
+				"status":                 msg.Status,
+				"type":                   msg.Type,
+				"mediaUrl":               msg.MediaURL,
+				"isAutomatic":            msg.IsAutomatic,
+				"senderName":             msg.SenderName,
+				"chatName":               msg.ChatName,
+				"notificationSuppressed": notificationSuppressed,
 			}
 			if msg.ReplyToID != "" {
 				payload["replyToId"] = msg.ReplyToID

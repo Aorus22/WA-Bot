@@ -361,6 +361,22 @@ func (s *MessageStore) UpdateChatState(state ChatState) error {
 	return err
 }
 
+// ChatNotificationsSuppressed includes both phone-number and LID rows. A
+// first message under a new alias must not bypass an existing mute/archive.
+func (s *MessageStore) ChatNotificationsSuppressed(chatID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var suppressed bool
+	err := s.db.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM chats WHERE
+		(id = ? OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?))
+		AND (archived = 1 OR COALESCE(mute_mode, 'off') NOT IN ('', 'off', 'until')
+		OR (mute_mode = 'until' AND (muted_until IS NULL OR muted_until > ?)))
+	)`, chatID, chatID, chatID, time.Now().UnixMilli()).Scan(&suppressed)
+	return suppressed, err
+}
+
 func (s *MessageStore) GetChatState(chatID string) (ChatState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -7612,10 +7612,12 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "wabot-backend-client",
  "wabot-settings",
  "wabot-supervisor",
+ "zbus",
 ]
 
 [[package]]

@@ -204,6 +204,7 @@ mod tests {
             message_type: "text".to_string(),
             media_url: None,
             is_automatic: None,
+            notification_suppressed: false,
             sender_name: None,
             reply_to_id: None,
             forwarded: None,

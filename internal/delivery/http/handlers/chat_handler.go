@@ -38,6 +38,14 @@ func (ch *ChatHandler) GetChats(w http.ResponseWriter, r *http.Request) {
 	if chats == nil {
 		chats = []repository.Chat{}
 	}
+	unreadMentions, err := ch.handler.msgRepo.UnreadMentionChats(ch.handler.ownMentionJIDs())
+	if err != nil {
+		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i := range chats {
+		chats[i].HasUnreadMention = unreadMentions[chats[i].ID] && chats[i].Unread > 0
+	}
 
 	ch.handler.sendJSON(w, chats)
 }
@@ -77,6 +85,7 @@ func (ch *ChatHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ch.handler.enrichMessagesMentions(messages)
 	ch.handler.sendJSON(w, messages)
 }
 
@@ -104,6 +113,7 @@ func (ch *ChatHandler) SearchMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ch.handler.enrichMessagesMentions(messages)
 	ch.handler.sendJSON(w, messages)
 }
 
@@ -131,6 +141,7 @@ func (ch *ChatHandler) GetMessageContext(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	ch.handler.enrichMessagesMentions(messages)
 	ch.handler.sendJSON(w, messages)
 }
 
@@ -170,9 +181,14 @@ func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
 		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if hub, ok := ch.handler.hub.(wsHub); ok && hub != nil {
+		hub.BroadcastMessage("chat_update", map[string]interface{}{
+			"chatId": ch.handler.msgRepo.ResolveChatID(chatID), "unread": 0,
+		})
+	}
 
 	// When the read-receipts toggle is on, tell WhatsApp we read the chat.
-	if ch.handler.ReadReceiptsEnabled(r.Context()) {
+	if ch.handler.client != nil && ch.handler.ReadReceiptsEnabled(r.Context()) {
 		if targets, terr := ch.handler.msgRepo.GetRecentIncoming(chatID, 100); terr == nil && len(targets) > 0 {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -258,6 +274,7 @@ func (ch *ChatHandler) GetChatMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ch.handler.enrichMessagesMentions(messages)
 	ch.handler.sendJSON(w, messages)
 }
 
@@ -290,6 +307,7 @@ func (ch *ChatHandler) GetChatDocs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ch.handler.enrichMessagesMentions(messages)
 	ch.handler.sendJSON(w, messages)
 }
 
@@ -322,5 +340,6 @@ func (ch *ChatHandler) GetChatLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ch.handler.enrichMessagesMentions(messages)
 	ch.handler.sendJSON(w, messages)
 }

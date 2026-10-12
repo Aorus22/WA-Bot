@@ -129,6 +129,9 @@ pub struct ChatView {
 
 impl ChatView {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        if cx.has_global::<ChatStore>() {
+            ChatStore::global_mut(cx).active_chat_id = None;
+        }
         let mut view = Self {
             search_query: String::new(),
             search_focus_handle: cx.focus_handle(),

@@ -21,18 +21,71 @@ pub(crate) fn prepare_mention_text(text: &str, group: Option<&GroupCache>) -> (S
 }
 
 pub(crate) fn render_message_mentions(content: &str, message: &Message, group: Option<&GroupCache>) -> String {
-    let Some(group) = group else { return content.to_string() };
     let Some(extra) = message.extra.as_ref() else { return content.to_string() };
-    let mut rendered = content.to_string();
+    let mut names = std::collections::HashMap::new();
     for jid in &extra.mentions {
-        let participant = group.participants.iter().find(|member| member.jid == *jid || member.jid.split('@').next() == jid.split('@').next());
-        if let Some(participant) = participant {
-            let number = jid.split('@').next().unwrap_or(jid);
-            let label = participant.name.as_deref().filter(|name| !name.trim().is_empty()).unwrap_or(number);
-            rendered = rendered.replace(&format!("@{number}"), &format!("@{label}"));
+        let label = extra.mention_names.get(jid).map(String::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| group.and_then(|group| {
+                group.participants.iter().find(|member| member.jid == *jid)
+                    .and_then(|member| member.name.as_deref()).filter(|name| !name.trim().is_empty())
+            }));
+        if let Some(label) = label {
+            names.insert(jid.split('@').next().unwrap_or(jid), label);
         }
     }
+    // Match complete IDs so @123 cannot rewrite the prefix of @12345.
+    let mut parts = content.split('@');
+    let mut rendered = parts.next().unwrap_or_default().to_owned();
+    for part in parts {
+        let end = part.find(|c: char| !c.is_ascii_digit()).unwrap_or(part.len());
+        let number = &part[..end];
+        rendered.push('@');
+        rendered.push_str(names.get(number).copied().unwrap_or(number));
+        rendered.push_str(&part[end..]);
+    }
     rendered
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::*;
+    use core::prelude::v1::test;
+
+    fn message(mentions: serde_json::Value, names: serde_json::Value) -> Message {
+        serde_json::from_value(serde_json::json!({
+            "id": "m1", "chatId": "123@g.us", "extra": {"mentions": mentions, "mentionNames": names}
+        })).unwrap()
+    }
+
+    #[test]
+    fn lid_mentions_show_names_before_group_info_has_loaded() {
+        let m = message(serde_json::json!(["242622887161958@lid"]), serde_json::json!({"242622887161958@lid": "Nama kontak"}));
+        assert_eq!(render_message_mentions("halo @242622887161958!", &m, None), "halo @Nama kontak!");
+    }
+
+    #[test]
+    fn mention_replacement_matches_whole_ids_and_preserves_other_text() {
+        let m = message(serde_json::json!(["123@lid"]), serde_json::json!({"123@lid": "Zoë Putri"}));
+        assert_eq!(render_message_mentions("@123, @12345\n@123 🙂", &m, None), "@Zoë Putri, @12345\n@Zoë Putri 🙂");
+    }
+
+    #[test]
+    fn unresolved_mentions_and_plain_at_text_keep_their_content() {
+        let m = message(serde_json::json!(["123@lid"]), serde_json::json!({}));
+        assert_eq!(render_message_mentions("halo @123 dan @456", &m, None), "halo @123 dan @456");
+        let plain = message(serde_json::json!([]), serde_json::json!({"123@lid": "Nama"}));
+        assert_eq!(render_message_mentions("@123", &plain, None), "@123");
+    }
+
+    #[test]
+    fn older_messages_can_resolve_names_from_the_group_cache() {
+        let m = message(serde_json::json!(["123@s.whatsapp.net"]), serde_json::json!({}));
+        let group: GroupCache = serde_json::from_value(serde_json::json!({
+            "jid": "123@g.us", "name": "Test group", "participants": [{"jid": "123@s.whatsapp.net", "name": "Nama anggota"}]
+        })).unwrap();
+        assert_eq!(render_message_mentions("@123", &m, Some(&group)), "@Nama anggota");
+    }
 }
 
 
