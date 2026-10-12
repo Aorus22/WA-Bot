@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { api, type HistorySyncStatus, type SettingsMap } from '@/lib/api'
 import { useChatStore } from '@/stores/chatStore'
+import { isMessageFormattingEnabled, setMessageFormattingEnabled } from '@/pages/chat/renderMd'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -60,6 +61,9 @@ export function SettingsPage() {
 	const [savingAi, setSavingAi] = useState(false)
 	const [readReceipts, setReadReceipts] = useState(true)
 	const [savingReceipts, setSavingReceipts] = useState(false)
+	const [formatMessages, setFormatMessages] = useState(isMessageFormattingEnabled)
+	const [contactNameMode, setContactNameMode] = useState<'profile' | 'saved'>('profile')
+	const [savingNames, setSavingNames] = useState(false)
 
 	const [ttsProvider, setTtsProvider] = useState('')
 	const [ttsDefaultVoice, setTtsDefaultVoice] = useState('')
@@ -128,6 +132,7 @@ export function SettingsPage() {
 				setFishAudioModel(res.call_tts_fish_audio_model ?? '')
 				setFishAudioVoiceId(res.call_tts_fish_audio_voice_id ?? '')
 				setReadReceipts((res.read_receipts ?? 'true') !== 'false')
+				setContactNameMode(res.contact_name_mode === 'saved' ? 'saved' : 'profile')
 			})
 			.catch(() => {
 				if (!cancelled) toast.error('Failed to load settings')
@@ -155,6 +160,27 @@ export function SettingsPage() {
 			toast.error(err instanceof Error ? err.message : 'Failed to save AI configuration')
 		} finally {
 			setSavingAi(false)
+		}
+	}
+
+	const toggleFormatMessages = (enabled: boolean) => {
+		setMessageFormattingEnabled(enabled)
+		setFormatMessages(enabled)
+	}
+
+	const chooseContactNameMode = async (mode: 'profile' | 'saved') => {
+		if (mode === contactNameMode) return
+		const previous = contactNameMode
+		setContactNameMode(mode)
+		setSavingNames(true)
+		try {
+			const res = await api.updateSettings({ contact_name_mode: mode })
+			setContactNameMode(res.contact_name_mode === 'saved' ? 'saved' : 'profile')
+		} catch (err) {
+			setContactNameMode(previous)
+			toast.error(err instanceof Error ? err.message : 'Failed to save setting')
+		} finally {
+			setSavingNames(false)
 		}
 	}
 
@@ -439,6 +465,45 @@ export function SettingsPage() {
 										{savingAi ? 'Saving...' : 'Save'}
 									</Button>
 								</div>
+							</div>
+						</div>
+					</div>
+
+					<div className="space-y-4">
+						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Messages</h2>
+						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+							<div className="flex items-center gap-3 px-4 py-3.5">
+								<div className="flex flex-col flex-1 min-w-0">
+									<span className="text-sm font-medium">Format message text</span>
+									<span className="text-xs text-muted-foreground">Show *bold*, _italic_, ~strikethrough~ and `monospace` like WhatsApp.</span>
+								</div>
+								<Switch checked={formatMessages} onCheckedChange={(v) => toggleFormatMessages(Boolean(v))} />
+							</div>
+							<div className="px-4 py-4 space-y-2">
+								<span className="text-sm font-medium">Contact names</span>
+								{([
+									['saved', 'Saved contact name', "The name from your phone's contacts. Contacts you haven't saved show their phone number, like WhatsApp."],
+									['profile', 'Profile name', 'The name each person chose for themselves.'],
+								] as const).map(([value, title, description]) => (
+									<button
+										key={value}
+										type="button"
+										disabled={savingNames}
+										onClick={() => chooseContactNameMode(value)}
+										className={cn(
+											'flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors hover:bg-muted/50',
+											contactNameMode === value && 'border-primary',
+										)}
+									>
+										<span className={cn('flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-2', contactNameMode === value ? 'border-primary' : 'border-muted-foreground')}>
+											{contactNameMode === value && <span className="h-2 w-2 rounded-full bg-primary" />}
+										</span>
+										<span className="flex flex-col min-w-0">
+											<span className="text-sm font-medium">{title}</span>
+											<span className="text-xs text-muted-foreground">{description}</span>
+										</span>
+									</button>
+								))}
 							</div>
 						</div>
 					</div>

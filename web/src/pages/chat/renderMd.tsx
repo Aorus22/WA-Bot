@@ -74,6 +74,57 @@ const RenderMarkdown = ({ content }: { content: string }) => {
     )
 }
 
+const FORMAT_KEY = "wa-bot-format-messages"
+
+/** Whether WhatsApp-style formatting (*bold*, _italic_, ~strike~, `mono`) is rendered. On unless turned off. */
+export const isMessageFormattingEnabled = (): boolean => {
+    try {
+        return localStorage.getItem(FORMAT_KEY) !== "false"
+    } catch {
+        return true
+    }
+}
+
+export const setMessageFormattingEnabled = (enabled: boolean) => {
+    try {
+        localStorage.setItem(FORMAT_KEY, String(enabled))
+    } catch { /* storage unavailable: keep the default */ }
+}
+
+// A marker opens at a word boundary before a non-space and closes after a
+// non-space before a word boundary, on one line (WhatsApp's rule), so
+// snake_case_words and "2 * 3 * 4" stay as typed.
+const WORD = "\\p{L}\\p{N}"
+const span = (marker: string) =>
+    `(?<![${WORD}])${marker}(?=[^\\s${marker}])[^\\n]*?[^\\s]${marker}(?![${WORD}])`
+const FORMAT_SPLIT = new RegExp(
+    `(${span("\\*")}|${span("_")}|${span("~")}|${span("`")}|\\n|https?:\\/\\/[^\\s]+)`,
+    "u",
+)
+const URL_SPLIT = /(\n|https?:\/\/[^\s]+)/g
+
+const renderInline = (content: string, formatting: boolean): React.ReactNode[] => {
+    const parts = formatting ? content.split(FORMAT_SPLIT) : content.split(URL_SPLIT)
+    return parts.map((part, index) => {
+        if (formatting && index % 2 === 1 && part.length > 2) {
+            const inner = part.slice(1, -1)
+            if (part.startsWith("*") && part.endsWith("*")) return <strong key={index}>{renderInline(inner, true)}</strong>
+            if (part.startsWith("_") && part.endsWith("_")) return <em key={index}>{renderInline(inner, true)}</em>
+            if (part.startsWith("~") && part.endsWith("~")) return <del key={index}>{renderInline(inner, true)}</del>
+            if (part.startsWith("`") && part.endsWith("`")) {
+                return <code key={index} className="bg-primary/10 text-primary dark:text-primary-foreground px-1.5 py-0.5 rounded font-mono text-[0.85em] border border-primary/20">{inner}</code>
+            }
+        }
+        if (part === "\n") {
+            return <br key={index} />
+        }
+        if (part.match(/^https?:\/\/[^\s]+$/)) {
+            return <a key={index} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline underline-offset-2 break-all">{part}</a>
+        }
+        return part
+    })
+}
+
 export const renderFormattedContent = (content: string) => {
     if (!content) return null
 
@@ -86,27 +137,5 @@ export const renderFormattedContent = (content: string) => {
         } catch { /* invalid base64, fall through to WA format */ }
     }
 
-    const parts = content.split(/(\*.*?\*|_.*?_|~.*?~|`.*?`|\n|https?:\/\/[^\s]+)/g)
-
-    return parts.map((part, index) => {
-        if (part.startsWith("*") && part.endsWith("*")) {
-            return <strong key={index}>{part.slice(1, -1)}</strong>
-        }
-        if (part.startsWith("_") && part.endsWith("_")) {
-            return <em key={index}>{part.slice(1, -1)}</em>
-        }
-        if (part.startsWith("~") && part.endsWith("~")) {
-            return <del key={index}>{part.slice(1, -1)}</del>
-        }
-        if (part.startsWith("`") && part.endsWith("`")) {
-            return <code key={index} className="bg-primary/10 text-primary dark:text-primary-foreground px-1.5 py-0.5 rounded font-mono text-[0.85em] border border-primary/20">{part.slice(1, -1)}</code>
-        }
-        if (part === "\n") {
-            return <br key={index} />
-        }
-        if (part.match(/^https?:\/\/[^\s]+$/)) {
-            return <a key={index} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline underline-offset-2 break-all">{part}</a>
-        }
-        return part
-    })
+    return renderInline(content, isMessageFormattingEnabled())
 }

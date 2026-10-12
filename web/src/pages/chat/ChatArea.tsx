@@ -142,6 +142,8 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
     const [inputMessage, setInputMessage] = useState("")
     const [groupInfo, setGroupInfo] = useState<GroupCache | null>(null)
     const [mentionTrigger, setMentionTrigger] = useState<{ start: number; end: number; query: string } | null>(null)
+    // Highlighted row of the @-list; the arrow keys move it.
+    const [mentionIndex, setMentionIndex] = useState(0)
     const [viewedByMessage, setViewedByMessage] = useState<Message | null>(null)
     const [viewedByReceipts, setViewedByReceipts] = useState<MessageReceipt[]>([])
     const [loadingViewedBy, setLoadingViewedBy] = useState(false)
@@ -331,8 +333,17 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
         }
         const query = match[1]
         const start = caret - query.length - 1
+        if (query !== mentionTrigger?.query) setMentionIndex(0)
         setMentionTrigger({ start, end: caret, query })
     }
+
+    const mentionMatches: GroupParticipantInfo[] = chat?.isGroup && mentionTrigger && !editingMessage
+        ? (groupInfo?.participants ?? []).filter(member => {
+            const query = mentionTrigger.query.toLowerCase()
+            return participantLabel(member).toLowerCase().includes(query) || member.jid.toLowerCase().includes(query)
+        }).slice(0, 8)
+        : []
+    const activeMention = Math.min(mentionIndex, Math.max(mentionMatches.length - 1, 0))
 
     const insertMention = (participant: GroupParticipantInfo) => {
         if (!mentionTrigger) return
@@ -1157,29 +1168,25 @@ const handleReplyMessage = (message: Message) => {
                                 <Mic className="h-5 w-5" />
                             </Button>
                             <div className="flex-1 relative">
-                        {chat.isGroup && mentionTrigger && !editingMessage && (() => {
-                            const query = mentionTrigger.query.toLowerCase()
-                            const matchingMembers = (groupInfo?.participants ?? []).filter(member =>
-                                participantLabel(member).toLowerCase().includes(query) || member.jid.toLowerCase().includes(query),
-                            ).slice(0, 8)
-                            return matchingMembers.length > 0 ? (
-                                <div className="absolute bottom-full left-0 z-40 mb-2 max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl">
-                                    {matchingMembers.map(member => (
-                                        <button
-                                            key={member.jid}
-                                            type="button"
-                                            onMouseDown={event => event.preventDefault()}
-                                            onClick={() => insertMention(member)}
-                                            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-muted"
-                                        >
-                                            <Avatar className="h-8 w-8"><AvatarFallback>{participantLabel(member).slice(0, 1).toUpperCase()}</AvatarFallback></Avatar>
-                                            <span className="min-w-0 flex-1 truncate text-sm">{participantLabel(member)}</span>
-                                            {member.isAdmin && <span className="text-[10px] text-muted-foreground">admin</span>}
-                                        </button>
-                                    ))}
-                                </div>
-                            ) : null
-                        })()}
+                        {mentionMatches.length > 0 && (
+                            <div className="absolute bottom-full left-0 z-40 mb-2 max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl">
+                                {mentionMatches.map((member, index) => (
+                                    <button
+                                        key={member.jid}
+                                        type="button"
+                                        ref={index === activeMention ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+                                        onMouseDown={event => event.preventDefault()}
+                                        onMouseEnter={() => setMentionIndex(index)}
+                                        onClick={() => insertMention(member)}
+                                        className={cn("flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-muted", index === activeMention && "bg-muted")}
+                                    >
+                                        <Avatar className="h-8 w-8"><AvatarImage src={getAvatarUrl(member.jid)} /><AvatarFallback>{participantLabel(member).slice(0, 1).toUpperCase()}</AvatarFallback></Avatar>
+                                        <span className="min-w-0 flex-1 truncate text-sm">{participantLabel(member)}</span>
+                                        {member.isAdmin && <span className="text-[10px] text-muted-foreground">admin</span>}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                         <Textarea
                             ref={inputRef}
                             placeholder={editingMessage ? "Edit message..." : replyTo ? "Reply to message..." : isMdMode ? "Write markdown..." : "Type a message..."}
@@ -1189,6 +1196,24 @@ const handleReplyMessage = (message: Message) => {
                                 updateMentionTrigger(e.target.value, e.currentTarget.selectionStart ?? e.target.value.length)
                             }}
                             onKeyDown={e => {
+                                if (mentionMatches.length > 0) {
+                                    const count = mentionMatches.length
+                                    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                                        e.preventDefault()
+                                        setMentionIndex((activeMention + (e.key === "ArrowDown" ? 1 : count - 1)) % count)
+                                        return
+                                    }
+                                    if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+                                        e.preventDefault()
+                                        insertMention(mentionMatches[activeMention])
+                                        return
+                                    }
+                                    if (e.key === "Escape") {
+                                        e.preventDefault()
+                                        setMentionTrigger(null)
+                                        return
+                                    }
+                                }
                                 const send = isMdMode
                                     ? e.key === "Enter" && (e.ctrlKey || e.metaKey)
                                     : e.key === "Enter" && !e.shiftKey
@@ -1299,7 +1324,10 @@ const handleReplyMessage = (message: Message) => {
                                 const name = participant ? participantLabel(participant) : receipt.jid.split("@")[0]
                                 return (
                                     <div key={receipt.jid} className="flex items-center justify-between gap-4 rounded-lg px-2 py-2">
-                                        <span className="truncate text-sm">{name}</span>
+                                        <span className="flex min-w-0 items-center gap-3">
+                                            <Avatar className="h-9 w-9"><AvatarImage src={getAvatarUrl(receipt.jid)} /><AvatarFallback>{name.slice(0, 1).toUpperCase()}</AvatarFallback></Avatar>
+                                            <span className="truncate text-sm">{name}</span>
+                                        </span>
                                         <time className="shrink-0 text-xs text-muted-foreground">{new Date(receipt.readAt).toLocaleString()}</time>
                                     </div>
                                 )
