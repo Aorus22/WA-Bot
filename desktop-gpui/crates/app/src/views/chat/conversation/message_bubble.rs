@@ -36,13 +36,25 @@ impl ChatView {
             });
             let sender_color = avatar_color_for(&sender_jid);
 
-            let content = render_message_mentions(&r_msg.content, &r_msg.msg, this.group_info.as_ref());
+            let (content, mention_spans) = render_message_mentions_with_spans(&r_msg.content, &r_msg.msg, this.group_info.as_ref());
             let time_str = r_msg.time_str.clone();
             let ticks = r_msg.ticks;
             let reply_to_id = r_msg.msg.reply_to_id.clone();
             let quoted = r_msg.quoted.clone().or_else(|| reply_to_id.as_ref().map(|_| {
                 ("Message".to_string(), "Open original message".to_string())
             }));
+            // The quoted line is cached as raw text; resolve the original's
+            // mentions here so it shows names instead of numeric IDs.
+            let quoted = quoted.map(|(sender, line)| {
+                let original = reply_to_id.as_deref().and_then(|rid| {
+                    this.cached_render_messages.iter().find(|m| m.msg.id == rid)
+                });
+                let (line, spans) = match original {
+                    Some(original) => render_message_mentions_with_spans(&line, &original.msg, this.group_info.as_ref()),
+                    None => (line, Vec::new()),
+                };
+                (sender, line, spans)
+            });
             let msg_clone = r_msg.msg.clone();
 
             let msg_type = r_msg.msg.message_type.as_str();
@@ -62,6 +74,8 @@ impl ChatView {
                 is_image && r_msg.msg.media_url.is_some() && !image_has_caption;
 
             let is_dark_bg = theme.background.l < 0.5;
+            // WhatsApp Web's mention colour.
+            let mention_color: Hsla = if is_dark_bg { rgb(0x06cf9c).into() } else { rgb(0x008069).into() };
             let (bubble_bg, bubble_text) = if is_sticker {
                 (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
             } else if let Some(c) = theme.chat {
@@ -126,7 +140,7 @@ impl ChatView {
                     }),
                 )
                 // Quoted reply box matching Web
-                .children(if let Some((q_sender, q_line)) = quoted {
+                .children(if let Some((q_sender, q_line, q_spans)) = quoted {
                     Some(
                         v_flex()
                             .cursor_pointer()
@@ -158,7 +172,15 @@ impl ChatView {
                                     .text_xs()
                                     .text_color(muted_text)
                                     .overflow_hidden()
-                                    .child(q_line),
+                                    .child(
+                                        StyledText::new(q_line).with_highlights(q_spans.into_iter().map(|range| {
+                                            (range, HighlightStyle {
+                                                color: Some(mention_color),
+                                                font_weight: Some(FontWeight::MEDIUM),
+                                                ..Default::default()
+                                            })
+                                        })),
+                                    ),
                             ),
                     )
                 } else {
@@ -334,9 +356,11 @@ impl ChatView {
                             div()
                                 .text_sm()
                                 .text_color(bubble_text)
-                                .child(SelectableText::new(
+                                .child(MentionText::new(
                                     format!("message-body-{}", r_msg.msg.id),
                                     content.clone(),
+                                    &mention_spans,
+                                    mention_color,
                                 ))
                         )
                     } else {

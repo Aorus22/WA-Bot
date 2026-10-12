@@ -20,10 +20,24 @@ pub(crate) fn prepare_mention_text(text: &str, group: Option<&GroupCache>) -> (S
     (content, mentions)
 }
 
+#[cfg(test)]
 pub(crate) fn render_message_mentions(content: &str, message: &Message, group: Option<&GroupCache>) -> String {
-    let Some(extra) = message.extra.as_ref() else { return content.to_string() };
+    render_message_mentions_with_spans(content, message, group).0
+}
+
+/// Rewrites `@<id>` tokens to the contact's name and returns the byte ranges of
+/// every mention in the rewritten text, so callers can colour them.
+pub(crate) fn render_message_mentions_with_spans(
+    content: &str,
+    message: &Message,
+    group: Option<&GroupCache>,
+) -> (String, Vec<Range<usize>>) {
+    let Some(extra) = message.extra.as_ref() else { return (content.to_string(), Vec::new()) };
     let mut names = std::collections::HashMap::new();
+    let mut mentioned = HashSet::new();
     for jid in &extra.mentions {
+        let id = jid.split('@').next().unwrap_or(jid);
+        mentioned.insert(id);
         let label = extra.mention_names.get(jid).map(String::as_str)
             .filter(|name| !name.trim().is_empty())
             .or_else(|| group.and_then(|group| {
@@ -31,20 +45,25 @@ pub(crate) fn render_message_mentions(content: &str, message: &Message, group: O
                     .and_then(|member| member.name.as_deref()).filter(|name| !name.trim().is_empty())
             }));
         if let Some(label) = label {
-            names.insert(jid.split('@').next().unwrap_or(jid), label);
+            names.insert(id, label);
         }
     }
     // Match complete IDs so @123 cannot rewrite the prefix of @12345.
     let mut parts = content.split('@');
     let mut rendered = parts.next().unwrap_or_default().to_owned();
+    let mut spans = Vec::new();
     for part in parts {
         let end = part.find(|c: char| !c.is_ascii_digit()).unwrap_or(part.len());
         let number = &part[..end];
+        let start = rendered.len();
         rendered.push('@');
         rendered.push_str(names.get(number).copied().unwrap_or(number));
+        if mentioned.contains(number) {
+            spans.push(start..rendered.len());
+        }
         rendered.push_str(&part[end..]);
     }
-    rendered
+    (rendered, spans)
 }
 
 #[cfg(test)]
@@ -68,6 +87,14 @@ mod mention_tests {
     fn mention_replacement_matches_whole_ids_and_preserves_other_text() {
         let m = message(serde_json::json!(["123@lid"]), serde_json::json!({"123@lid": "Zoë Putri"}));
         assert_eq!(render_message_mentions("@123, @12345\n@123 🙂", &m, None), "@Zoë Putri, @12345\n@Zoë Putri 🙂");
+    }
+
+    #[test]
+    fn mention_spans_cover_the_rendered_names_only() {
+        let m = message(serde_json::json!(["123@lid"]), serde_json::json!({"123@lid": "Zoë"}));
+        let (text, spans) = render_message_mentions_with_spans("hi @123 and @456", &m, None);
+        assert_eq!(text, "hi @Zoë and @456");
+        assert_eq!(spans.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>(), ["@Zoë"]);
     }
 
     #[test]

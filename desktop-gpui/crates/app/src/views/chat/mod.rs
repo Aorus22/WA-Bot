@@ -8,7 +8,6 @@ use std::collections::HashSet;
 use std::ops::Range;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_base::SelectableText;
 use gpui_component::input::{InputEvent, InputState, Textarea, TextareaState};
 use gpui_component::scroll::{Scrollbar, ScrollbarMode, ScrollableElement};
 use gpui_component::spinner::Spinner;
@@ -27,6 +26,7 @@ use crate::components::{
     toast,
 };
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
+use crate::components::MentionText;
 use crate::icons::*;
 use crate::layout_pref::{self, LayoutKind};
 use crate::views::viewer_math::{

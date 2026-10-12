@@ -34,6 +34,7 @@ impl ChatView {
                 let r_sender = if r_msg.from == "me" { "You" } else { r_msg.sender_name.as_deref().unwrap_or("Sender") };
                 let r_content = MessageBubbleHelper::decode_content(&r_msg.content);
                 let r_first = r_content.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+                let (r_first, r_spans) = render_message_mentions_with_spans(r_first, r_msg, self.group_info.as_ref());
                 Some(
                     h_flex()
                         .mx_3()
@@ -63,7 +64,13 @@ impl ChatView {
                                         .text_xs()
                                         .text_color(muted_text)
                                         .overflow_hidden()
-                                        .child(r_first.to_string()),
+                                        .child(StyledText::new(r_first).with_highlights(r_spans.into_iter().map(|range| {
+                                            (range, HighlightStyle {
+                                                color: Some(if theme.background.l < 0.5 { rgb(0x06cf9c).into() } else { rgb(0x008069).into() }),
+                                                font_weight: Some(FontWeight::MEDIUM),
+                                                ..Default::default()
+                                            })
+                                        }))),
                                 ),
                         )
                         .child(
