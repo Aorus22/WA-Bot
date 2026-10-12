@@ -37,7 +37,12 @@ impl ChatView {
                                         Some(id_res.id),
                                     );
                                 }
-                                _ => {
+                                other => {
+                                    let reason = match other {
+                                        Ok(Err(error)) => error.to_string(),
+                                        _ => "request interrupted".to_string(),
+                                    };
+                                    toast::error(format!("Gagal mengirim stiker: {reason}"), cx);
                                     this.finish_optimistic_attachment(cx, &chat_id, &temp_id, None);
                                 }
                             }

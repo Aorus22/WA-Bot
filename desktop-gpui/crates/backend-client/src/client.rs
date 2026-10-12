@@ -634,6 +634,7 @@ impl HttpClient {
             .client
             .post(format!("{}/send-sticker", self.base_url))
             .json(&json!({
+                "secret": "default-secret",
                 "target": target,
                 "mediaUrl": media_url,
                 "isAnimated": is_animated,
