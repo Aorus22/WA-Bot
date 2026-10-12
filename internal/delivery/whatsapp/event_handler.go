@@ -770,7 +770,7 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	// 0. Filter out empty messages that are not media and carry no other
 	// renderable payload (polls, locations, contacts, view-once wraps).
 	hasPayload := isMedia ||
-		evt.Message.GetPollCreationMessage() != nil ||
+		pollCreation(evt.Message) != nil ||
 		evt.Message.GetLocationMessage() != nil ||
 		evt.Message.GetLiveLocationMessage() != nil ||
 		evt.Message.GetContactMessage() != nil ||
@@ -1110,7 +1110,7 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 				Contacts:    entries,
 			}
 			content = fmt.Sprintf("%s (%d kontak)", ca.GetDisplayName(), len(entries))
-		} else if poll := payload.GetPollCreationMessage(); poll != nil {
+		} else if poll := pollCreation(payload); poll != nil {
 			msgType = "poll"
 			options := make([]repository.PollOption, 0, len(poll.GetOptions()))
 			for _, o := range poll.GetOptions() {
