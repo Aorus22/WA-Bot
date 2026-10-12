@@ -15,7 +15,7 @@ impl ChatView {
         if self.viewed_by_message.is_some() {
             let receipts = self.viewed_by_receipts.clone();
             let group = self.group_info.clone();
-            Some(
+            Some(crate::components::motion::modal_in(
                 div()
                     .id("viewed-by-backdrop")
                     .absolute()
@@ -96,7 +96,8 @@ impl ChatView {
                                     .into_any_element()
                             }),
                     ),
-            )
+                "viewed-by-in",
+            ))
         } else {
             None
         }

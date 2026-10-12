@@ -125,7 +125,6 @@ impl ChatView {
         .detach();
     }
 
-    /// Pages layout: leave the open chat and return to the chat list.
     /// Open the one-to-one conversation with `jid` (a clicked mention), adding
     /// an empty row for it if there is no history with that person yet.
     pub fn open_direct_chat(&mut self, jid: &str, name: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -159,6 +158,7 @@ impl ChatView {
         self.select_chat(jid.to_string(), window, cx);
     }
 
+    /// Pages layout: leave the open chat and return to the chat list.
     pub fn back_to_list(&mut self, cx: &mut Context<Self>) {
         self.selected_chat_id = None;
         if cx.has_global::<ChatStore>() {
@@ -172,7 +172,17 @@ impl ChatView {
 
     /// Sidebar layout: hide or show the chat list.
     pub fn toggle_sidebar_collapsed(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_animate = true;
         self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.sidebar_exiting = self.sidebar_collapsed;
+        if self.sidebar_collapsed {
+            // Keep the list mounted while it slides shut.
+            Self::after_sheet_exit(cx, |this| {
+                if this.sidebar_collapsed {
+                    this.sidebar_exiting = false;
+                }
+            });
+        }
         cx.notify();
     }
 

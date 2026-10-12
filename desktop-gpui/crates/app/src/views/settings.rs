@@ -864,7 +864,12 @@ impl Render for SettingsView {
                                                                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
                                                                     this.set_theme_mode_filter(m, window, cx);
                                                                 }))
-                                                        })),
+                                                        }))
+                                                    .with_animation(
+                                                        "settings-dropdown-in-0",
+                                                        crate::components::motion::enter(crate::components::motion::FAST_MS),
+                                                        |el, d| el.opacity(d),
+                                                    ),
                                                 )
                                             } else {
                                                 None
@@ -1880,7 +1885,12 @@ impl Render for SettingsView {
                                                                     this.show_tts_provider_picker = false;
                                                                     cx.notify();
                                                                 }))
-                                                        })),
+                                                        }))
+                                                    .with_animation(
+                                                        "settings-dropdown-in-1",
+                                                        crate::components::motion::enter(crate::components::motion::FAST_MS),
+                                                        |el, d| el.opacity(d),
+                                                    ),
                                                 )
                                             } else {
                                                 None

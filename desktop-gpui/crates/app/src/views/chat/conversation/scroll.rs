@@ -75,25 +75,11 @@ impl ChatView {
             .map(|m| MessageBubbleHelper::format_date_label(m.msg.timestamp).to_uppercase())
     }
 
-    /// Distance from the bottom of the message list in pixels.
-    pub(crate) fn distance_from_bottom(&self) -> Pixels {
-        let max_offset = self.messages_list_state.max_offset_for_scrollbar().y;
-        let current_offset = -self.messages_list_state.scroll_px_offset_for_scrollbar().y;
-        (max_offset - current_offset).max(px(0.0))
-    }
-
-    /// Whether the user has scrolled up away from the newest messages.
+    /// Whether the user has scrolled up away from the newest messages. The
+    /// list follows the tail while it sits at the bottom, so that is the signal.
     pub(crate) fn should_show_scroll_to_bottom(&self) -> bool {
-        let total = self.cached_render_messages.len();
-        if total == 0 {
-            return false;
-        }
-        let max_offset = self.messages_list_state.max_offset_for_scrollbar().y;
-        if max_offset <= px(40.0) {
-            return false;
-        }
-        let top_ix = self.messages_list_state.logical_scroll_top().item_ix;
-        self.distance_from_bottom() > px(60.0) || (top_ix + 4 < total)
+        !self.cached_render_messages.is_empty()
+            && (self.has_more_next || !self.messages_list_state.is_following_tail())
     }
 
     /// Scroll to the newest messages at the bottom.

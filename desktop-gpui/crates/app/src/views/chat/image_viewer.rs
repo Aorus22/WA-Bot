@@ -225,6 +225,7 @@ impl ChatView {
             let mut overlay = div()
                 .id("image-viewer")
                 .absolute()
+                .occlude()
                 .inset_0()
                 .overflow_hidden()
                 .bg(rgba(0x0b141aee))

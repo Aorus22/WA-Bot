@@ -32,7 +32,7 @@ pub fn background_appearance(blur_enabled: bool) -> WindowBackgroundAppearance {
 
 /// Whether the restored app window should draw its inset rounded CSD frame.
 pub fn is_framed_window(window: &Window) -> bool {
-    !window.is_maximized()
+    !window.is_maximized() && !window.is_fullscreen()
 }
 
 /// Approximate a rounded rectangle with horizontal strips because Wayland blur

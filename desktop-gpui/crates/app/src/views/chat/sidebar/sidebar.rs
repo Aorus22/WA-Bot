@@ -10,12 +10,12 @@ impl ChatView {
         has_selection: bool,
         archived_count: usize,
         pinned_count: usize,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let theme = *cx.app_theme();
         let border_color = theme.border;
         let bg_color = theme.background;
         let window_transparency = ThemeManager::global(cx).window_transparency;
-        v_flex()
+        let sidebar = v_flex()
             .w(px(self.sidebar_width))
             .when(pages, |el| el.w_full())
             .when(!show_list, |el| el.hidden())
@@ -30,6 +30,27 @@ impl ChatView {
             .children(self.render_archived_row(cx, archived_count))
             .children(self.render_pinned_label(cx, pinned_count))
             // Chat Scroll List (Uniform 72px item height strictly enforced) with scrollbar
-            .child(self.render_chat_list(cx))
+            .child(self.render_chat_list(cx));
+        if pages || !show_list || !self.sidebar_animate {
+            return sidebar.into_any_element();
+        }
+        // The list keeps its width and is clipped by a slot that grows or
+        // shrinks, so its content never reflows mid-animation.
+        let width = self.sidebar_width;
+        let exiting = self.sidebar_exiting;
+        div()
+            .h_full()
+            .flex_shrink_0()
+            .overflow_hidden()
+            .child(sidebar)
+            .with_animation(
+                if exiting { "chat-sidebar-out" } else { "chat-sidebar-in" },
+                crate::components::motion::enter(SHEET_ANIM_MS),
+                move |el, delta| {
+                    let delta = delta.clamp(0.0, 1.0);
+                    el.w(px(width * if exiting { 1.0 - delta } else { delta }))
+                },
+            )
+            .into_any_element()
     }
 }

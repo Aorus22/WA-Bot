@@ -267,6 +267,11 @@ impl ChatView {
                                     }))
                                     .into_any_element()
                             }))
+                            .with_animation(
+                                "mention-list-in",
+                                crate::components::motion::enter(crate::components::motion::FAST_MS),
+                                |el, d| el.opacity(d),
+                            )
                             .into_any_element(),
                     )
                 })

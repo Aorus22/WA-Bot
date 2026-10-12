@@ -52,6 +52,10 @@ pub struct ChatView {
     pub sidebar_width: f32,
     /// Sidebar layout only: the chat list is hidden while a chat is open.
     pub sidebar_collapsed: bool,
+    /// The chat list is sliding shut; it stays mounted until that ends.
+    pub sidebar_exiting: bool,
+    /// Set after the first toggle so the list never animates on startup.
+    pub sidebar_animate: bool,
     /// `(pointer x, sidebar width)` captured when the divider drag started.
     pub sidebar_resize_drag: Option<(f32, f32)>,
 
@@ -176,12 +180,20 @@ impl ChatView {
             cached_render_messages: Vec::new(),
 
             chat_list_scroll_handle: UniformListScrollHandle::new(),
-            messages_list_state: ListState::new(0, ListAlignment::Top, px(200.0)),
+            // At the bottom the list follows new messages by itself; scrolling
+            // up pauses that until the user returns to the bottom.
+            messages_list_state: {
+                let state = ListState::new(0, ListAlignment::Top, px(200.0));
+                state.set_follow_mode(FollowMode::Tail);
+                state
+            },
             fresh_msgs: std::collections::HashMap::new(),
 
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             sidebar_resize_drag: None,
             sidebar_collapsed: false,
+            sidebar_exiting: false,
+            sidebar_animate: false,
 
             context_menu: None,
             forward_msg: None,
@@ -337,7 +349,11 @@ impl Render for ChatView {
         let layout = layout_pref::effective(cx);
         let pages = layout == LayoutKind::Pages;
         let has_selection = selected_chat.is_some();
-        let show_list = if pages { !has_selection } else { !(self.sidebar_collapsed && has_selection) };
+        let show_list = if pages {
+            !has_selection
+        } else {
+            !(self.sidebar_collapsed && has_selection) || self.sidebar_exiting
+        };
         let show_right = if pages { has_selection } else { true };
 
         // Ensure cached messages match currently selected chat, and rebuild
