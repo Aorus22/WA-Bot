@@ -11,10 +11,11 @@ use gpui::{
     App, BorderStyle, Bounds, Corners, CursorStyle, Edges, Element, ElementId, FontWeight,
     GlobalElementId, Hitbox, HitboxBehavior, HighlightStyle, Hsla, InspectorElementId,
     IntoElement, LayoutId, MouseButton, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    SharedString, StyledText, Window, transparent_black,
+    SharedString, StyledText, Subscription, Window, transparent_black,
 };
 use gpui_base::{
-    TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun, Theme,
+    TextSelection, TextSelectionEvent, TextSelectionHandle, TextSelectionRegistration,
+    TextSelectionRun, Theme,
 };
 
 /// Called with the mentioned JID when a mention is clicked.
@@ -35,6 +36,8 @@ pub struct MentionText {
 pub struct MentionState {
     handle: TextSelectionHandle,
     over_mention: Rc<Cell<bool>>,
+    // Keeps the redraw-on-selection-change subscription alive with the element.
+    _redraw: Rc<Subscription>,
 }
 
 impl MentionText {
@@ -116,12 +119,31 @@ impl Element for MentionText {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
+        let window_handle = window.window_handle();
         let handle = window.with_element_state(
             global_id.expect("MentionText must have a stable element id"),
             |retained: Option<MentionState>, _| {
-                let state = retained.unwrap_or_else(|| MentionState {
-                    handle: TextSelectionHandle::new(self.text.clone(), cx),
-                    over_mention: Rc::new(Cell::new(false)),
+                let state = retained.unwrap_or_else(|| {
+                    let handle = TextSelectionHandle::new(self.text.clone(), cx);
+                    // Redraw as soon as the drag moves the selection, rather
+                    // than waiting for the next paint to notice the change.
+                    // Deferred because the window is leased while it
+                    // dispatches the mouse event that got us here.
+                    let redraw = handle.subscribe(
+                        move |event, cx| {
+                            if matches!(event, TextSelectionEvent::SelectionChanged(_)) {
+                                cx.defer(move |cx| {
+                                    _ = window_handle.update(cx, |_, window, _| window.refresh());
+                                });
+                            }
+                        },
+                        cx,
+                    );
+                    MentionState {
+                        handle,
+                        over_mention: Rc::new(Cell::new(false)),
+                        _redraw: Rc::new(redraw),
+                    }
                 });
                 (state.clone(), state)
             },
@@ -159,14 +181,10 @@ impl Element for MentionText {
         cx: &mut App,
     ) {
         let layout = self.styled_text.layout().clone();
-        let selected_before = TextSelection::selected_text(window, cx);
         let projection = state.handle.update_runs(
             &[TextSelectionRun::new(self.text.clone(), layout.clone(), bounds)],
             cx,
         );
-        if selected_before != TextSelection::selected_text(window, cx) {
-            window.refresh();
-        }
         let color = self.selection_color.unwrap_or_else(|| Theme::global(cx).tokens.colors.selection);
         for range in projection.ranges().iter().flatten().cloned() {
             let (Some(start), Some(end)) = (
