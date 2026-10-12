@@ -11,6 +11,7 @@ pub mod message_bubble;
 pub mod motion;
 pub mod nav_sidebar;
 pub mod rich_bubbles;
+pub mod text_field;
 pub mod titlebar;
 pub mod toast;
 
@@ -25,5 +26,6 @@ pub use mention_text::MentionText;
 pub use message_bubble::*;
 pub use nav_sidebar::*;
 pub use rich_bubbles::*;
+pub use text_field::{TextArea, TextField, TextFieldEvent};
 pub use titlebar::*;
 pub use toast::*;

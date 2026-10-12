@@ -35,7 +35,7 @@ use wabot_settings::{
 };
 
 use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
-use crate::components::toast;
+use crate::components::{toast, TextField, TextFieldEvent};
 use crate::components::dialogs::logout::open_logout_dialog;
 use crate::router::{AppRoute, Router};
 use crate::state::auth::{AuthState, AuthStatus};
@@ -82,6 +82,7 @@ pub struct SettingsView {
     pub gemini_api_key_input: String,
     pub ai_server_url: String,
     pub read_receipts: bool,
+    pub contact_name_mode: String,
 
     // TTS settings
     pub tts_provider: String,
@@ -103,6 +104,7 @@ pub struct SettingsView {
     // Modal editing state
     pub edit_modal: Option<EditModalState>,
     pub modal_focus_handle: FocusHandle,
+    pub modal_field: Option<TextField>,
 }
 
 impl SettingsView {
@@ -157,6 +159,7 @@ impl SettingsView {
             gemini_api_key_input: String::new(),
             ai_server_url: "http://localhost:8981".to_string(),
             read_receipts: true,
+            contact_name_mode: "profile".to_string(),
 
             tts_provider: String::new(),
             show_tts_provider_picker: false,
@@ -174,6 +177,7 @@ impl SettingsView {
 
             edit_modal: None,
             modal_focus_handle,
+            modal_field: None,
         };
 
         view.load_backend_settings(cx);
@@ -210,6 +214,7 @@ impl SettingsView {
                                 this.has_fish_key = settings_resp.has_fish_key.unwrap_or(false);
                                 this.ai_server_url = settings_resp.ai_server_url().to_string();
                                 this.read_receipts = settings_resp.read_receipts();
+                                this.contact_name_mode = settings_resp.contact_name_mode().to_string();
                                 this.tts_provider = settings_resp.call_tts_provider().to_string();
                                 this.tts_default_voice = settings_resp.call_tts_default_voice().to_string();
                                 this.fish_audio_model = settings_resp.call_tts_fish_audio_model().to_string();
@@ -350,6 +355,46 @@ impl SettingsView {
     }
 
     /// Toggle Read Receipts switch via PUT /api/settings.
+    /// Choose how other people's names are shown ("saved" or "profile").
+    pub fn set_contact_name_mode(&mut self, mode: &'static str, cx: &mut Context<Self>) {
+        if self.contact_name_mode == mode {
+            return;
+        }
+        let previous = std::mem::replace(&mut self.contact_name_mode, mode.to_string());
+        cx.notify();
+
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        let mut data = HashMap::new();
+        data.insert("contact_name_mode".to_string(), mode.to_string());
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT.spawn(async move { client.update_settings(&data).await }).await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(resp)) => this.contact_name_mode = resp.contact_name_mode().to_string(),
+                                _ => {
+                                    this.contact_name_mode = previous;
+                                    toast::error("Failed to update contact names", cx);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     pub fn toggle_read_receipts(&mut self, cx: &mut Context<Self>) {
         if self.is_saving_receipts {
             return;
@@ -505,12 +550,29 @@ impl SettingsView {
             field,
             title,
             description,
-            value: initial_val,
+            value: initial_val.clone(),
             is_secret,
             presets,
         });
 
-        self.modal_focus_handle.focus(window, cx);
+        let on_event = |this: &mut Self, event: TextFieldEvent, _: &mut Window, cx: &mut Context<Self>| match event {
+            TextFieldEvent::Change(value) => {
+                if let Some(modal) = this.edit_modal.as_mut() {
+                    modal.value = value;
+                }
+                cx.notify();
+            }
+            TextFieldEvent::Enter => this.save_modal_value(cx),
+        };
+        let placeholder = "Click to type or select preset below...";
+        let input = if is_secret {
+            TextField::secret(placeholder, window, cx, on_event)
+        } else {
+            TextField::new(placeholder, window, cx, on_event)
+        };
+        input.set_value(initial_val, window, cx);
+        input.focus(window, cx);
+        self.modal_field = Some(input);
         cx.notify();
     }
 
@@ -774,6 +836,7 @@ impl Render for SettingsView {
                                                 Some(
                                                     div()
                                                         .absolute()
+                                                        .occlude()
                                                         .top(px(46.0))
                                                         .right(px(16.0))
                                                         .w(px(110.0))
@@ -1555,6 +1618,68 @@ impl Render for SettingsView {
                             ),
                     )
                     // ====================================================
+                    // CONTACT NAMES SECTION
+                    // ====================================================
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(12.0))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(muted_text)
+                                    .child("CONTACT NAMES"),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .children([
+                                        ("saved", "Saved contact name", "The name from your phone's contacts. Contacts you haven't saved show their phone number, like WhatsApp."),
+                                        ("profile", "Profile name", "The name each person chose for themselves."),
+                                    ].into_iter().map(|(mode, title, description)| {
+                                        let selected = self.contact_name_mode == mode;
+                                        div()
+                                            .id(SharedString::from(format!("contact-names-{mode}")))
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap_3()
+                                            .px_4()
+                                            .py_3()
+                                            .rounded_lg()
+                                            .border_1()
+                                            .border_color(if selected { primary_color } else { border_color })
+                                            .cursor_pointer()
+                                            .hover(|s| s.bg(tag_bg))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .size(px(18.0))
+                                                    .rounded_full()
+                                                    .border_2()
+                                                    .border_color(if selected { primary_color } else { muted_text })
+                                                    .children(selected.then(|| div().size(px(8.0)).rounded_full().bg(primary_color))),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).text_color(text_color).child(title))
+                                                    .child(div().text_xs().text_color(muted_text).child(description)),
+                                            )
+                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                this.set_contact_name_mode(mode, cx);
+                                            }))
+                                    })),
+                            ),
+                    )
+                    // ====================================================
                     // 4. PRIVACY SECTION
                     // ====================================================
                     .child(
@@ -1730,6 +1855,7 @@ impl Render for SettingsView {
                                                 Some(
                                                     div()
                                                         .absolute()
+                                                        .occlude()
                                                         .top(px(46.0))
                                                         .right(px(16.0))
                                                         .w(px(120.0))
@@ -1998,18 +2124,12 @@ impl Render for SettingsView {
             .children(if let Some(modal) = &self.edit_modal {
                 let title = modal.title.clone();
                 let desc = modal.description.clone();
-                let val_display = if modal.is_secret && !modal.value.is_empty() {
-                    "●".repeat(modal.value.len())
-                } else if modal.value.is_empty() {
-                    "Click to type or select preset below...".to_string()
-                } else {
-                    modal.value.clone()
-                };
                 let presets = modal.presets.clone();
 
                 Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
+                        .occlude()
                         .inset_0()
                         .bg(rgba(0x00000088))
                         .flex()
@@ -2031,30 +2151,13 @@ impl Render for SettingsView {
                                 .flex()
                                 .flex_col()
                                 .gap_4()
-                                .track_focus(&self.modal_focus_handle)
                                 .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                    if let Some(ref mut m) = this.edit_modal {
-                                        match ev.keystroke.key.as_str() {
-                                            "backspace" => {
-                                                m.value.pop();
-                                                cx.notify();
-                                            }
-                                            "enter" => {
-                                                this.save_modal_value(cx);
-                                            }
-                                            "escape" => {
-                                                this.edit_modal = None;
-                                                cx.notify();
-                                            }
-                                            k if k.len() == 1 => {
-                                                m.value.push_str(k);
-                                                cx.notify();
-                                            }
-                                            _ => {}
-                                        }
+                                    if ev.keystroke.key.as_str() == "escape" {
+                                        this.edit_modal = None;
+                                        cx.notify();
                                     }
                                 }))
-                                .on_mouse_down(MouseButton::Left, |_, _, _| {}) // stop propagation
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()) // keep clicks inside the card from closing the modal
                                 // Modal Header
                                 .child(
                                     div()
@@ -2087,44 +2190,8 @@ impl Render for SettingsView {
                                         .text_color(muted_text)
                                         .child(desc),
                                 )
-                                // Input Display Box
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .min_h(px(40.0))
-                                        .p_2p5()
-                                        .rounded_md()
-                                        .border_1()
-                                        .border_color(primary_color)
-                                        .bg(theme.background)
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .justify_between()
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(if modal.value.is_empty() { muted_text } else { text_color })
-                                                .child(val_display),
-                                        )
-                                        .children(if !modal.value.is_empty() {
-                                            Some(
-                                                div()
-                                                    .cursor_pointer()
-                                                    .text_xs()
-                                                    .text_color(muted_text)
-                                                    .child("Clear")
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                        if let Some(ref mut m) = this.edit_modal {
-                                                            m.value.clear();
-                                                            cx.notify();
-                                                        }
-                                                    })),
-                                            )
-                                        } else {
-                                            None
-                                        }),
-                                )
+                                // Value input
+                                .children(self.modal_field.as_ref().map(|field| field.element(&theme, None)))
                                 // Preset Chips (if any)
                                 .children(if !presets.is_empty() {
                                     Some(
@@ -2146,10 +2213,9 @@ impl Render for SettingsView {
                                                     .cursor_pointer()
                                                     .hover(|s| s.bg(secondary_bg))
                                                     .child(lbl)
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                        if let Some(ref mut m) = this.edit_modal {
-                                                            m.value = val.to_string();
-                                                            cx.notify();
+                                                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
+                                                        if let Some(field) = this.modal_field.clone() {
+                                                            field.set_value(val, window, cx);
                                                         }
                                                     }))
                                             })),

@@ -52,12 +52,15 @@ func (h *Handler) enrichMessageMentions(msg *repository.Message, ownJIDs []strin
 	if extra.MentionNames == nil {
 		extra.MentionNames = make(map[string]string)
 	}
+	extra.MentionChats = make(map[string]string)
+	resolver := h.newNameResolver()
 	own := make(map[string]bool)
 	for _, jid := range ownJIDs {
 		own[h.resolveMentionJID(jid)] = true
 	}
 	for _, mentioned := range extra.Mentions {
 		jid := h.resolveMentionJID(mentioned)
+		extra.MentionChats[mentioned] = jid
 		isOwn := own[jid]
 		if isOwn && msg.Status == "received" && !msg.IsAutomatic {
 			extra.MentionsMe = true
@@ -100,6 +103,9 @@ func (h *Handler) enrichMessageMentions(msg *repository.Message, ownJIDs []strin
 				name = "+" + phone
 			}
 		}
+		if !isOwn {
+			name = resolver.resolve(jid, name)
+		}
 		if name = strings.TrimSpace(name); name != "" {
 			extra.MentionNames[mentioned] = name
 		}
@@ -107,6 +113,7 @@ func (h *Handler) enrichMessageMentions(msg *repository.Message, ownJIDs []strin
 }
 
 func (h *Handler) enrichMessagesMentions(messages []repository.Message) {
+	h.applySenderNames(messages)
 	own := h.ownMentionJIDs()
 	for i := range messages {
 		h.enrichMessageMentions(&messages[i], own)

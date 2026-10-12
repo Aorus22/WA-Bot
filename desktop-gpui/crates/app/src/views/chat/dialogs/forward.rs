@@ -24,6 +24,7 @@ impl ChatView {
                 div()
                     .id("forward-backdrop")
                     .absolute()
+                    .occlude()
                     .inset_0()
                     .bg(rgba(0x00000088))
                     .flex()

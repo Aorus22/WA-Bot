@@ -8,7 +8,6 @@ impl ChatView {
     ) -> Option<impl IntoElement> {
         let theme = *cx.app_theme();
         let border_color = theme.border;
-        let bg_color = theme.background;
         let card_bg = theme.card;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
@@ -22,6 +21,7 @@ impl ChatView {
             Some(crate::components::motion::modal_in(
                 div()
                     .absolute()
+                    .occlude()
                     .inset_0()
                     .bg(rgba(0x00000088))
                     .flex()
@@ -57,33 +57,7 @@ impl ChatView {
                                     ),
                             )
                             // Group Name Input
-                            .child(
-                                h_flex()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_xl()
-                                    .border_1()
-                                    .border_color(border_color)
-                                    .bg(bg_color)
-                                    .track_focus(&self.new_group_focus)
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                        this.new_group_focus.focus(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                        match ev.keystroke.key.as_str() {
-                                            "backspace" => { this.new_group_name.pop(); cx.notify(); }
-                                            "space" => { this.new_group_name.push(' '); cx.notify(); }
-                                            k if k.len() == 1 => { this.new_group_name.push_str(k); cx.notify(); }
-                                            _ => {}
-                                        }
-                                    }))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(if self.new_group_name.is_empty() { muted_text } else { text_color })
-                                            .child(if self.new_group_name.is_empty() { "Group name...".to_string() } else { self.new_group_name.clone() }),
-                                    ),
-                            )
+                            .children(self.new_group_field.as_ref().map(|field| field.element(&theme, None)))
                             // Contact Picker Scroll
                             .child(
                                 v_flex()

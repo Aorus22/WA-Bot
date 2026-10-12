@@ -6,7 +6,7 @@ use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::StatusGroup;
 
-use crate::components::toast;
+use crate::components::{toast, TextArea};
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::theme::manager::{AppThemeExt, ThemeManager};
@@ -107,13 +107,12 @@ pub struct StatusView {
     composer_open: bool,
     composer_text: String,
     composer_bg: u32,
-    composer_focus: FocusHandle,
+    composer_field: Option<TextArea>,
     is_posting: bool,
 }
 
 impl StatusView {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let composer_focus = cx.focus_handle();
         let mut this = Self {
             groups: Vec::new(),
             is_loading: true,
@@ -122,7 +121,7 @@ impl StatusView {
             composer_open: false,
             composer_text: String::new(),
             composer_bg: BACKGROUNDS[0],
-            composer_focus,
+            composer_field: None,
             is_posting: false,
         };
         this.load_statuses(cx);
@@ -271,6 +270,17 @@ impl StatusView {
 
 impl Render for StatusView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.composer_field.is_none() {
+            self.composer_field = Some(TextArea::new("Type a status…", window, cx, |this, value, _, cx| {
+                this.composer_text = value;
+                cx.notify();
+            }));
+        }
+        if let Some(field) = self.composer_field.clone() {
+            if field.value(cx) != self.composer_text {
+                field.set_value(self.composer_text.clone(), window, cx);
+            }
+        }
         let theme = cx.app_theme();
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
@@ -339,7 +349,9 @@ impl Render for StatusView {
                                     .child(svg().data(PLUS_SVG).size(px(20.0)).text_color(text_color))
                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                         this.composer_open = true;
-                                        this.composer_focus.focus(window, cx);
+                                        if let Some(field) = this.composer_field.clone() {
+                                            field.focus(window, cx);
+                                        }
                                         cx.notify();
                                     })),
                             ),
@@ -388,7 +400,9 @@ impl Render for StatusView {
                                             }
                                         }
                                         this.composer_open = true;
-                                        this.composer_focus.focus(window, cx);
+                                        if let Some(field) = this.composer_field.clone() {
+                                            field.focus(window, cx);
+                                        }
                                         cx.notify();
                                     }))
                                     .child(
@@ -853,12 +867,12 @@ impl Render for StatusView {
             // --- Status Composer Modal ---
             .children(if self.composer_open {
                 let current_bg = argb_to_rgb(self.composer_bg);
-                let text_val = self.composer_text.clone();
                 let is_posting = self.is_posting;
 
                 Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
+                        .occlude()
                         .inset_0()
                         .bg(rgba(0x00000088))
                         .flex()
@@ -909,45 +923,14 @@ impl Render for StatusView {
                                         .items_center()
                                         .justify_center()
                                         .cursor_text()
-                                        .track_focus(&self.composer_focus)
-                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                            this.composer_focus.focus(window, cx);
-                                        }))
-                                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                            match ev.keystroke.key.as_str() {
-                                                "backspace" => {
-                                                    this.composer_text.pop();
-                                                    cx.notify();
-                                                }
-                                                "space" => {
-                                                    this.composer_text.push(' ');
-                                                    cx.notify();
-                                                }
-                                                "enter" => {
-                                                    this.composer_text.push('\n');
-                                                    cx.notify();
-                                                }
-                                                k if k.len() == 1 => {
-                                                    this.composer_text.push_str(k);
-                                                    cx.notify();
-                                                }
-                                                _ => {}
-                                            }
-                                        }))
-                                        .child(
-                                            div()
+                                        .children(self.composer_field.as_ref().map(|field| {
+                                            field
+                                                .element()
+                                                .w_full()
+                                                .h_full()
                                                 .text_lg()
-                                                .text_color(if text_val.is_empty() {
-                                                    rgba(0xffffff99)
-                                                } else {
-                                                    rgb(0xffffff)
-                                                })
-                                                .child(if text_val.is_empty() {
-                                                    "Type a status…".to_string()
-                                                } else {
-                                                    text_val
-                                                }),
-                                        ),
+                                                .text_color(rgb(0xffffff))
+                                        })),
                                 )
                                 // Background Color Swatches
                                 .child(

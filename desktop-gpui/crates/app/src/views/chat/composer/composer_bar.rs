@@ -64,8 +64,8 @@ impl ChatView {
                                         .text_xs()
                                         .text_color(muted_text)
                                         .overflow_hidden()
-                                        .child(StyledText::new(r_first).with_highlights(r_spans.into_iter().map(|range| {
-                                            (range, HighlightStyle {
+                                        .child(StyledText::new(r_first).with_highlights(r_spans.into_iter().map(|span| {
+                                            (span.range, HighlightStyle {
                                                 color: Some(if theme.background.l < 0.5 { rgb(0x06cf9c).into() } else { rgb(0x008069).into() }),
                                                 font_weight: Some(FontWeight::MEDIUM),
                                                 ..Default::default()
@@ -229,6 +229,7 @@ impl ChatView {
                     }
                     Some(
                         v_flex()
+                            .occlude()
                             .mx_3()
                             .mb_2()
                             .max_h(px(240.0))
@@ -329,17 +330,7 @@ impl ChatView {
                                 this.focus_composer(window, cx);
                             }))
                             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                                let key = ev.keystroke.key.as_str();
-                                let modifiers = ev.keystroke.modifiers;
-                                let send = if this.is_md_mode {
-                                    key == "enter" && (modifiers.control || modifiers.platform)
-                                } else {
-                                    key == "enter" && !modifiers.shift
-                                };
-                                if send {
-                                    cx.stop_propagation();
-                                    this.send_current_message(window, cx);
-                                } else if key == "escape" {
+                                if ev.keystroke.key.as_str() == "escape" {
                                     if this.reply_to.is_some() {
                                         cx.stop_propagation();
                                         this.cancel_reply(window, cx);

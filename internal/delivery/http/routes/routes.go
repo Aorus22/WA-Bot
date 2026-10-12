@@ -126,6 +126,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/groups/{id}/leave", groupHandler.LeaveGroup).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/stickers/favorites", stickerHandler.GetFavorites).Methods("GET")
+	api.HandleFunc("/stickers/recent", stickerHandler.GetRecent).Methods("GET")
 	api.HandleFunc("/stickers/favorite", stickerHandler.FavoriteSticker).Methods("POST", "OPTIONS")
 	api.HandleFunc("/stickers/favorites/{id}", stickerHandler.DeleteFavorite).Methods("DELETE", "OPTIONS")
 

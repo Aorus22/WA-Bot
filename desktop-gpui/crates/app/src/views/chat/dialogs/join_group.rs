@@ -8,7 +8,6 @@ impl ChatView {
     ) -> Option<impl IntoElement> {
         let theme = *cx.app_theme();
         let border_color = theme.border;
-        let bg_color = theme.background;
         let card_bg = theme.card;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
@@ -17,6 +16,7 @@ impl ChatView {
             Some(crate::components::motion::modal_in(
                 div()
                     .absolute()
+                    .occlude()
                     .inset_0()
                     .bg(rgba(0x00000088))
                     .flex()
@@ -55,44 +55,7 @@ impl ChatView {
                                 div().text_xs().text_color(muted_text).child("Paste an invite link (chat.whatsapp.com/...)"),
                             )
                             // Invite Link Input
-                            .child(
-                                h_flex()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_xl()
-                                    .border_1()
-                                    .border_color(border_color)
-                                    .bg(bg_color)
-                                    .track_focus(&self.join_group_focus)
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                        this.join_group_focus.focus(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                        if (ev.keystroke.modifiers.control || ev.keystroke.modifiers.platform)
-                                            && ev.keystroke.key.as_str().eq_ignore_ascii_case("v")
-                                        {
-                                            if let Some(item) = cx.read_from_clipboard() {
-                                                if let Some(text) = item.text() {
-                                                    this.join_group_link.push_str(&text);
-                                                    cx.notify();
-                                                }
-                                            }
-                                            return;
-                                        }
-                                        match ev.keystroke.key.as_str() {
-                                            "backspace" => { this.join_group_link.pop(); cx.notify(); }
-                                            "space" => { this.join_group_link.push(' '); cx.notify(); }
-                                            k if k.len() == 1 => { this.join_group_link.push_str(k); cx.notify(); }
-                                            _ => {}
-                                        }
-                                    }))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(if self.join_group_link.is_empty() { muted_text } else { text_color })
-                                            .child(if self.join_group_link.is_empty() { "https://chat.whatsapp.com/...".to_string() } else { self.join_group_link.clone() }),
-                                    ),
-                            )
+                            .children(self.join_link_field.as_ref().map(|field| field.element(&theme, Some(LINK_SVG))))
                             // Actions
                             .child(
                                 h_flex()

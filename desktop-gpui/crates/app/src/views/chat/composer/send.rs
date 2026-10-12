@@ -593,6 +593,7 @@ impl ChatView {
                     link_preview: None,
                     mentions: mention_jids.clone(),
                     mention_names: Default::default(),
+                    mention_chats: Default::default(),
                     mentions_me: false,
                 })
             },

@@ -361,8 +361,15 @@ impl ChatStore {
                 }
                 true
             }
-            WsEvent::ChatsChanged { .. } => {
+            WsEvent::ChatsChanged { reason } => {
                 self.chats_loaded = false;
+                if reason == "names" {
+                    // Cached messages carry sender names from before the
+                    // change; the open chat keeps its copy, the rest reload.
+                    let active = self.active_chat_id.clone();
+                    self.messages_by_chat.retain(|id, _| Some(id) == active.as_ref());
+                    self.messages_version = self.messages_version.wrapping_add(1);
+                }
                 true
             }
             _ => false,

@@ -57,6 +57,9 @@ func (gh *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
 		gh.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Names follow the contact-name setting at read time, so the stored
+	// snapshot keeps the profile names.
+	gh.applyDisplayNames(cache)
 	gh.handler.sendJSON(w, cache)
 }
 
@@ -112,6 +115,23 @@ func (gh *GroupHandler) enrichParticipantNames(ctx context.Context, group *repos
 				Name: name,
 				JID:  participant.JID,
 			})
+		}
+	}
+}
+
+// applyDisplayNames renames participants as the contact-name setting asks.
+func (gh *GroupHandler) applyDisplayNames(group *repository.GroupCache) {
+	if group == nil {
+		return
+	}
+	resolver := gh.handler.newNameResolver()
+	for i := range group.Participants {
+		participant := &group.Participants[i]
+		if participant.Name == "You" {
+			continue
+		}
+		if name := resolver.resolve(participant.JID, participant.Name); name != "" {
+			participant.Name = name
 		}
 	}
 }

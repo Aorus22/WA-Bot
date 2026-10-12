@@ -586,6 +586,15 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
+    pub async fn get_recent_stickers(&self) -> Result<Vec<StickerFavorite>> {
+        let resp = self
+            .client
+            .get(format!("{}/stickers/recent", self.base_url))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
     pub async fn favorite_sticker(
         &self,
         message_id: &str,
@@ -596,6 +605,7 @@ impl HttpClient {
             .client
             .post(format!("{}/stickers/favorite", self.base_url))
             .json(&json!({
+                "secret": "default-secret",
                 "messageId": message_id,
                 "mediaUrl": media_url,
                 "isAnimated": is_animated,

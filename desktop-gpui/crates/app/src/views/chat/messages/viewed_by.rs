@@ -19,6 +19,7 @@ impl ChatView {
                 div()
                     .id("viewed-by-backdrop")
                     .absolute()
+                    .occlude()
                     .inset_0()
                     .bg(rgba(0x00000099))
                     .flex()

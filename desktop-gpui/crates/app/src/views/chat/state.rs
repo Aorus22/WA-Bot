@@ -26,6 +26,8 @@ pub struct MessageContextMenu {
     pub msg: Message,
     pub is_from_me: bool,
     pub position: Point<Pixels>,
+    /// Showing the full emoji list instead of the actions (the "+" / React rows).
+    pub reaction_picker: bool,
 }
 
 /// Context menu popup state when right-clicking a sidebar chat item

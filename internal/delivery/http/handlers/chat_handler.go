@@ -29,6 +29,9 @@ func (ch *ChatHandler) GetChats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chats, err := ch.handler.msgRepo.GetChats()
+	if err == nil {
+		ch.handler.applyChatNames(chats)
+	}
 	if err != nil {
 		fmt.Printf("Error getting chats: %v\n", err)
 		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
@@ -237,6 +240,9 @@ func (ch *ChatHandler) GetContacts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	contacts, err := ch.handler.msgRepo.GetContacts()
+	if err == nil {
+		ch.handler.applyContactNames(contacts)
+	}
 	if err != nil {
 		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return

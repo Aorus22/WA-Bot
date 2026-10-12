@@ -23,6 +23,7 @@ var managedSettingsKeys = []string{
 	"call_tts_fish_audio_model",
 	"call_tts_fish_audio_voice_id",
 	"read_receipts",
+	settingContactNameMode,
 }
 
 // secretSettingsKeys are masked in API responses so raw secrets never leak.
@@ -127,11 +128,21 @@ func (sh *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if mode, ok := updates[settingContactNameMode]; ok && mode != nameModeProfile && mode != nameModeSaved {
+		sh.handler.sendError(w, http.StatusBadRequest, "contact_name_mode must be one of: 'profile', 'saved'")
+		return
+	}
+
 	for key, value := range updates {
 		if err := sh.settingsRepo.Set(r.Context(), key, value); err != nil {
 			sh.handler.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	}
+
+	if _, changed := updates[settingContactNameMode]; changed {
+		// Chat lists and cached messages carry the old names.
+		sh.handler.broadcast("chats_changed", map[string]string{"reason": "names"})
 	}
 
 	all, err := sh.settingsRepo.List(r.Context())

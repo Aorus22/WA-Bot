@@ -25,19 +25,26 @@ pub(crate) fn render_message_mentions(content: &str, message: &Message, group: O
     render_message_mentions_with_spans(content, message, group).0
 }
 
+/// A mention inside rendered message text: where it sits and who it points at.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MentionSpan {
+    pub range: Range<usize>,
+    pub jid: String,
+}
+
 /// Rewrites `@<id>` tokens to the contact's name and returns the byte ranges of
 /// every mention in the rewritten text, so callers can colour them.
 pub(crate) fn render_message_mentions_with_spans(
     content: &str,
     message: &Message,
     group: Option<&GroupCache>,
-) -> (String, Vec<Range<usize>>) {
+) -> (String, Vec<MentionSpan>) {
     let Some(extra) = message.extra.as_ref() else { return (content.to_string(), Vec::new()) };
     let mut names = std::collections::HashMap::new();
-    let mut mentioned = HashSet::new();
+    let mut mentioned = std::collections::HashMap::new();
     for jid in &extra.mentions {
         let id = jid.split('@').next().unwrap_or(jid);
-        mentioned.insert(id);
+        mentioned.insert(id, extra.mention_chats.get(jid).unwrap_or(jid).as_str());
         let label = extra.mention_names.get(jid).map(String::as_str)
             .filter(|name| !name.trim().is_empty())
             .or_else(|| group.and_then(|group| {
@@ -58,8 +65,8 @@ pub(crate) fn render_message_mentions_with_spans(
         let start = rendered.len();
         rendered.push('@');
         rendered.push_str(names.get(number).copied().unwrap_or(number));
-        if mentioned.contains(number) {
-            spans.push(start..rendered.len());
+        if let Some(jid) = mentioned.get(number) {
+            spans.push(MentionSpan { range: start..rendered.len(), jid: (*jid).to_string() });
         }
         rendered.push_str(&part[end..]);
     }
@@ -94,7 +101,8 @@ mod mention_tests {
         let m = message(serde_json::json!(["123@lid"]), serde_json::json!({"123@lid": "Zoë"}));
         let (text, spans) = render_message_mentions_with_spans("hi @123 and @456", &m, None);
         assert_eq!(text, "hi @Zoë and @456");
-        assert_eq!(spans.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>(), ["@Zoë"]);
+        assert_eq!(spans.iter().map(|m| &text[m.range.clone()]).collect::<Vec<_>>(), ["@Zoë"]);
+        assert_eq!(spans[0].jid, "123@lid");
     }
 
     #[test]
@@ -146,9 +154,26 @@ pub(crate) fn preview_load_state(url: &str, window: &mut Window, cx: &mut App) -
 }
 
 
-/// the click handler.
-/// One row of a context menu: icon + label, hover highlight. The caller adds
-/// the click handler.
+/// Card that holds a context menu's rows, in WhatsApp Web's style.
+pub(crate) fn menu_surface(width: f32, card_bg: Hsla, border: Hsla) -> Div {
+    v_flex()
+        .w(px(width))
+        .py_2()
+        .rounded_2xl()
+        .bg(card_bg)
+        .border_1()
+        .border_color(border.opacity(0.35))
+        .shadow_xl()
+        .occlude()
+}
+
+/// Thin rule between groups of rows.
+pub(crate) fn menu_separator(color: Hsla) -> Div {
+    div().h(px(1.0)).my_2().bg(color.opacity(0.5))
+}
+
+/// One row of a context menu: icon + label, full-width hover highlight. The
+/// caller adds the click handler.
 pub(crate) fn menu_row(
     id: &'static str,
     icon: &'static [u8],
@@ -160,20 +185,13 @@ pub(crate) fn menu_row(
     h_flex()
         .id(id)
         .cursor_pointer()
-        .px_3()
-        .py_2()
-        .rounded_xl()
-        .gap_2p5()
+        .px_5()
+        .py_2p5()
+        .gap_4()
         .items_center()
         .hover(move |s| s.bg(hover_bg))
-        .child(svg().data(icon).size(px(15.0)).text_color(icon_color))
-        .child(
-            div()
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(text_color)
-                .child(label),
-        )
+        .child(svg().data(icon).size(px(17.0)).text_color(icon_color))
+        .child(div().text_sm().text_color(text_color).child(label))
 }
 
 /// Conversation sidebar sizing: the desktop opens at 360 like before, and

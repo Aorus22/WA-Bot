@@ -37,6 +37,15 @@ impl SettingsResponse {
         self.get("call_tts_fish_audio_voice_id").unwrap_or("")
     }
 
+    /// `saved` shows address-book names (or the phone number), `profile` the
+    /// name each contact chose for themselves.
+    pub fn contact_name_mode(&self) -> &str {
+        match self.get("contact_name_mode") {
+            Some("saved") => "saved",
+            _ => "profile",
+        }
+    }
+
     pub fn read_receipts(&self) -> bool {
         self.get("read_receipts").map(|v| v != "false").unwrap_or(true)
     }

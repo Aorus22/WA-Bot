@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	waTypes "go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -190,6 +193,8 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 		h.handleClearChat(v)
 	case *events.DeleteForMe:
 		h.handleDeleteForMe(v)
+	case *events.AppState:
+		h.handleAppState(v)
 	case *events.PushName:
 		h.handlePushName(v)
 	case *events.UserAbout:
@@ -1587,4 +1592,57 @@ func (h *WhatsAppEventHandler) handlePresence(evt *events.Presence) {
 		"available": !evt.Unavailable,
 		"lastSeen":  lastSeen,
 	})
+}
+
+// handleAppState follows app-state changes that have no typed event. Right now
+// that is the stickers starred in WhatsApp, which the picker shows as "Starred".
+func (h *WhatsAppEventHandler) handleAppState(evt *events.AppState) {
+	if h.msgStore == nil || evt == nil || len(evt.Index) < 2 || evt.Index[0] != appstate.IndexFavoriteSticker {
+		return
+	}
+	action := evt.SyncActionValue.GetStickerAction()
+	if action == nil {
+		return
+	}
+	id := evt.Index[1]
+	if !action.GetIsFavorite() {
+		if err := h.msgStore.DeleteFavoriteSticker(id); err != nil {
+			fmt.Printf("[STICKER] Failed to remove starred sticker %s: %v\n", id, err)
+		}
+		return
+	}
+	go h.saveStarredSticker(id, action)
+}
+
+func (h *WhatsAppEventHandler) saveStarredSticker(id string, action *waSyncAction.StickerAction) {
+	if h.storage == nil || h.waClient == nil || h.waClient.CoreClient() == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// The sync action carries no plain-file hash, so the download cannot be
+	// verified against one; the MAC check on the encrypted file still runs.
+	data, err := h.waClient.CoreClient().DownloadMediaWithPath(ctx, action.GetDirectPath(),
+		action.GetFileEncSHA256(), nil, action.GetMediaKey(), whatsmeow.MediaImage, "", true)
+	if err != nil && !errors.Is(err, whatsmeow.ErrInvalidMediaSHA256) {
+		fmt.Printf("[STICKER] Failed to download starred sticker %s: %v\n", id, err)
+		return
+	}
+	if len(data) == 0 {
+		return
+	}
+	safe := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, id)
+	filename := fmt.Sprintf("wa_sticker_%s.webp", safe)
+	if _, err := h.storage.Save(ctx, filename, bytes.NewReader(data)); err != nil {
+		fmt.Printf("[STICKER] Failed to store starred sticker %s: %v\n", id, err)
+		return
+	}
+	if err := h.msgStore.SaveStarredSticker(id, "/media/"+filename, action.GetIsLottie()); err != nil {
+		fmt.Printf("[STICKER] Failed to save starred sticker %s: %v\n", id, err)
+	}
 }

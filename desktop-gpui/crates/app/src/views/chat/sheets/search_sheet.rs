@@ -27,7 +27,9 @@ impl ChatView {
         self.is_search_sheet_open = true;
         self.is_info_sheet_open = false;
         self.info_sheet_closing = false;
-        self.search_sheet_focus.focus(window, cx);
+        if let Some(field) = self.sheet_search_field.clone() {
+            field.focus(window, cx);
+        }
         if !self.search_sheet_query.is_empty() {
             self.run_search_messages(cx);
         }
@@ -337,91 +339,15 @@ impl ChatView {
                         div()
                             .px_3()
                             .pb_3()
-                            .child(
-                                h_flex()
-                                    .px_3()
-                                    .py_2()
-                                    .bg(theme.muted.opacity(0.5))
-                                    .rounded_xl()
-                                    .border_1()
-                                    .border_color(border_color.opacity(0.3))
-                                    .items_center()
-                                    .gap_2()
-                                    .cursor_text()
-                                    .track_focus(&self.search_sheet_focus)
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                        this.search_sheet_focus.focus(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                        match ev.keystroke.key.as_str() {
-                                            "backspace" => {
-                                                this.search_sheet_query.pop();
-                                                this.run_search_messages(cx);
-                                            }
-                                            "escape" => {
-                                                if !this.search_sheet_query.is_empty() {
-                                                    this.search_sheet_query.clear();
-                                                    this.search_sheet_results.clear();
-                                                    this.is_searching_messages = false;
-                                                } else {
-                                                    this.close_search_sheet(cx);
-                                                }
-                                                cx.notify();
-                                            }
-                                            "space" => {
-                                                this.search_sheet_query.push(' ');
-                                                this.run_search_messages(cx);
-                                            }
-                                            "enter" => {
-                                                this.run_search_messages(cx);
-                                            }
-                                            k if k.len() == 1 => {
-                                                this.search_sheet_query.push_str(k);
-                                                this.run_search_messages(cx);
-                                            }
-                                            _ => {}
-                                        }
-                                    }))
-                                    .child(
-                                        svg()
-                                            .data(SEARCH_SVG)
-                                            .size(px(14.0))
-                                            .text_color(muted_text),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .cursor_text()
-                                            .text_xs()
-                                            .text_color(if self.search_sheet_query.is_empty() { muted_text } else { text_color })
-                                            .child(if self.search_sheet_query.is_empty() {
-                                                "Search messages...".to_string()
-                                            } else {
-                                                self.search_sheet_query.clone()
-                                            }),
-                                    )
-                                    .children(if !self.search_sheet_query.is_empty() {
-                                        Some(
-                                            div()
-                                                .id("btn-clear-search-sheet")
-                                                .cursor_pointer()
-                                                .p_1()
-                                                .rounded_full()
-                                                .hover(|s| s.bg(theme.muted.opacity(0.65)))
-                                                .tooltip(move |window, cx| {
-                                                    Tooltip::new("Clear search").build(window, cx)
-                                                })
-                                                .child(svg().data(X_SVG).size(px(12.0)).text_color(muted_text))
-                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                    this.search_sheet_query.clear();
-                                                    this.search_sheet_results.clear();
-                                                    this.is_searching_messages = false;
-                                                    cx.notify();
-                                                })),
-                                        )
-                                    } else {
-                                        None
-                                    }),
+                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                                if ev.keystroke.key.as_str() == "escape" {
+                                    this.close_search_sheet(cx);
+                                }
+                            }))
+                            .children(
+                                self.sheet_search_field
+                                    .as_ref()
+                                    .map(|field| field.element(&theme, Some(SEARCH_SVG))),
                             ),
                     ),
             )

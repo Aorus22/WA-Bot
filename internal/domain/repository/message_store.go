@@ -118,6 +118,9 @@ type MessageExtra struct {
 	LinkPreview  *LinkPreviewMeta  `json:"linkPreview,omitempty"`
 	Mentions     []string          `json:"mentions,omitempty"`
 	MentionNames map[string]string `json:"mentionNames,omitempty"`
+	// MentionChats maps each mentioned JID to the one-to-one chat JID to open
+	// for it (a LID resolved to its phone number when known).
+	MentionChats map[string]string `json:"mentionChats,omitempty"`
 	MentionsMe   bool              `json:"mentionsMe,omitempty"`
 }
 
@@ -372,6 +375,10 @@ func (s *MessageStore) initLocked() error {
 			UPDATE chats SET last_msg = NEW.content, last_time = NEW.timestamp, updated_at = strftime('%s', 'now')
 			WHERE id = NEW.chat_id AND COALESCE(last_time, 0) <= NEW.timestamp;
 		END`)
+
+	// Starred stickers synced from the phone are tagged source='wa'; the
+	// ones saved from this app keep the default 'custom'.
+	_, _ = s.db.Exec(`ALTER TABLE favorite_stickers ADD COLUMN source TEXT DEFAULT 'custom'`)
 
 	// Migration: Ensure favorite_stickers has the 'id' column (handling old implementation)
 	var tableExists bool
@@ -1150,19 +1157,26 @@ func (s *MessageStore) UpdateChatName(chatID, name string) error {
 }
 
 func (s *MessageStore) SaveFavoriteSticker(id, mediaURL string, isAnimated bool) error {
+	return s.saveSticker(id, mediaURL, isAnimated, "custom")
+}
+
+// SaveStarredSticker stores a sticker the user starred in WhatsApp itself.
+func (s *MessageStore) SaveStarredSticker(id, mediaURL string, isAnimated bool) error {
+	return s.saveSticker(id, mediaURL, isAnimated, "wa")
+}
+
+func (s *MessageStore) saveSticker(id, mediaURL string, isAnimated bool, source string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	animated := 0
+	if isAnimated {
+		animated = 1
+	}
 	_, err := s.db.Exec(`
-                INSERT OR REPLACE INTO favorite_stickers (id, media_url, is_animated)
-                VALUES (?, ?, ?)
-        `, id, mediaURL, func() int {
-		if isAnimated {
-			return 1
-		}
-		return 0
-	}())
-
+                INSERT OR REPLACE INTO favorite_stickers (id, media_url, is_animated, source)
+                VALUES (?, ?, ?, ?)
+        `, id, mediaURL, animated, source)
 	return err
 }
 
@@ -1170,7 +1184,7 @@ func (s *MessageStore) GetFavoriteStickers() ([]map[string]interface{}, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query("SELECT id, media_url, is_animated FROM favorite_stickers ORDER BY created_at DESC")
+	rows, err := s.db.Query("SELECT id, media_url, is_animated, COALESCE(source, 'custom') FROM favorite_stickers ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -1178,15 +1192,49 @@ func (s *MessageStore) GetFavoriteStickers() ([]map[string]interface{}, error) {
 
 	var stickers []map[string]interface{}
 	for rows.Next() {
-		var id, url string
+		var id, url, source string
 		var isAnim int
-		if err := rows.Scan(&id, &url, &isAnim); err != nil {
+		if err := rows.Scan(&id, &url, &isAnim, &source); err != nil {
 			return nil, err
 		}
 		stickers = append(stickers, map[string]interface{}{
 			"id":         id,
 			"mediaUrl":   url,
 			"isAnimated": isAnim == 1,
+			"source":     source,
+		})
+	}
+	return stickers, nil
+}
+
+// GetRecentStickers returns the stickers the user sent most recently, newest
+// first, one entry per sticker file.
+func (s *MessageStore) GetRecentStickers(limit int) ([]map[string]interface{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT media_url FROM messages
+		WHERE msg_type = 'sticker' AND sender_id = 'me' AND COALESCE(media_url, '') != '' AND deleted_at IS NULL
+		GROUP BY media_url
+		ORDER BY MAX(timestamp) DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stickers []map[string]interface{}
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			return nil, err
+		}
+		stickers = append(stickers, map[string]interface{}{
+			"id":         url,
+			"mediaUrl":   url,
+			"isAnimated": false,
+			"source":     "recent",
 		})
 	}
 	return stickers, nil

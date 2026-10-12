@@ -7,7 +7,13 @@ impl ChatView {
         }
 
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Type a message..."));
-        let textarea = cx.new(|cx| TextareaState::new(window, cx).placeholder("Write markdown..."));
+        // Enter sends and Shift+Enter inserts a newline, as in WhatsApp Web.
+        // Markdown mode flips that: plain Enter is a newline, Ctrl+Enter sends.
+        let textarea = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Type a message...")
+                .submit_on_enter(true)
+        });
 
         let input_subscription = cx.subscribe(
             &input,
@@ -19,14 +25,23 @@ impl ChatView {
                 }
             },
         );
-        let textarea_subscription = cx.subscribe(
+        let textarea_subscription = cx.subscribe_in(
             &textarea,
-            |this, textarea: Entity<TextareaState>, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
+            window,
+            |this, textarea: &Entity<TextareaState>, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
                     this.compose_text = textarea.read(cx).value().to_string();
                     this.refresh_mention_query();
                     cx.notify();
                 }
+                InputEvent::PressEnter { secondary, shift } => {
+                    let send = if this.is_md_mode { *secondary } else { !*shift };
+                    if send {
+                        this.compose_text = textarea.read(cx).value().to_string();
+                        this.send_current_message(window, cx);
+                    }
+                }
+                _ => {}
             },
         );
 
@@ -34,6 +49,55 @@ impl ChatView {
         self.compose_textarea = Some(textarea);
         self._compose_input_subscription = Some(input_subscription);
         self._compose_textarea_subscription = Some(textarea_subscription);
+    }
+
+    /// Create the single-line inputs on first use and push model changes made
+    /// elsewhere (a cleared form, a new chat) back into them.
+    pub(crate) fn ensure_text_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_field.is_none() {
+            self.search_field = Some(TextField::new("Search conversations...", window, cx, |this, event, _, cx| {
+                if let TextFieldEvent::Change(value) = event {
+                    this.search_query = value;
+                    cx.notify();
+                }
+            }));
+            self.sheet_search_field = Some(TextField::new("Search messages...", window, cx, |this, event, _, cx| {
+                match event {
+                    TextFieldEvent::Change(value) => {
+                        this.search_sheet_query = value;
+                        this.run_search_messages(cx);
+                    }
+                    TextFieldEvent::Enter => this.run_search_messages(cx),
+                }
+            }));
+            self.new_group_field = Some(TextField::new("Group name...", window, cx, |this, event, _, cx| {
+                if let TextFieldEvent::Change(value) = event {
+                    this.new_group_name = value;
+                    cx.notify();
+                }
+            }));
+            self.join_link_field = Some(TextField::new("https://chat.whatsapp.com/...", window, cx, |this, event, _, cx| {
+                match event {
+                    TextFieldEvent::Change(value) => {
+                        this.join_group_link = value;
+                        cx.notify();
+                    }
+                    TextFieldEvent::Enter => this.submit_join_group(cx),
+                }
+            }));
+        }
+        for (field, model) in [
+            (&self.search_field, &self.search_query),
+            (&self.sheet_search_field, &self.search_sheet_query),
+            (&self.new_group_field, &self.new_group_name),
+            (&self.join_link_field, &self.join_group_link),
+        ] {
+            if let Some(field) = field {
+                if field.value(cx) != *model {
+                    field.set_value(model.clone(), window, cx);
+                }
+            }
+        }
     }
 
     pub(crate) fn compose_placeholder(&self) -> &'static str {
@@ -138,6 +202,10 @@ impl ChatView {
     /// Toggle markdown mode (web's "Markdown (on/off)" item).
     pub fn toggle_markdown_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.is_md_mode = !self.is_md_mode;
+        let submit_on_enter = !self.is_md_mode;
+        if let Some(textarea) = self.compose_textarea.clone() {
+            textarea.update(cx, |state, cx| state.set_submit_on_enter(submit_on_enter, cx));
+        }
         self.attach_panel = AttachPanel::None;
         let text = self.compose_text.clone();
         self.set_compose_text(text, window, cx);

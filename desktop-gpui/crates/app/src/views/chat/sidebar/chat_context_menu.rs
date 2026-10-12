@@ -23,19 +23,10 @@ impl ChatView {
             let confirm_leave = ctx.confirm_leave;
             let show_mute_submenu = ctx.show_mute_submenu;
             let menu_pos = ctx.position;
-            let hover_bg: Hsla = theme.muted.opacity(0.4);
+            let hover_bg: Hsla = theme.muted.opacity(0.6);
             let danger: Hsla = rgb(0xef4444).into();
 
-            let mut menu = v_flex()
-                .w(px(232.0))
-                .p_1p5()
-                .gap_0p5()
-                .rounded_2xl()
-                .bg(card_bg)
-                .border_1()
-                .border_color(border_color)
-                .shadow_xl()
-                .occlude()
+            let mut menu = menu_surface(232.0, card_bg, border_color)
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.chat_context_menu = None;
                     cx.notify();
@@ -108,10 +99,9 @@ impl ChatView {
                             h_flex()
                                 .id(id)
                                 .cursor_pointer()
-                                .pl_10()
-                                .pr_3()
-                                .py_1p5()
-                                .rounded_xl()
+                                .pl_12()
+                                .pr_5()
+                                .py_2()
                                 .items_center()
                                 .hover(move |s| s.bg(hover_bg))
                                 .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child(label))
@@ -149,7 +139,7 @@ impl ChatView {
             if is_group {
                 let cid = chat_id.clone();
                 menu = menu
-                    .child(div().h(px(1.0)).mx_2().my_1().bg(border_color))
+                    .child(menu_separator(border_color))
                     .child(
                         menu_row(
                             "cm-exit",

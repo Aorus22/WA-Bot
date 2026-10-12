@@ -355,6 +355,14 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 				fmt.Printf("Failed to read chat notification policy: %v\n", err)
 				notificationSuppressed = true
 			}
+			senderName, chatName := msg.SenderName, msg.ChatName
+			if msg.From != "me" {
+				resolver := h.newNameResolver()
+				senderName = resolver.resolve(msg.From, senderName)
+				if !strings.HasSuffix(resolvedChatID, "@g.us") {
+					chatName = resolver.resolve(resolvedChatID, chatName)
+				}
+			}
 			payload := map[string]interface{}{
 				"id":                     msg.ID,
 				"chatId":                 resolvedChatID,
@@ -366,8 +374,8 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 				"type":                   msg.Type,
 				"mediaUrl":               msg.MediaURL,
 				"isAutomatic":            msg.IsAutomatic,
-				"senderName":             msg.SenderName,
-				"chatName":               msg.ChatName,
+				"senderName":             senderName,
+				"chatName":               chatName,
 				"notificationSuppressed": notificationSuppressed,
 			}
 			if msg.ReplyToID != "" {

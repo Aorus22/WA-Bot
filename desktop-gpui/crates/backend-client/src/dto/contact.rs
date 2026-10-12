@@ -17,4 +17,8 @@ pub struct StickerFavorite {
     pub media_url: String,
     #[serde(default)]
     pub is_animated: bool,
+    /// `wa` for stickers starred in WhatsApp, `custom` for ones added from
+    /// this app, `recent` for recently sent ones.
+    #[serde(default)]
+    pub source: Option<String>,
 }

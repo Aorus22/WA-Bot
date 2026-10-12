@@ -75,6 +75,7 @@ impl ChatView {
 
             let is_dark_bg = theme.background.l < 0.5;
             // WhatsApp Web's mention colour.
+            let selection_color: Hsla = if is_dark_bg { rgba(0xffffff40).into() } else { rgba(0x00000026).into() };
             let mention_color: Hsla = if is_dark_bg { rgb(0x06cf9c).into() } else { rgb(0x008069).into() };
             let (bubble_bg, bubble_text) = if is_sticker {
                 (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
@@ -134,6 +135,7 @@ impl ChatView {
                                 msg: m.clone(),
                                 is_from_me: me,
                                 position: ev.position,
+                                reaction_picker: false,
                             });
                             cx.notify();
                         }
@@ -173,8 +175,8 @@ impl ChatView {
                                     .text_color(muted_text)
                                     .overflow_hidden()
                                     .child(
-                                        StyledText::new(q_line).with_highlights(q_spans.into_iter().map(|range| {
-                                            (range, HighlightStyle {
+                                        StyledText::new(q_line).with_highlights(q_spans.into_iter().map(|span| {
+                                            (span.range, HighlightStyle {
                                                 color: Some(mention_color),
                                                 font_weight: Some(FontWeight::MEDIUM),
                                                 ..Default::default()
@@ -356,12 +358,29 @@ impl ChatView {
                             div()
                                 .text_sm()
                                 .text_color(bubble_text)
-                                .child(MentionText::new(
-                                    format!("message-body-{}", r_msg.msg.id),
-                                    content.clone(),
-                                    &mention_spans,
-                                    mention_color,
-                                ))
+                                .child({
+                                    let view = cx.entity();
+                                    MentionText::new(
+                                        format!("message-body-{}", r_msg.msg.id),
+                                        content.clone(),
+                                        mention_spans
+                                            .iter()
+                                            .map(|m| (m.range.clone(), SharedString::from(m.jid.clone())))
+                                            .collect(),
+                                        mention_color,
+                                    )
+                                    .selection_color(selection_color)
+                                    .on_click({
+                                        let content = content.clone();
+                                        let spans = mention_spans.clone();
+                                        move |jid, window, cx| {
+                                            let name = spans.iter().find(|m| m.jid == jid)
+                                                .map(|m| content[m.range.clone()].trim_start_matches('@').to_string())
+                                                .unwrap_or_default();
+                                            view.update(cx, |this, cx| this.open_direct_chat(jid, &name, window, cx));
+                                        }
+                                    })
+                                })
                         )
                     } else {
                         None

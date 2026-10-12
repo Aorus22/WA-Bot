@@ -37,6 +37,24 @@ func (sh *StickerHandler) GetFavorites(w http.ResponseWriter, r *http.Request) {
 	sh.handler.sendJSON(w, stickers)
 }
 
+func (sh *StickerHandler) GetRecent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if sh.handler.msgRepo == nil {
+		sh.handler.sendError(w, http.StatusInternalServerError, "Message repository not configured")
+		return
+	}
+	stickers, err := sh.handler.msgRepo.GetRecentStickers(60)
+	if err != nil {
+		sh.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if stickers == nil {
+		stickers = []map[string]interface{}{}
+	}
+	sh.handler.sendJSON(w, stickers)
+}
+
 func (sh *StickerHandler) FavoriteSticker(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

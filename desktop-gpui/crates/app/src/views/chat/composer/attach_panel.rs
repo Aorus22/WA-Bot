@@ -43,13 +43,14 @@ impl ChatView {
         // (an in-flow panel would stretch the compose container over the chat).
         // Eases up from the compose bar; keyed per panel so switching between
         // the menu, emoji and sticker panels replays it.
-        let panel_shell = |id: &'static str, children: Vec<AnyElement>| {
+        let panel_shell = |id: &'static str, width: f32, children: Vec<AnyElement>| {
             v_flex()
                 .absolute()
+                .occlude()
                 .left(px(12.0))
                 .bottom_full()
                 .mb(px(8.0))
-                .w(px(320.0))
+                .w(px(width))
                 .p_2()
                 .gap_1()
                 .rounded_2xl()
@@ -62,6 +63,40 @@ impl ChatView {
                     id,
                     crate::components::motion::enter(crate::components::motion::FAST_MS + 40),
                     |el, d| el.opacity(d).mb(px(8.0 * d)),
+                )
+                .into_any_element()
+        };
+
+        // Emoji / sticker switch at the bottom of both pickers, as in WhatsApp Web.
+        let picker_switch = |sticker_active: bool, cx: &mut Context<Self>| -> AnyElement {
+            let segment = |id: &'static str, icon: &'static [u8], active: bool| {
+                div()
+                    .id(id)
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(52.0))
+                    .h(px(30.0))
+                    .rounded_full()
+                    .bg(if active { theme.muted.opacity(0.9) } else { rgba(0x00000000).into() })
+                    .hover(move |s| s.bg(theme.muted.opacity(0.9)))
+                    .child(svg().data(icon).size(px(17.0)).text_color(if active { text_color } else { muted_text }))
+            };
+            h_flex()
+                .w_full()
+                .justify_center()
+                .pt_1()
+                .child(
+                    h_flex()
+                        .p(px(3.0))
+                        .gap_0p5()
+                        .rounded_full()
+                        .bg(theme.muted.opacity(0.45))
+                        .child(segment("picker-emoji", SMILE_SVG, !sticker_active)
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.open_emoji_panel(cx))))
+                        .child(segment("picker-sticker", STICKER_SVG, sticker_active)
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.open_sticker_panel(cx)))),
                 )
                 .into_any_element()
         };
@@ -165,6 +200,7 @@ impl ChatView {
                 Some(
                     v_flex()
                         .absolute()
+                        .occlude()
                         .left(px(12.0))
                         .bottom_full()
                         .mb(px(8.0))
@@ -237,7 +273,7 @@ impl ChatView {
                     })
                     .collect();
 
-                Some(panel_shell("attach-emoji-in", vec![
+                Some(panel_shell("attach-emoji-in", 320.0, vec![
                     h_flex()
                         .w_full()
                         .justify_between()
@@ -280,44 +316,88 @@ impl ChatView {
                         .overflow_y_scroll()
                         .child(h_flex().flex_wrap().gap_1().children(emojis))
                         .into_any_element(),
+                    picker_switch(false, cx),
                 ]))
             }
             AttachPanel::Sticker => {
+                let tab = self.sticker_picker.tab;
+                let tabs = [
+                    (StickerTab::Recent, "sticker-tab-recent", CLOCK_SVG, "Recent"),
+                    (StickerTab::Starred, "sticker-tab-starred", STAR_SVG, "Starred"),
+                    (StickerTab::Custom, "sticker-tab-custom", HEART_SVG, "My stickers"),
+                ]
+                .into_iter()
+                .map(|(kind, id, icon, label)| {
+                    let active = tab == kind;
+                    div()
+                        .id(id)
+                        .cursor_pointer()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_1()
+                        .px_4()
+                        .pt_1()
+                        .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+                        .child(svg().data(icon).size(px(20.0)).text_color(if active { text_color } else { muted_text }))
+                        .child(
+                            div()
+                                .h(px(3.0))
+                                .w(px(26.0))
+                                .rounded_full()
+                                .bg(if active { primary_color } else { rgba(0x00000000).into() }),
+                        )
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                            this.sticker_picker.tab = kind;
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                })
+                .collect::<Vec<_>>();
+
+                let visible = self.sticker_picker.visible();
                 let body: AnyElement = if self.sticker_picker.is_loading {
                     h_flex()
                         .w_full()
-                        .py_4()
+                        .py_8()
                         .justify_center()
                         .child(Spinner::new().color(primary_color))
                         .into_any_element()
-                } else if self.sticker_picker.favorites.is_empty() {
+                } else if visible.is_empty() {
                     div()
                         .w_full()
-                        .py_4()
-                        .text_xs()
+                        .px_4()
+                        .py_8()
+                        .text_sm()
+                        .text_center()
                         .text_color(muted_text)
-                        .child("Belum ada stiker favorit")
+                        .child(match tab {
+                            StickerTab::Recent => "Stickers you send will show up here.",
+                            StickerTab::Starred => "Star a sticker in WhatsApp on your phone and it will show up here.",
+                            StickerTab::Custom => "Right-click a sticker in a chat and choose Add to favourites.",
+                        })
                         .into_any_element()
                 } else {
                     let base_url = Self::compose_base_url(cx);
-                    let stickers: Vec<AnyElement> = self
-                        .sticker_picker
-                        .favorites
-                        .iter()
-                        .map(|fav| {
-                            let url = resolve_media_url(&fav.media_url, &base_url);
-                            let send_url = fav.media_url.clone();
-                            let is_animated = fav.is_animated;
+                    let stickers: Vec<AnyElement> = visible
+                        .into_iter()
+                        .map(|sticker| {
+                            let url = resolve_media_url(&sticker.media_url, &base_url);
+                            let send_url = sticker.media_url.clone();
+                            let is_animated = sticker.is_animated;
                             div()
-                                .w(px(64.0))
-                                .h(px(64.0))
-                                .rounded_lg()
+                                .w(px(96.0))
+                                .h(px(96.0))
+                                .p_1()
+                                .rounded_xl()
                                 .overflow_hidden()
                                 .cursor_pointer()
-                                .bg(theme.muted.opacity(0.35))
+                                .bg(theme.muted.opacity(0.3))
+                                .hover(move |s| s.bg(theme.muted.opacity(0.6)))
                                 .child(
                                     img(url)
-                                        .id(format!("sticker-fav-{}", fav.media_url))
+                                        .id(format!("sticker-{}-{}", sticker.id, sticker.media_url))
                                         .w_full()
                                         .h_full()
                                         .object_fit(ObjectFit::Contain),
@@ -330,44 +410,16 @@ impl ChatView {
                         .collect();
                     v_flex()
                         .id("attach-sticker-scroll")
-                        .max_h(px(190.0))
+                        .h(px(300.0))
                         .overflow_y_scroll()
                         .child(h_flex().flex_wrap().gap_2().children(stickers))
                         .into_any_element()
                 };
 
-                Some(panel_shell("attach-sticker-in", vec![
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .items_center()
-                        .px_1()
-                        .child(
-                            h_flex()
-                                .items_center()
-                                .gap_2()
-                                .child(svg().data(STICKER_SVG).size(px(14.0)).text_color(rgb(0xa855f7)))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(text_color)
-                                        .child("Sticker"),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .cursor_pointer()
-                                .p_1()
-                                .rounded_full()
-                                .hover(move |s| s.bg(hover_bg))
-                                .child(svg().data(X_SVG).size(px(13.0)).text_color(muted_text))
-                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                    this.close_attach_panel(cx);
-                                })),
-                        )
-                        .into_any_element(),
+                Some(panel_shell("attach-sticker-in", 440.0, vec![
+                    h_flex().w_full().justify_center().children(tabs).into_any_element(),
                     body,
+                    picker_switch(true, cx),
                 ]))
             }
         }

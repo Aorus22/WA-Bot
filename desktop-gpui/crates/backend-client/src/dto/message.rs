@@ -83,6 +83,9 @@ pub struct MessageExtra {
     pub mentions: Vec<String>,
     #[serde(default)]
     pub mention_names: HashMap<String, String>,
+    /// Mentioned JID → the chat JID to open for it.
+    #[serde(default)]
+    pub mention_chats: HashMap<String, String>,
     #[serde(default)]
     pub mentions_me: bool,
 }

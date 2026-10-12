@@ -126,6 +126,39 @@ impl ChatView {
     }
 
     /// Pages layout: leave the open chat and return to the chat list.
+    /// Open the one-to-one conversation with `jid` (a clicked mention), adding
+    /// an empty row for it if there is no history with that person yet.
+    pub fn open_direct_chat(&mut self, jid: &str, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if cx.has_global::<ChatStore>() {
+            let store = ChatStore::global_mut(cx);
+            if !store.chats.iter().any(|chat| chat.id == jid) {
+                let label = if name.trim().is_empty() {
+                    jid.split('@').next().unwrap_or(jid).to_string()
+                } else {
+                    name.to_string()
+                };
+                store.chats.insert(0, Chat {
+                    id: jid.to_string(),
+                    name: label,
+                    avatar: String::new(),
+                    last_msg: String::new(),
+                    last_time: 0,
+                    unread: 0,
+                    has_unread_mention: false,
+                    is_active: true,
+                    is_group: false,
+                    archived: false,
+                    pinned_at: None,
+                    mute_mode: "off".to_string(),
+                    muted_until: None,
+                });
+                store.chats_version = store.chats_version.wrapping_add(1);
+            }
+        }
+        self.archived_mode = false;
+        self.select_chat(jid.to_string(), window, cx);
+    }
+
     pub fn back_to_list(&mut self, cx: &mut Context<Self>) {
         self.selected_chat_id = None;
         if cx.has_global::<ChatStore>() {

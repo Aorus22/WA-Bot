@@ -7,7 +7,7 @@ use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{Channel, ChannelMessage, ChannelPreview};
 
-use crate::components::toast;
+use crate::components::{toast, TextField, TextFieldEvent};
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::theme::manager::{AppThemeExt, ThemeManager};
@@ -97,14 +97,13 @@ pub struct ChannelsView {
     is_discover_open: bool,
     discover_link: String,
     discover_preview: Option<ChannelPreview>,
-    discover_focus: FocusHandle,
+    discover_field: Option<TextField>,
     is_discovering: bool,
 
 }
 
 impl ChannelsView {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let discover_focus = cx.focus_handle();
         let mut this = Self {
             channels: Vec::new(),
             is_loading: true,
@@ -119,7 +118,7 @@ impl ChannelsView {
             is_discover_open: false,
             discover_link: String::new(),
             discover_preview: None,
-            discover_focus,
+            discover_field: None,
             is_discovering: false,
 
         };
@@ -437,6 +436,23 @@ impl ChannelsView {
 
 impl Render for ChannelsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.discover_field.is_none() {
+            self.discover_field = Some(TextField::new("https://whatsapp.com/channel/…", window, cx, |this, event, _, cx| {
+                match event {
+                    TextFieldEvent::Change(value) => {
+                        this.discover_link = value;
+                        this.discover_preview = None;
+                        cx.notify();
+                    }
+                    TextFieldEvent::Enter => this.preview_channel(cx),
+                }
+            }));
+        }
+        if let Some(field) = self.discover_field.clone() {
+            if field.value(cx) != self.discover_link {
+                field.set_value(self.discover_link.clone(), window, cx);
+            }
+        }
         let theme = cx.app_theme();
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
@@ -499,7 +515,9 @@ impl Render for ChannelsView {
                                     .child(svg().data(PLUS_SVG).size(px(20.0)).text_color(text_color))
                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                         this.is_discover_open = true;
-                                        this.discover_focus.focus(window, cx);
+                                        if let Some(field) = this.discover_field.clone() {
+                                            field.focus(window, cx);
+                                        }
                                         cx.notify();
                                     })),
                             ),
@@ -664,7 +682,9 @@ impl Render for ChannelsView {
                                             .hover(|s| s.bg(theme.muted.opacity(0.4)))
                                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                                 this.is_discover_open = true;
-                                                this.discover_focus.focus(window, cx);
+                                                if let Some(field) = this.discover_field.clone() {
+                                            field.focus(window, cx);
+                                        }
                                                 cx.notify();
                                             }))
                                             .child(
@@ -1115,13 +1135,13 @@ impl Render for ChannelsView {
             )
             // --- Discover / Find Channel Dialog ---
             .children(if self.is_discover_open {
-                let link_val = self.discover_link.clone();
                 let is_busy = self.is_discovering;
                 let preview = self.discover_preview.clone();
 
                 Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
+                        .occlude()
                         .inset_0()
                         .bg(rgba(0x00000088))
                         .flex()
@@ -1163,55 +1183,7 @@ impl Render for ChannelsView {
                                         ),
                                 )
                                 // Link Input Field
-                                .child(
-                                    h_flex()
-                                        .px_3()
-                                        .py_2()
-                                        .rounded_xl()
-                                        .border_1()
-                                        .border_color(border_color)
-                                        .bg(bg_color)
-                                        .items_center()
-                                        .gap_2()
-                                        .track_focus(&self.discover_focus)
-                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                            this.discover_focus.focus(window, cx);
-                                        }))
-                                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                            match ev.keystroke.key.as_str() {
-                                                "backspace" => {
-                                                    this.discover_link.pop();
-                                                    this.discover_preview = None;
-                                                    cx.notify();
-                                                }
-                                                "space" => {
-                                                    this.discover_link.push(' ');
-                                                    cx.notify();
-                                                }
-                                                "enter" => {
-                                                    this.preview_channel(cx);
-                                                }
-                                                k if k.len() == 1 => {
-                                                    this.discover_link.push_str(k);
-                                                    this.discover_preview = None;
-                                                    cx.notify();
-                                                }
-                                                _ => {}
-                                            }
-                                        }))
-                                        .child(svg().data(LINK_SVG).size(px(16.0)).text_color(muted_text))
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .text_sm()
-                                                .text_color(if link_val.is_empty() { muted_text } else { text_color })
-                                                .child(if link_val.is_empty() {
-                                                    "https://whatsapp.com/channel/…".to_string()
-                                                } else {
-                                                    link_val
-                                                }),
-                                        ),
-                                )
+                                .children(self.discover_field.as_ref().map(|field| field.element(&theme, Some(LINK_SVG))))
                                 // Preview Action Button
                                 .child(
                                     h_flex()
@@ -1325,6 +1297,7 @@ impl Render for ChannelsView {
                 Some(crate::components::motion::modal_in(
                     div()
                         .absolute()
+                        .occlude()
                         .inset_0()
                         .bg(rgba(0x00000088))
                         .flex()

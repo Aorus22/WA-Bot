@@ -336,12 +336,26 @@ impl ContactDraft {
     }
 }
 
-/// Favourite stickers shown by the sticker picker.
+/// Tabs of the sticker picker.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub enum StickerTab {
+    /// Stickers recently sent from this account.
+    #[default]
+    Recent,
+    /// Stickers starred in WhatsApp (synced from the phone).
+    Starred,
+    /// Stickers added from this app.
+    Custom,
+}
+
+/// Stickers shown by the sticker picker.
 #[derive(Clone, Default, Debug)]
 pub struct StickerPickerState {
     pub is_loading: bool,
     /// Set once a fetch finished so the picker does not refetch every open.
     pub loaded: bool,
+    pub tab: StickerTab,
+    pub recent: Vec<StickerFavorite>,
     pub favorites: Vec<StickerFavorite>,
 }
 
@@ -354,10 +368,20 @@ impl StickerPickerState {
         self.is_loading = true;
     }
 
-    pub fn set_favorites(&mut self, favorites: Vec<StickerFavorite>) {
+    pub fn set_stickers(&mut self, recent: Vec<StickerFavorite>, favorites: Vec<StickerFavorite>) {
+        self.recent = recent;
         self.favorites = favorites;
         self.is_loading = false;
         self.loaded = true;
+    }
+
+    /// The stickers on the current tab.
+    pub fn visible(&self) -> Vec<&StickerFavorite> {
+        match self.tab {
+            StickerTab::Recent => self.recent.iter().collect(),
+            StickerTab::Starred => self.favorites.iter().filter(|s| s.source.as_deref() == Some("wa")).collect(),
+            StickerTab::Custom => self.favorites.iter().filter(|s| s.source.as_deref() != Some("wa")).collect(),
+        }
     }
 
     pub fn failed(&mut self) {

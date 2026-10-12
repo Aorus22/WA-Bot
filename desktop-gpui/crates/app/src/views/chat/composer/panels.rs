@@ -34,13 +34,18 @@ impl ChatView {
             async move {
                 let client = HttpClient::new(&base_url);
                 let res = TOKIO_RT
-                    .spawn(async move { client.get_favorite_stickers().await })
+                    .spawn(async move {
+                        let favorites = client.get_favorite_stickers().await?;
+                        // Recents are a nicety; the picker still works without them.
+                        let recent = client.get_recent_stickers().await.unwrap_or_default();
+                        Ok::<_, wabot_backend_client::error::ClientError>((recent, favorites))
+                    })
                     .await;
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = this.upgrade() {
                         view.update(cx, |this, cx| {
                             match res {
-                                Ok(Ok(favorites)) => this.sticker_picker.set_favorites(favorites),
+                                Ok(Ok((recent, favorites))) => this.sticker_picker.set_stickers(recent, favorites),
                                 _ => {
                                     this.sticker_picker.failed();
                                     toast::error("Gagal memuat stiker", cx);
@@ -59,7 +64,7 @@ impl ChatView {
     /// Open one of the poll / location / contact dialogs.
     pub fn open_compose_dialog(&mut self, dialog: ComposeDialog, cx: &mut Context<Self>) {
         self.attach_panel = AttachPanel::None;
-        self.active_compose_field = 0;
+        self.dialog_fields.clear();
         self.compose_dialog = Some(dialog);
         cx.notify();
     }
@@ -67,58 +72,7 @@ impl ChatView {
     /// Close the active compose dialog.
     pub fn close_compose_dialog(&mut self, cx: &mut Context<Self>) {
         self.compose_dialog = None;
-        self.active_compose_field = 0;
+        self.dialog_fields.clear();
         cx.notify();
     }
-
-    /// Route a keystroke to the focused dialog field.
-    pub(crate) fn dialog_key_input(&mut self, ev: &KeyDownEvent, cx: &mut Context<Self>) {
-        match ev.keystroke.key.as_str() {
-            "escape" => self.close_compose_dialog(cx),
-            "backspace" => {
-                if let Some(field) = self.active_dialog_field_mut() {
-                    field.pop();
-                }
-                cx.notify();
-            }
-            "space" => {
-                if let Some(field) = self.active_dialog_field_mut() {
-                    field.push(' ');
-                }
-                cx.notify();
-            }
-            k if k.len() == 1 => {
-                if let Some(field) = self.active_dialog_field_mut() {
-                    field.push_str(k);
-                }
-                cx.notify();
-            }
-            _ => {}
-        }
-    }
-
-    pub(crate) fn active_dialog_field_mut(&mut self) -> Option<&mut String> {
-        let dialog = self.compose_dialog?;
-        let index = self.active_compose_field;
-        match dialog {
-            ComposeDialog::Poll => {
-                if index == 0 {
-                    Some(&mut self.poll_draft.question)
-                } else {
-                    self.poll_draft.options.get_mut(index - 1)
-                }
-            }
-            ComposeDialog::Location => match index {
-                0 => Some(&mut self.location_draft.latitude),
-                1 => Some(&mut self.location_draft.longitude),
-                2 => Some(&mut self.location_draft.name),
-                _ => Some(&mut self.location_draft.address),
-            },
-            ComposeDialog::Contact => match index {
-                0 => Some(&mut self.contact_draft.name),
-                _ => Some(&mut self.contact_draft.phone),
-            },
-        }
-    }
-
 }

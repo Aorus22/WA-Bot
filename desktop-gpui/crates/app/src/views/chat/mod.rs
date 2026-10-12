@@ -20,13 +20,13 @@ use wabot_backend_client::multipart::SendMediaBuilder;
 use crate::components::{
     compose::{
         encode_markdown, looks_like_document_name, AttachPanel, ComposeDialog, ContactDraft,
-        LocationDraft, MediaKind, PollDraft, StickerPickerState,
+        LocationDraft, MediaKind, PollDraft, StickerPickerState, StickerTab,
     },
     emoji_picker::{EmojiPickerState, EMOJI_CATEGORIES},
     toast,
 };
 use crate::components::message_bubble::{MessageBubbleHelper, MessageTicks};
-use crate::components::MentionText;
+use crate::components::{MentionText, TextField, TextFieldEvent};
 use crate::icons::*;
 use crate::layout_pref::{self, LayoutKind};
 use crate::views::viewer_math::{
@@ -55,6 +55,7 @@ mod sheets;
 mod sidebar;
 mod state;
 
+pub(crate) use helpers::render_message_mentions_with_spans;
 pub use chat_page::*;
 pub use state::*;
 

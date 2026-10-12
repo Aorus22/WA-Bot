@@ -6,7 +6,7 @@ use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{CallDirection, CallHistoryFilter, CallLog, CallStatus, CallType};
 
-use crate::components::toast;
+use crate::components::{toast, TextField, TextFieldEvent};
 use crate::icons::*;
 use crate::router::{AppRoute, Router};
 use crate::state::auth::AuthState;
@@ -145,14 +145,13 @@ pub struct CallsView {
     has_more: bool,
     filter: CallFilterKey,
     search_query: String,
-    search_focus: FocusHandle,
+    search_field: Option<TextField>,
     selected_log: Option<CallLog>,
     error_message: Option<String>,
 }
 
 impl CallsView {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let search_focus = cx.focus_handle();
         let mut this = Self {
             logs: Vec::new(),
             is_loading: true,
@@ -160,7 +159,7 @@ impl CallsView {
             has_more: true,
             filter: CallFilterKey::All,
             search_query: String::new(),
-            search_focus,
+            search_field: None,
             selected_log: None,
             error_message: None,
         };
@@ -328,6 +327,14 @@ impl CallsView {
 
 impl Render for CallsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.search_field.is_none() {
+            self.search_field = Some(TextField::new("Search calls", window, cx, |this, event, _, cx| {
+                if let TextFieldEvent::Change(value) = event {
+                    this.search_query = value;
+                    cx.notify();
+                }
+            }));
+        }
         let theme = cx.app_theme();
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
@@ -433,62 +440,7 @@ impl Render for CallsView {
                                     ),
                             )
                             // Search Field
-                            .child(
-                                h_flex()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_xl()
-                                    .bg(theme.muted.opacity(0.4))
-                                    .items_center()
-                                    .gap_2()
-                                    .track_focus(&self.search_focus)
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                        this.search_focus.focus(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                        match ev.keystroke.key.as_str() {
-                                            "backspace" => {
-                                                this.search_query.pop();
-                                                cx.notify();
-                                            }
-                                            "space" => {
-                                                this.search_query.push(' ');
-                                                cx.notify();
-                                            }
-                                            k if k.len() == 1 => {
-                                                this.search_query.push_str(k);
-                                                cx.notify();
-                                            }
-                                            _ => {}
-                                        }
-                                    }))
-                                    .child(svg().data(SEARCH_SVG).size(px(16.0)).text_color(muted_text))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .text_sm()
-                                            .text_color(if self.search_query.is_empty() { muted_text } else { text_color })
-                                            .child(if self.search_query.is_empty() {
-                                                "Search calls".to_string()
-                                            } else {
-                                                self.search_query.clone()
-                                            }),
-                                    )
-                                    .children(if !self.search_query.is_empty() {
-                                        Some(
-                                            div()
-                                                .cursor_pointer()
-                                                .p_1()
-                                                .child(svg().data(X_SVG).size(px(14.0)).text_color(muted_text))
-                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                    this.search_query.clear();
-                                                    cx.notify();
-                                                })),
-                                        )
-                                    } else {
-                                        None
-                                    }),
-                            )
+                            .children(self.search_field.as_ref().map(|field| field.element(&theme, Some(SEARCH_SVG))))
                             // Filter Chips Row
                             .child(
                                 h_flex()

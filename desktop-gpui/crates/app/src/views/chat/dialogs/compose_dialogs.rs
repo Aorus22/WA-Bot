@@ -1,46 +1,72 @@
 use crate::views::chat::*;
 
 impl ChatView {
-    /// Text field row used by the compose dialogs. All rows share one focus
-    /// handle; `active_compose_field` decides where keystrokes land.
+    /// Text input used by the compose dialogs. Inputs are created on demand,
+    /// keyed by `key`, seeded from the matching draft and mirror edits back to it.
     pub(crate) fn dialog_field_row(
-        index: usize,
-        value: &str,
+        &mut self,
+        key: &str,
         placeholder: &str,
-        is_active: bool,
-        theme: ActiveTokens,
-        border_color: Hsla,
-        text_color: Hsla,
-        muted_text: Hsla,
-        primary_color: Hsla,
+        theme: &ActiveTokens,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let display = if value.is_empty() {
-            placeholder.to_string()
-        } else {
-            value.to_string()
-        };
-        h_flex()
-            .w_full()
-            .px_3()
-            .py_2()
-            .rounded_xl()
-            .border_1()
-            .border_color(if is_active { primary_color } else { border_color })
-            .bg(theme.background)
-            .cursor_text()
-            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
-                this.active_compose_field = index;
-                this.compose_field_focus.focus(window, cx);
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(if value.is_empty() { muted_text } else { text_color })
-                    .child(display),
-            )
-            .into_any_element()
+        if !self.dialog_fields.contains_key(key) {
+            let field_key = key.to_string();
+            let field = TextField::new(placeholder.to_string(), window, cx, move |this, event, _, cx| {
+                if let TextFieldEvent::Change(value) = event {
+                    this.set_dialog_value(&field_key, value);
+                    cx.notify();
+                }
+            });
+            let initial = self.dialog_value(key);
+            if !initial.is_empty() {
+                field.set_value(initial, window, cx);
+            }
+            if matches!(key, "poll-question" | "location-latitude" | "contact-name") {
+                field.focus(window, cx);
+            }
+            self.dialog_fields.insert(key.to_string(), field);
+        }
+        self.dialog_fields[key].element(theme, None).into_any_element()
+    }
+
+    fn dialog_value(&self, key: &str) -> String {
+        match key {
+            "poll-question" => self.poll_draft.question.clone(),
+            "location-latitude" => self.location_draft.latitude.clone(),
+            "location-longitude" => self.location_draft.longitude.clone(),
+            "location-name" => self.location_draft.name.clone(),
+            "location-address" => self.location_draft.address.clone(),
+            "contact-name" => self.contact_draft.name.clone(),
+            "contact-phone" => self.contact_draft.phone.clone(),
+            _ => key
+                .strip_prefix("poll-option-")
+                .and_then(|i| i.parse::<usize>().ok())
+                .and_then(|i| self.poll_draft.options.get(i).cloned())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn set_dialog_value(&mut self, key: &str, value: String) {
+        match key {
+            "poll-question" => self.poll_draft.question = value,
+            "location-latitude" => self.location_draft.latitude = value,
+            "location-longitude" => self.location_draft.longitude = value,
+            "location-name" => self.location_draft.name = value,
+            "location-address" => self.location_draft.address = value,
+            "contact-name" => self.contact_draft.name = value,
+            "contact-phone" => self.contact_draft.phone = value,
+            _ => {
+                if let Some(slot) = key
+                    .strip_prefix("poll-option-")
+                    .and_then(|i| i.parse::<usize>().ok())
+                    .and_then(|i| self.poll_draft.options.get_mut(i))
+                {
+                    *slot = value;
+                }
+            }
+        }
     }
 
     /// Checkbox row used by the compose dialogs (multi-select, live location).
@@ -106,7 +132,8 @@ impl ChatView {
 
     /// Poll / location / contact modal, mirroring the web's compose dialogs.
     pub(crate) fn render_compose_dialog(
-        &self,
+        &mut self,
+        window: &mut Window,
         theme: ActiveTokens,
         border_color: Hsla,
         card_bg: Hsla,
@@ -116,37 +143,26 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let dialog = self.compose_dialog?;
-        let active = self.active_compose_field;
         let busy = self.is_sending_attachment;
 
         let (title, body, action_label): (&str, Vec<AnyElement>, &str) = match dialog {
             ComposeDialog::Poll => {
-                let options: Vec<AnyElement> = self
-                    .poll_draft
-                    .options
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, option)| {
-                        let index = idx + 1;
-                        let can_remove = self.poll_draft.options.len() > 2;
+                let option_count = self.poll_draft.options.len();
+                let can_remove = option_count > 2;
+                let options: Vec<AnyElement> = (0..option_count)
+                    .map(|idx| {
+                        let field = self.dialog_field_row(
+                            &format!("poll-option-{idx}"),
+                            &format!("Opsi {}", idx + 1),
+                            &theme,
+                            window,
+                            cx,
+                        );
                         h_flex()
                             .w_full()
                             .gap_2()
                             .items_center()
-                            .child(
-                                div().flex_1().child(Self::dialog_field_row(
-                                    index,
-                                    option,
-                                    &format!("Opsi {}", index),
-                                    active == index,
-                                    theme,
-                                    border_color,
-                                    text_color,
-                                    muted_text,
-                                    primary_color,
-                                    cx,
-                                )),
-                            )
+                            .child(div().flex_1().child(field))
                             .children(if can_remove {
                                 Some(
                                     div()
@@ -159,9 +175,8 @@ impl ChatView {
                                             MouseButton::Left,
                                             cx.listener(move |this, _, _, cx| {
                                                 this.poll_draft.remove_option(idx);
-                                                if this.active_compose_field > idx + 1 {
-                                                    this.active_compose_field -= 1;
-                                                }
+                                                // Later options shift up: rebuild their inputs.
+                                                this.dialog_fields.retain(|key, _| !key.starts_with("poll-option-"));
                                                 cx.notify();
                                             }),
                                         )
@@ -175,18 +190,7 @@ impl ChatView {
                     .collect();
 
                 let at_max = self.poll_draft.options.len() >= crate::components::compose::POLL_MAX_OPTIONS;
-                let mut body: Vec<AnyElement> = vec![Self::dialog_field_row(
-                    0,
-                    &self.poll_draft.question,
-                    "Pertanyaan",
-                    active == 0,
-                    theme,
-                    border_color,
-                    text_color,
-                    muted_text,
-                    primary_color,
-                    cx,
-                )];
+                let mut body: Vec<AnyElement> = vec![self.dialog_field_row("poll-question", "Pertanyaan", &theme, window, cx)];
                 body.extend(options);
                 body.push(
                     div()
@@ -225,58 +229,14 @@ impl ChatView {
                         .w_full()
                         .gap_2()
                         .child(
-                            div().flex_1().child(Self::dialog_field_row(
-                                0,
-                                &self.location_draft.latitude,
-                                "Latitude",
-                                active == 0,
-                                theme,
-                                border_color,
-                                text_color,
-                                muted_text,
-                                primary_color,
-                                cx,
-                            )),
+                            div().flex_1().child(self.dialog_field_row("location-latitude", "Latitude", &theme, window, cx)),
                         )
                         .child(
-                            div().flex_1().child(Self::dialog_field_row(
-                                1,
-                                &self.location_draft.longitude,
-                                "Longitude",
-                                active == 1,
-                                theme,
-                                border_color,
-                                text_color,
-                                muted_text,
-                                primary_color,
-                                cx,
-                            )),
+                            div().flex_1().child(self.dialog_field_row("location-longitude", "Longitude", &theme, window, cx)),
                         )
                         .into_any_element(),
-                    Self::dialog_field_row(
-                        2,
-                        &self.location_draft.name,
-                        "Nama tempat (opsional)",
-                        active == 2,
-                        theme,
-                        border_color,
-                        text_color,
-                        muted_text,
-                        primary_color,
-                        cx,
-                    ),
-                    Self::dialog_field_row(
-                        3,
-                        &self.location_draft.address,
-                        "Alamat (opsional)",
-                        active == 3,
-                        theme,
-                        border_color,
-                        text_color,
-                        muted_text,
-                        primary_color,
-                        cx,
-                    ),
+                    self.dialog_field_row("location-name", "Nama tempat (opsional)", &theme, window, cx),
+                    self.dialog_field_row("location-address", "Alamat (opsional)", &theme, window, cx),
                     Self::dialog_toggle_row(
                         "Bagikan lokasi live",
                         self.location_draft.live,
@@ -293,30 +253,8 @@ impl ChatView {
             }
             ComposeDialog::Contact => {
                 let body = vec![
-                    Self::dialog_field_row(
-                        0,
-                        &self.contact_draft.name,
-                        "Nama kontak",
-                        active == 0,
-                        theme,
-                        border_color,
-                        text_color,
-                        muted_text,
-                        primary_color,
-                        cx,
-                    ),
-                    Self::dialog_field_row(
-                        1,
-                        &self.contact_draft.phone,
-                        "Nomor telepon (mis. +62812…)",
-                        active == 1,
-                        theme,
-                        border_color,
-                        text_color,
-                        muted_text,
-                        primary_color,
-                        cx,
-                    ),
+                    self.dialog_field_row("contact-name", "Nama kontak", &theme, window, cx),
+                    self.dialog_field_row("contact-phone", "Nomor telepon (mis. +62812…)", &theme, window, cx),
                 ];
                 ("Bagikan kontak", body, "Bagikan")
             }
@@ -331,6 +269,7 @@ impl ChatView {
         Some(crate::components::motion::modal_in(
             div()
                 .absolute()
+                .occlude()
                 .inset_0()
                 .bg(rgba(0x00000088))
                 .flex()
@@ -346,9 +285,10 @@ impl ChatView {
                         .border_1()
                         .border_color(border_color)
                         .shadow_2xl()
-                        .track_focus(&self.compose_field_focus)
                         .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                            this.dialog_key_input(ev, cx);
+                            if ev.keystroke.key.as_str() == "escape" {
+                                this.close_compose_dialog(cx);
+                            }
                         }))
                         .child(
                             h_flex()

@@ -1,6 +1,14 @@
 use crate::views::chat::*;
 
 pub struct ChatView {
+    // Text inputs (created on first render, when a window is available). Each
+    // mirrors its edits into the matching `String` model below.
+    pub(crate) search_field: Option<TextField>,
+    pub(crate) sheet_search_field: Option<TextField>,
+    pub(crate) new_group_field: Option<TextField>,
+    pub(crate) join_link_field: Option<TextField>,
+    /// Compose-dialog inputs by key (`poll-question`, `poll-option-2`, ...).
+    pub(crate) dialog_fields: std::collections::HashMap<String, TextField>,
     pub search_query: String,
     pub search_focus_handle: FocusHandle,
     pub filter: ChatFilter,
@@ -133,6 +141,11 @@ impl ChatView {
             ChatStore::global_mut(cx).active_chat_id = None;
         }
         let mut view = Self {
+            search_field: None,
+            sheet_search_field: None,
+            new_group_field: None,
+            join_link_field: None,
+            dialog_fields: std::collections::HashMap::new(),
             search_query: String::new(),
             search_focus_handle: cx.focus_handle(),
             filter: ChatFilter::All,
@@ -238,6 +251,7 @@ impl ChatView {
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_composer_inputs(window, cx);
+        self.ensure_text_fields(window, cx);
         if self.preview_needs_focus && self.preview_image_url.is_some() {
             // Keys (Esc, arrows, +/-) go to the viewer as soon as it opens.
             self.preview_focus.focus(window, cx);
@@ -400,6 +414,7 @@ impl Render for ChatView {
             // MODAL: POLL / LOCATION / CONTACT COMPOSE DIALOGS
             // ====================================================
             .children(self.render_compose_dialog(
+                window,
                 theme,
                 border_color,
                 card_bg,

@@ -105,7 +105,9 @@ pub fn plan(msg: &Message, chat: Option<&Chat>, now_ms: i64) -> Option<Notice> {
         .unwrap_or(&msg.chat_id)
         .to_string();
 
+    // Mentions arrive as "@<number>"; show the names the backend resolved.
     let decoded = MessageBubbleHelper::decode_content(&msg.content);
+    let decoded = crate::views::chat::render_message_mentions_with_spans(&decoded, msg, None).0;
     let first_line = decoded.lines().map(str::trim).find(|l| !l.is_empty());
     let text = match first_line {
         // Placeholders such as "[Image]" carry no information beyond the type.
@@ -179,6 +181,12 @@ pub fn notify_new_message(msg: &Message, cx: &App) {
         let Some(auth) = cx.try_global::<AuthState>() else {
             return;
         };
+        // Something sent from our own number (another device, an echo) is not
+        // an incoming message, whatever the backend labelled it.
+        if auth.phone.as_deref().is_some_and(|phone| msg.from.split('@').next() == Some(phone)) {
+            eprintln!("[notifications] skipped: sent from the linked account");
+            return;
+        }
         eprintln!("[notifications] dispatching incoming message");
         show(
             notice,
@@ -406,6 +414,18 @@ mod tests {
             mute_mode: "off".into(),
             muted_until: None,
         }
+    }
+
+    #[test]
+    fn mentions_show_names_not_numbers() {
+        let mut message = msg("@11781648990305 info deployment");
+        message.extra = serde_json::from_value(serde_json::json!({
+            "mentions": ["11781648990305@lid"],
+            "mentionNames": {"11781648990305@lid": "Bimalord Bot"}
+        }))
+        .unwrap();
+        let n = plan(&message, Some(&chat("Budi S")), NOW).unwrap();
+        assert_eq!(n.body, "@Bimalord Bot info deployment");
     }
 
     #[test]
