@@ -36,6 +36,12 @@ pub struct ChatStore {
     pub chats: Vec<Chat>,
     pub chats_loaded: bool,
     pub chats_loading: bool,
+    /// Set by the backend's `chats_changed`; the chat view reloads the list
+    /// (and clears this) the next time it renders.
+    pub chats_stale: bool,
+    /// Set when contact names were re-resolved: the open chat's messages and
+    /// group members carry the old names and must be fetched again.
+    pub names_changed: bool,
     pub chats_version: u64,
     pub messages_by_chat: HashMap<String, ChatMessagesEntry>,
     pub active_chat_id: Option<String>,
@@ -267,6 +273,18 @@ impl ChatStore {
                 self.patch_message(chat_id, id, |m| m.reactions = Some(reactions.clone()));
                 true
             }
+            WsEvent::PollUpdate { chat_id, message_id, payload } => {
+                let extra = payload
+                    .get("extra")
+                    .and_then(|v| serde_json::from_value::<wabot_backend_client::dto::MessageExtra>(v.clone()).ok());
+                match extra {
+                    Some(extra) => {
+                        self.patch_message(chat_id, message_id, |m| m.extra = Some(extra));
+                        true
+                    }
+                    None => false,
+                }
+            }
             WsEvent::NewMessage(msg) => {
                 let chat_id = msg.chat_id.clone();
                 let mentions_me = msg.extra.as_ref().is_some_and(|extra| extra.mentions_me);
@@ -363,9 +381,11 @@ impl ChatStore {
             }
             WsEvent::ChatsChanged { reason } => {
                 self.chats_loaded = false;
+                self.chats_stale = true;
                 if reason == "names" {
                     // Cached messages carry sender names from before the
-                    // change; the open chat keeps its copy, the rest reload.
+                    // change; the open chat is refetched in place, the rest reload.
+                    self.names_changed = true;
                     let active = self.active_chat_id.clone();
                     self.messages_by_chat.retain(|id, _| Some(id) == active.as_ref());
                     self.messages_version = self.messages_version.wrapping_add(1);
@@ -401,6 +421,48 @@ mod tests {
             reactions: None,
             extra: None,
         }
+    }
+
+    #[test]
+    fn name_changes_ask_the_view_to_refetch_the_open_chat() {
+        let mut store = ChatStore::new();
+        store.active_chat_id = Some("chat-1".to_string());
+        store.upsert_message("chat-1", make_test_msg("a", 1, "x", "delivered"));
+        store.upsert_message("chat-2", make_test_msg("b", 1, "y", "delivered"));
+
+        assert!(store.handle_ws_event(&WsEvent::ChatsChanged { reason: "names".to_string() }));
+
+        assert!(store.chats_stale && store.names_changed);
+        assert!(store.messages_by_chat.contains_key("chat-1"), "open chat is refetched in place");
+        assert!(!store.messages_by_chat.contains_key("chat-2"), "other chats reload on open");
+    }
+
+    #[test]
+    fn poll_update_replaces_the_message_extra() {
+        let mut store = ChatStore::new();
+        let mut poll = make_test_msg("p1", 100, "📊 Lunch?", "delivered");
+        poll.message_type = "poll".to_string();
+        store.upsert_message("chat-1", poll);
+
+        // Shape of the backend's `poll_update` broadcast.
+        let event = wabot_backend_client::ws::WsMessage {
+            msg_type: "poll_update".to_string(),
+            payload: serde_json::json!({
+                "chatId": "chat-1",
+                "id": "p1",
+                "extra": {"poll": {
+                    "question": "Lunch?",
+                    "options": [{"name": "Nasi"}, {"name": "Mie"}],
+                    "votes": {"628123@s.whatsapp.net": ["Nasi"]}
+                }}
+            }),
+        }
+        .to_event();
+        assert!(store.handle_ws_event(&event));
+
+        let stored = &store.messages_by_chat["chat-1"].messages[0];
+        let poll = stored.extra.as_ref().and_then(|e| e.poll.as_ref()).expect("poll extra");
+        assert_eq!(poll.votes.as_ref().map(|v| v.len()), Some(1));
     }
 
     #[test]

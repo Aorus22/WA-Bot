@@ -69,20 +69,18 @@ impl LocationHelper {
 pub struct ContactHelper;
 
 impl ContactHelper {
+    /// The first `TEL` number of a vCard.
+    pub fn phone_of(vcard: &str) -> Option<String> {
+        vcard
+            .lines()
+            .find(|line| line.to_uppercase().starts_with("TEL"))
+            .and_then(|line| line.split_once(':'))
+            .map(|(_, number)| number.trim().to_string())
+            .filter(|number| !number.is_empty())
+    }
+
     pub fn primary_phone(contact: &ContactMeta) -> Option<String> {
-        if let Some(sub) = contact.contacts.first() {
-            if let Some(vcard) = &sub.vcard {
-                for line in vcard.lines() {
-                    let upper = line.to_uppercase();
-                    if upper.starts_with("TEL") {
-                        if let Some(idx) = line.find(':') {
-                            return Some(line[idx + 1..].trim().to_string());
-                        }
-                    }
-                }
-            }
-        }
-        None
+        contact.contacts.first()?.vcard.as_deref().and_then(Self::phone_of)
     }
 }
 

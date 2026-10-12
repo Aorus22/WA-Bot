@@ -18,6 +18,7 @@ pub mod notifications;
 pub mod popover;
 pub mod router;
 pub mod state;
+pub mod text_format;
 pub mod theme;
 pub mod views;
 pub mod window_material;

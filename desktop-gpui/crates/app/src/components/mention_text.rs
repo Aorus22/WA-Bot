@@ -11,12 +11,15 @@ use gpui::{
     App, BorderStyle, Bounds, Corners, CursorStyle, Edges, Element, ElementId, FontWeight,
     GlobalElementId, Hitbox, HitboxBehavior, HighlightStyle, Hsla, InspectorElementId,
     IntoElement, LayoutId, MouseButton, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    SharedString, StyledText, Subscription, Window, transparent_black,
+    SharedString, StrikethroughStyle, StyledText, Subscription, TextRun, TextStyle, Window,
+    px, transparent_black, FontStyle,
 };
 use gpui_base::{
     TextSelection, TextSelectionEvent, TextSelectionHandle, TextSelectionRegistration,
     TextSelectionRun, Theme,
 };
+
+use crate::text_format::Style as TextFormat;
 
 /// Called with the mentioned JID when a mention is clicked.
 pub type MentionClick = Rc<dyn Fn(&str, &mut Window, &mut App)>;
@@ -26,6 +29,8 @@ pub struct MentionText {
     id: ElementId,
     text: SharedString,
     styled_text: StyledText,
+    mention_style: HighlightStyle,
+    formats: Vec<(Range<usize>, TextFormat)>,
     targets: Vec<(Range<usize>, SharedString)>,
     on_click: Option<MentionClick>,
     selection_color: Option<Hsla>,
@@ -53,15 +58,22 @@ impl MentionText {
             font_weight: Some(FontWeight::MEDIUM),
             ..Default::default()
         };
-        let highlights = mentions.iter().map(|(range, _)| (range.clone(), style)).collect::<Vec<_>>();
         Self {
             id: id.into(),
-            styled_text: StyledText::new(text.clone()).with_highlights(highlights),
+            styled_text: StyledText::new(text.clone()),
+            mention_style: style,
+            formats: Vec::new(),
             text,
             targets: mentions,
             on_click: None,
             selection_color: None,
         }
+    }
+
+    /// Styles ranges of the text (WhatsApp `*bold*` and friends).
+    pub fn formats(mut self, formats: Vec<(Range<usize>, TextFormat)>) -> Self {
+        self.formats = formats;
+        self
     }
 
     pub fn on_click(mut self, handler: impl Fn(&str, &mut Window, &mut App) + 'static) -> Self {
@@ -74,6 +86,44 @@ impl MentionText {
     pub fn selection_color(mut self, color: Hsla) -> Self {
         self.selection_color = Some(color);
         self
+    }
+}
+
+impl MentionText {
+    /// One run per stretch of text sharing the same mention and format.
+    fn text_runs(&self, base: &TextStyle, mono: SharedString) -> Vec<TextRun> {
+        let mut cuts = vec![0, self.text.len()];
+        let ranges = self.targets.iter().map(|(r, _)| r).chain(self.formats.iter().map(|(r, _)| r));
+        for range in ranges {
+            cuts.push(range.start.min(self.text.len()));
+            cuts.push(range.end.min(self.text.len()));
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        cuts.windows(2)
+            .map(|pair| {
+                let (start, end) = (pair[0], pair[1]);
+                let mut style = base.clone();
+                if let Some((_, format)) = self.formats.iter().find(|(r, _)| r.start <= start && end <= r.end) {
+                    if format.bold {
+                        style.font_weight = FontWeight::BOLD;
+                    }
+                    if format.italic {
+                        style.font_style = FontStyle::Italic;
+                    }
+                    if format.strike {
+                        style.strikethrough = Some(StrikethroughStyle { thickness: px(1.0), color: None });
+                    }
+                    if format.mono {
+                        style.font_family = mono.clone();
+                    }
+                }
+                if self.targets.iter().any(|(r, _)| r.start <= start && end <= r.end) {
+                    style = style.highlight(self.mention_style);
+                }
+                style.to_run(end - start)
+            })
+            .collect()
     }
 }
 
@@ -148,6 +198,8 @@ impl Element for MentionText {
                 (state.clone(), state)
             },
         );
+        let runs = self.text_runs(&window.text_style(), Theme::global(cx).tokens.typography.mono.clone());
+        self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
         let (layout_id, ()) = self.styled_text.request_layout(global_id, inspector_id, window, cx);
         (layout_id, handle)
     }

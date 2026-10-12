@@ -646,6 +646,7 @@ impl Render for SettingsView {
 
         let layout_pref_now = crate::layout_pref::preference(cx);
         let notifications_now = crate::notifications::enabled(cx);
+        let format_now = crate::text_format::enabled(cx);
         let theme_mgr = ThemeManager::global(cx);
         let active_preset_name = theme_mgr.active_preset.name.clone();
         let window_transparency = theme_mgr.window_transparency;
@@ -1089,6 +1090,50 @@ impl Render for SettingsView {
                                                     .checked(notifications_now)
                                                     .on_change(|enabled, _, cx| {
                                                         crate::notifications::set_enabled(cx, *enabled);
+                                                    }),
+                                            ),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Row: WhatsApp text formatting in message bubbles
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .justify_between()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .gap_3()
+                                                    .child(Icon::new(IconName::FileText).text_color(muted_text))
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(text_color)
+                                                                    .child("Format message text"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .child("Show *bold*, _italic_, ~strikethrough~ and `monospace` like WhatsApp"),
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                Switch::new("format-messages")
+                                                    .checked(format_now)
+                                                    .on_change(|enabled, _, cx| {
+                                                        crate::text_format::set_enabled(cx, *enabled);
                                                     }),
                                             ),
                                     )
@@ -1666,6 +1711,8 @@ impl Render for SettingsView {
                                                     .items_center()
                                                     .justify_center()
                                                     .size(px(18.0))
+                                                    // A long description must not squeeze the circle into an oval.
+                                                    .flex_none()
                                                     .rounded_full()
                                                     .border_2()
                                                     .border_color(if selected { primary_color } else { muted_text })
@@ -1675,6 +1722,8 @@ impl Render for SettingsView {
                                                 div()
                                                     .flex()
                                                     .flex_col()
+                                                    .flex_1()
+                                                    .min_w_0()
                                                     .child(div().text_sm().font_weight(FontWeight::MEDIUM).text_color(text_color).child(title))
                                                     .child(div().text_xs().text_color(muted_text).child(description)),
                                             )

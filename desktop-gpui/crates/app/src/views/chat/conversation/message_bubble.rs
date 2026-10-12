@@ -100,6 +100,21 @@ impl ChatView {
                 }
             };
 
+            let rich_card: Option<AnyElement> = match (msg_type, r_msg.msg.extra.as_ref()) {
+                ("poll", Some(extra)) => extra.poll.as_ref().map(|poll| {
+                    let chat_id = this.selected_chat_id.clone().unwrap_or_default();
+                    Self::render_poll_card(&chat_id, &r_msg.msg.id, poll, primary_color, bubble_text, cx)
+                }),
+                ("location", Some(extra)) => extra.location.as_ref().map(|location| {
+                    Self::render_location_card(&r_msg.msg.id, location, &base_url, primary_color, cx)
+                }),
+                ("contact", Some(extra)) => extra.contact.as_ref().map(|contact| {
+                    Self::render_contact_card(&r_msg.msg.id, contact, primary_color, cx)
+                }),
+                _ => None,
+            };
+            let has_rich_card = rich_card.is_some();
+
             let is_highlighted = this.highlighted_message_id.as_deref() == Some(&r_msg.msg.id);
             let base_bubble_bg: Hsla = bubble_bg.into();
             let final_bubble_bg = if is_highlighted { theme.primary.opacity(0.35) } else { base_bubble_bg };
@@ -347,12 +362,15 @@ impl ChatView {
                 } else {
                     None
                 })
+                // Poll, location and contact cards (the text is only a placeholder for them)
+                .children(rich_card.map(|card| div().text_color(bubble_text).child(card)))
                 // Message Body Text (hide placeholder if it's media without caption)
                 .children({
                     let is_media_placeholder = (is_image && (content == "[Image]" || content.is_empty()))
                         || (is_sticker && (content == "[Sticker]" || content.is_empty()))
                         || (is_video && (content == "[Video]" || content.is_empty()))
-                        || is_document;
+                        || is_document
+                        || has_rich_card;
                     if !content.is_empty() && !is_media_placeholder {
                         Some(
                             div()
@@ -360,15 +378,36 @@ impl ChatView {
                                 .text_color(bubble_text)
                                 .child({
                                     let view = cx.entity();
+                                    // WhatsApp formatting (not for markdown-mode messages,
+                                    // whose `*`/`_` mean something else).
+                                    let formatted = (crate::text_format::enabled(cx)
+                                        && !MessageBubbleHelper::is_markdown(&r_msg.msg.content))
+                                    .then(|| crate::text_format::parse(&content));
+                                    let (body_text, body_mentions, body_formats) = match &formatted {
+                                        Some(f) => (
+                                            f.text.clone(),
+                                            mention_spans
+                                                .iter()
+                                                .map(|m| (f.map_range(&m.range), SharedString::from(m.jid.clone())))
+                                                .collect::<Vec<_>>(),
+                                            f.spans.clone(),
+                                        ),
+                                        None => (
+                                            content.clone(),
+                                            mention_spans
+                                                .iter()
+                                                .map(|m| (m.range.clone(), SharedString::from(m.jid.clone())))
+                                                .collect(),
+                                            Vec::new(),
+                                        ),
+                                    };
                                     MentionText::new(
                                         format!("message-body-{}", r_msg.msg.id),
-                                        content.clone(),
-                                        mention_spans
-                                            .iter()
-                                            .map(|m| (m.range.clone(), SharedString::from(m.jid.clone())))
-                                            .collect(),
+                                        body_text,
+                                        body_mentions,
                                         mention_color,
                                     )
+                                    .formats(body_formats)
                                     .selection_color(selection_color)
                                     .on_click({
                                         let content = content.clone();

@@ -82,6 +82,46 @@ impl ChatView {
         cx.notify();
     }
 
+    /// Cast (or withdraw, with an empty list) my vote on a poll. The tally
+    /// updates at once; the backend echoes the authoritative extra back.
+    pub fn vote_poll(&mut self, chat_id: String, msg_id: String, options: Vec<String>, cx: &mut Context<Self>) {
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        if cx.has_global::<ChatStore>() {
+            let mine = options.clone();
+            ChatStore::global_mut(cx).patch_message(&chat_id, &msg_id, move |m| {
+                if let Some(poll) = m.extra.as_mut().and_then(|extra| extra.poll.as_mut()) {
+                    let votes = poll.votes.get_or_insert_with(Default::default);
+                    if mine.is_empty() {
+                        votes.remove("me");
+                    } else {
+                        votes.insert("me".to_string(), mine);
+                    }
+                }
+            });
+        }
+
+        cx.spawn(move |_this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT
+                    .spawn(async move { client.send_poll_vote(&chat_id, &msg_id, &options).await })
+                    .await;
+                if !matches!(res, Ok(Ok(_))) {
+                    let _ = cx.update(|cx: &mut App| {
+                        toast::error("Gagal mengirim suara", cx);
+                    });
+                }
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
     // ========================================================================
     // ATTACH MENU, PICKERS AND COMPOSE DIALOGS (web parity)
     // ========================================================================

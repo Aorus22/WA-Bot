@@ -222,9 +222,11 @@ impl WsMessage {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
+                // The backend broadcasts `{chatId, id, extra}`.
                 message_id: self
                     .payload
-                    .get("messageId")
+                    .get("id")
+                    .or_else(|| self.payload.get("messageId"))
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),

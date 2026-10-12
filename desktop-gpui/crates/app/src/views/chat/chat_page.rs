@@ -356,6 +356,26 @@ impl Render for ChatView {
         };
         let show_right = if pages { has_selection } else { true };
 
+        // The backend re-resolved names (or the chat list changed): fetch again
+        // what is on screen, since nothing else would.
+        let (reload_chats, reload_names) = if cx.has_global::<ChatStore>() {
+            let store = ChatStore::global_mut(cx);
+            (std::mem::take(&mut store.chats_stale), std::mem::take(&mut store.names_changed))
+        } else {
+            (false, false)
+        };
+        if reload_chats {
+            self.load_chats(cx);
+        }
+        if reload_names {
+            if let Some(chat) = selected_chat.as_ref() {
+                self.refresh_messages_in_place(&chat.id, cx);
+                if chat.is_group {
+                    self.load_group_info(&chat.id, cx);
+                }
+            }
+        }
+
         // Ensure cached messages match currently selected chat, and rebuild
         // when the store reports any change (new/edited/deleted messages,
         // status ticks, reactions) so live WS updates repaint the bubbles.

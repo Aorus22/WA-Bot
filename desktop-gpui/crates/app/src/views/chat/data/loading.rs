@@ -288,6 +288,38 @@ impl ChatView {
         .detach();
     }
 
+    /// Fetch the open chat's latest messages again without resetting the view:
+    /// the store's version bump makes the next render rebuild its cache in
+    /// place. Used when the backend re-resolves names.
+    pub(crate) fn refresh_messages_in_place(&mut self, chat_id: &str, cx: &mut Context<Self>) {
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        let cid = chat_id.to_string();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let cid_fetch = cid.clone();
+                let res = TOKIO_RT
+                    .spawn(async move { client.get_messages(&cid_fetch, Some(100), None, None).await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let (Ok(Ok(msgs)), Some(view)) = (res, this.upgrade()) {
+                        let has_more = msgs.len() >= 100;
+                        if cx.has_global::<ChatStore>() {
+                            ChatStore::global_mut(cx).set_messages(&cid, msgs, has_more);
+                        }
+                        view.update(cx, |_, cx| cx.notify());
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Load older messages when scrolling near the top (paginating backwards)
     pub fn load_older_messages(&mut self, cx: &mut Context<Self>) {
         if self.is_loading_more || !self.has_more {

@@ -80,6 +80,7 @@ fn main() {
             cx.set_global(wabot_app::notifications::NotificationPref(
                 settings.notifications_enabled,
             ));
+            cx.set_global(wabot_app::text_format::FormatPref(settings.format_messages));
 
             // Stop the bundled backend (if this process started it) on quit.
             cx.on_app_quit(|_| async {

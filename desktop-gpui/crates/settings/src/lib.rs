@@ -102,6 +102,10 @@ fn default_notifications_enabled() -> bool {
     true
 }
 
+fn default_format_messages() -> bool {
+    true
+}
+
 /// Desktop settings: UI preferences only (see module docs for the boundary).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesktopSettings {
@@ -136,6 +140,10 @@ pub struct DesktopSettings {
     /// Whether incoming messages raise an OS notification.
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
+    /// Whether WhatsApp text formatting (`*bold*`, `_italic_`, `~strike~`,
+    /// `` `mono` ``) is rendered in message bubbles.
+    #[serde(default = "default_format_messages")]
+    pub format_messages: bool,
 
     #[serde(skip)]
     pub custom_base: Option<PathBuf>,
@@ -154,6 +162,7 @@ impl Default for DesktopSettings {
             window_transparency: default_window_transparency(),
             window_blur_enabled: default_window_blur_enabled(),
             notifications_enabled: default_notifications_enabled(),
+            format_messages: default_format_messages(),
             custom_base: None,
         }
     }
