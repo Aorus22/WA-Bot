@@ -93,6 +93,35 @@ pub fn process_name(pid: u32) -> Option<String> {
     Some(name.trim().trim_end_matches(".exe").to_lowercase())
 }
 
+/// Pids of running backends whose working directory is `dir` — the data folder
+/// the app starts its backend in. Only Linux can tell (via `/proc`); elsewhere
+/// the answer is always empty.
+pub fn backend_pids_using(dir: &std::path::Path) -> Vec<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(dir) = dir.canonicalize() else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+                (process_name(pid)? == BACKEND_PROCESS_NAME).then_some(())?;
+                let cwd = std::fs::read_link(entry.path().join("cwd")).ok()?;
+                (cwd == dir).then_some(pid)
+            })
+            .collect()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = dir;
+        Vec::new()
+    }
+}
+
 fn signal(pid: u32, force: bool) {
     #[cfg(unix)]
     {

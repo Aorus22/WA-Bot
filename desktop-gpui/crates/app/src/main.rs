@@ -131,7 +131,8 @@ fn main() {
             cx.set_global(CallManager::new());
 
             let mut auth_state = AuthState::default();
-            let base_url = detect_backend_url(&settings);
+            let base_url = detect_backend_url();
+            backend::set_api_url(&base_url);
             eprintln!("[GPUI] Connecting to backend at: {base_url}");
             auth_state.base_url = base_url.clone();
             cx.set_global(auth_state);
@@ -356,13 +357,9 @@ fn main() {
             }
 
             // WebSocket client for live updates (QR codes, auth success, messages)
-            let ws_url = if base_url.starts_with("https://") {
-                format!("{}/ws", base_url.trim_end_matches("/api").replace("https://", "wss://"))
-            } else {
-                format!("{}/ws", base_url.trim_end_matches("/api").replace("http://", "ws://"))
-            };
-
-            let ws_client = WsClient::from_static_url(ws_url, None);
+            // Resolved on every (re)connect, so a restarted backend on a new
+            // port is followed without restarting the app.
+            let ws_client = WsClient::new(Arc::new(backend::ws_url), None);
             ws_client.start();
             let ws_rx = ws_client.subscribe();
 
@@ -514,8 +511,10 @@ fn emoji_fallbacks() -> gpui::FontFallbacks {
     ])
 }
 
-/// Detects the backend URL using CLI flags, env vars, active port probes, settings, or .env fallback.
-fn detect_backend_url(settings: &DesktopSettings) -> String {
+/// Detects the backend URL: CLI flags, then env vars (neither touches the
+/// `core.json` registry), then the recorded or freshly started bundled backend,
+/// then `.env` as a last resort.
+fn detect_backend_url() -> String {
     let args: Vec<String> = std::env::args().collect();
     for i in 0..args.len() {
         if (args[i] == "--url" || args[i] == "--backend-url") && i + 1 < args.len() {
@@ -544,28 +543,11 @@ fn detect_backend_url(settings: &DesktopSettings) -> String {
         }
     }
 
-    // Probe running loopback listeners: 3090 (.env default), 3000 (compiled default), 8080 (external)
-    // A backend that is already up (validated), else start the bundled one with
-    // its data in ~/.wa-bot. Only if that fails do the unvalidated fallbacks
-    // below apply.
-    if let Some(url) = backend::find_running(settings.last_backend_url.as_deref()) {
-        return url;
-    }
-    match backend::start_bundled() {
-        Ok(url) => {
-            if let Ok(mut saved) = DesktopSettings::load() {
-                saved.last_backend_url = Some(url.clone());
-                let _ = saved.save();
-            }
-            return url;
-        }
-        Err(e) => eprintln!("[backend] could not start the bundled backend: {e}"),
-    }
-
-    if let Some(ref url) = settings.last_backend_url {
-        if !url.trim().is_empty() {
-            return url.clone();
-        }
+    // Reconnect to the backend recorded in <data>/run/core.json (validated),
+    // else start the bundled one with its data in ~/.wa-bot.
+    match backend::connect_or_start() {
+        Ok(url) => return url,
+        Err(e) => eprintln!("[backend] no backend available: {e}"),
     }
 
     for env_path in &[std::path::Path::new(".env"), std::path::Path::new("../.env"), std::path::Path::new("../../.env")] {

@@ -287,7 +287,6 @@ impl SettingsView {
             let view_weak = this;
             let cx_handle = cx.clone();
             async move {
-                let old_url = base_url.clone();
                 let outcome = TOKIO_RT
                     .spawn(async move {
                         let url = crate::backend::restart(&base_url).await?;
@@ -323,15 +322,7 @@ impl SettingsView {
                             if cx.has_global::<crate::state::ChatStore>() {
                                 crate::state::ChatStore::global_mut(cx).chats_stale = true;
                             }
-                            if let Ok(mut saved) = DesktopSettings::load() {
-                                saved.last_backend_url = Some(url.clone());
-                                let _ = saved.save();
-                            }
-                            if *url == old_url {
-                                None
-                            } else {
-                                Some("Backend restarted on a new port; restart the app to reconnect live updates".to_string())
-                            }
+                            None
                         }
                         Err(error) => Some(format!("Backend restart failed: {error}")),
                     };
