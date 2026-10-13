@@ -5,6 +5,7 @@ pub mod calls;
 pub mod channels;
 pub mod chat;
 pub mod chat_area;
+pub mod history_sync;
 pub mod root;
 pub mod settings;
 pub mod shell;

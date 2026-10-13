@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,50 +21,130 @@ import (
 	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
-const historyPageSize = 50
+const (
+	// historyPageSize is how many messages one request to the phone asks for.
+	historyPageSize = 50
+	// historyWorkers chats are synced at the same time.
+	historyWorkers = 3
+	// historyResponseTimeout is how long to wait for the phone to answer one request.
+	historyResponseTimeout = 25 * time.Second
+	// historyMaxRounds bounds one chat (rounds x page size messages).
+	historyMaxRounds = 4000
+)
+
+// historyPhone is what a sync needs from the WhatsApp connection; the real one
+// wraps the client, tests supply a scripted phone.
+type historyPhone interface {
+	IsConnected() bool
+	// RequestOlder asks the phone for the page of messages before anchor.
+	RequestOlder(anchor *repository.MessageAnchor) error
+	// Parse turns a staged web message into an event.
+	Parse(chat waTypes.JID, msg *waWeb.WebMessageInfo) (*events.Message, error)
+}
+
+type clientPhone struct{ client *whatsappInfra.WhatsAppClient }
+
+func (p clientPhone) IsConnected() bool { return p.client.IsConnected() }
+
+func (p clientPhone) RequestOlder(anchor *repository.MessageAnchor) error {
+	jid, err := waTypes.ParseJID(anchor.ChatID)
+	if err != nil {
+		return fmt.Errorf("invalid chat JID: %w", err)
+	}
+	info := &waTypes.MessageInfo{
+		MessageSource: waTypes.MessageSource{Chat: jid, IsFromMe: anchor.IsFromMe},
+		ID:            waTypes.MessageID(anchor.MessageID),
+		Timestamp:     time.UnixMilli(anchor.Timestamp),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err = p.client.CoreClient().SendPeerMessage(ctx, p.client.CoreClient().BuildHistorySyncRequest(info, historyPageSize))
+	if err != nil {
+		return fmt.Errorf("request older history: %w", err)
+	}
+	return nil
+}
+
+func (p clientPhone) Parse(chat waTypes.JID, msg *waWeb.WebMessageInfo) (*events.Message, error) {
+	return p.client.CoreClient().ParseWebMessage(chat, msg)
+}
 
 // HistorySyncService owns durable staging and the single manual import job.
 // Downloading pairing packets is automatic, but visible tables are only
 // touched from run(), after POST /api/history-sync.
 type HistorySyncService struct {
 	client      *whatsappInfra.WhatsAppClient
+	phone       historyPhone
 	store       *repository.MessageStore
 	broadcaster HTTPServer
+	// responseTimeout is how long to wait for the phone to answer one request.
+	responseTimeout time.Duration
 
 	mu      sync.Mutex
 	stageMu sync.Mutex
 	staging map[string]bool
 	running bool
+	cancel  context.CancelFunc
+	current map[string]*repository.HistorySyncCurrent
 	status  repository.HistorySyncStatus
+
+	// A job can run in several segments (stopped, interrupted, resumed). The
+	// time of the earlier ones is activeBase; segmentStart and segmentDone are
+	// the running one's, and are what the time estimate is based on.
+	activeBase   int64
+	segmentStart time.Time
+	segmentDone  int
 }
 
 func NewHistorySyncService(client *whatsappInfra.WhatsAppClient, store *repository.MessageStore) *HistorySyncService {
-	s := &HistorySyncService{client: client, store: store, staging: make(map[string]bool)}
-	status, err := store.GetHistorySyncStatus()
-	if err != nil {
-		status = repository.HistorySyncStatus{State: "idle", Errors: []repository.HistorySyncError{}}
-	}
-	if status.State == "running" {
-		now := time.Now().UnixMilli()
-		status.State = "failed"
-		status.FinishedAt = &now
-		status.Errors = append(status.Errors, repository.HistorySyncError{Message: "history sync was interrupted by a backend restart"})
-		_ = store.SetHistorySyncStatus(status)
-	}
-	s.status = status
+	s := &HistorySyncService{client: client, phone: clientPhone{client}, store: store, responseTimeout: historyResponseTimeout, staging: make(map[string]bool), current: map[string]*repository.HistorySyncCurrent{}}
+	s.status = s.loadStatus()
 	return s
+}
+
+// loadStatus reads the persisted status. A sync recorded as "running" cannot be
+// running in a process that only just started, so it is closed as interrupted
+// (the job keeps its place and can be resumed); otherwise the UI would show it
+// as syncing forever.
+func (s *HistorySyncService) loadStatus() repository.HistorySyncStatus {
+	status, err := s.store.GetHistorySyncStatus()
+	if err != nil {
+		return repository.HistorySyncStatus{State: "idle", Errors: []repository.HistorySyncError{}, Current: []repository.HistorySyncCurrent{}}
+	}
+	applyJobTotals(&status, s.store)
+	if status.State == "running" || status.State == "cancelling" {
+		now := time.Now().UnixMilli()
+		status.State = "interrupted"
+		status.FinishedAt = &now
+		_ = s.store.SetHistorySyncStatus(status)
+	}
+	return status
+}
+
+// applyJobTotals sets the counters of status from the chats of the job.
+func applyJobTotals(status *repository.HistorySyncStatus, store *repository.MessageStore) {
+	totals, err := store.HistoryJobTotals()
+	if err != nil || (totals.Chats == 0 && status.ChatsSkipped == 0) {
+		return // no job on record (an older sync): keep what was stored
+	}
+	status.ChatsTotal = status.ChatsSkipped + totals.Chats
+	status.ChatsProcessed = status.ChatsSkipped + totals.Done
+	status.MessagesAdded = totals.Added
+	status.ChatsWithNew = totals.WithNew
+	status.ChatsExhausted = totals.Exhausted
+	status.Timeouts = totals.Timeouts
 }
 
 // Reload re-reads the persisted status after the message database was switched
 // to another account.
 func (s *HistorySyncService) Reload() {
-	status, err := s.store.GetHistorySyncStatus()
-	if err != nil {
-		status = repository.HistorySyncStatus{State: "idle", Errors: []repository.HistorySyncError{}}
-	}
 	s.mu.Lock()
-	s.status = status
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	if s.running {
+		return // a running sync belongs to the previous account's job; it keeps its own status
+	}
+	s.status = s.loadStatus()
+	s.current = map[string]*repository.HistorySyncCurrent{}
 }
 
 func (s *HistorySyncService) SetBroadcaster(server HTTPServer) { s.broadcaster = server }
@@ -156,8 +237,16 @@ func (s *HistorySyncService) StageData(data *waHistorySync.HistorySync) error {
 	return nil
 }
 
-func (s *HistorySyncService) Start() (repository.HistorySyncStatus, error) {
-	if !s.client.IsConnected() {
+// Start begins a sync with the given depth. The zero value means "50 older
+// messages per chat", which is what the first version of this feature did.
+func (s *HistorySyncService) Start(opts repository.HistorySyncOptions) (repository.HistorySyncStatus, error) {
+	if opts.PerChat < 0 || opts.SinceMs < 0 {
+		return s.Status(), fmt.Errorf("invalid history sync options")
+	}
+	if opts.PerChat == 0 && opts.SinceMs == 0 && !opts.All {
+		opts.PerChat = historyPageSize
+	}
+	if !s.phone.IsConnected() {
 		return s.Status(), fmt.Errorf("WhatsApp is not connected")
 	}
 	s.mu.Lock()
@@ -167,17 +256,107 @@ func (s *HistorySyncService) Start() (repository.HistorySyncStatus, error) {
 		return status, fmt.Errorf("history sync is already running")
 	}
 	now := time.Now().UnixMilli()
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = s.store.BeginHistoryJob(nil) // a new job replaces whatever was left of the last one
 	s.running = true
+	s.cancel = cancel
+	s.current = map[string]*repository.HistorySyncCurrent{}
+	s.activeBase, s.segmentStart, s.segmentDone = 0, time.Now(), 0
 	s.status = repository.HistorySyncStatus{
 		State:     "running",
 		Errors:    []repository.HistorySyncError{},
 		StartedAt: &now,
+		Options:   opts,
 	}
 	_ = s.store.SetHistorySyncStatus(s.status)
 	status := s.statusWithPendingLocked()
 	s.mu.Unlock()
-	go s.run()
+	go s.run(ctx, opts, false)
 	return status, nil
+}
+
+// Resume continues a job that was stopped, interrupted by a restart or lost with
+// the connection: chats it finished are not visited again, and its counters and
+// options carry on.
+func (s *HistorySyncService) Resume() (repository.HistorySyncStatus, error) {
+	if !s.phone.IsConnected() {
+		return s.Status(), fmt.Errorf("WhatsApp is not connected")
+	}
+	s.mu.Lock()
+	if s.running {
+		status := s.statusWithPendingLocked()
+		s.mu.Unlock()
+		return status, fmt.Errorf("history sync is already running")
+	}
+	if !s.resumableLocked() {
+		status := s.statusWithPendingLocked()
+		s.mu.Unlock()
+		return status, fmt.Errorf("there is no history sync to resume")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.running = true
+	s.cancel = cancel
+	s.current = map[string]*repository.HistorySyncCurrent{}
+	s.activeBase, s.segmentStart, s.segmentDone = s.status.ActiveMs, time.Now(), 0
+	s.status.State = "running"
+	s.status.FinishedAt = nil
+	_ = s.store.SetHistorySyncStatus(s.status)
+	status := s.statusWithPendingLocked()
+	opts := s.status.Options
+	s.mu.Unlock()
+	go s.run(ctx, opts, true)
+	return status, nil
+}
+
+// resumableLocked: the job stopped without finishing, and has chats left.
+func (s *HistorySyncService) resumableLocked() bool {
+	if s.running {
+		return false
+	}
+	switch s.status.State {
+	case "interrupted", "cancelled", "failed":
+	default:
+		return false
+	}
+	totals, err := s.store.HistoryJobTotals()
+	return err == nil && totals.Chats > totals.Done
+}
+
+// elapsedLocked is how long the job has actually run, stopped time not counted.
+func (s *HistorySyncService) elapsedLocked() int64 {
+	if !s.running {
+		return s.status.ActiveMs
+	}
+	return s.activeBase + time.Since(s.segmentStart).Milliseconds()
+}
+
+// etaLocked is a rough time left from the pace of the running segment, nil
+// until enough chats are done to say anything.
+func (s *HistorySyncService) etaLocked() *int64 {
+	if !s.running {
+		return nil
+	}
+	remaining := s.status.ChatsTotal - s.status.ChatsProcessed
+	spent := time.Since(s.segmentStart).Milliseconds()
+	if s.segmentDone < 3 || spent < 10_000 || remaining <= 0 {
+		return nil
+	}
+	eta := spent * int64(remaining) / int64(s.segmentDone)
+	return &eta
+}
+
+// Cancel asks the running sync to stop after the messages it is importing.
+func (s *HistorySyncService) Cancel() (repository.HistorySyncStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.running {
+		return s.statusWithPendingLocked(), fmt.Errorf("no history sync is running")
+	}
+	s.status.State = "cancelling"
+	if s.cancel != nil {
+		s.cancel()
+	}
+	return s.statusWithPendingLocked(), nil
 }
 
 func (s *HistorySyncService) Status() repository.HistorySyncStatus {
@@ -188,46 +367,83 @@ func (s *HistorySyncService) Status() repository.HistorySyncStatus {
 
 func (s *HistorySyncService) statusWithPendingLocked() repository.HistorySyncStatus {
 	status := s.status
-	status.Errors = append([]repository.HistorySyncError(nil), status.Errors...)
+	status.Resumable = s.resumableLocked()
+	status.ElapsedMs = s.elapsedLocked()
+	status.EtaMs = s.etaLocked()
+	// Never nil: clients read "errors" as a list, and JSON null is not one.
+	status.Errors = append([]repository.HistorySyncError{}, status.Errors...)
+	status.Current = make([]repository.HistorySyncCurrent, 0, len(s.current))
+	for _, c := range s.current {
+		status.Current = append(status.Current, *c)
+	}
+	sort.Slice(status.Current, func(i, j int) bool { return status.Current[i].ChatID < status.Current[j].ChatID })
 	status.PendingChats, status.PendingMessages, _ = s.store.PendingHistoryCounts()
+	status.ChatsFinished = s.store.FinishedChatCount()
 	return status
 }
 
-func (s *HistorySyncService) run() {
-	targets, err := s.store.HistoryTargets()
+func (s *HistorySyncService) run(ctx context.Context, opts repository.HistorySyncOptions, resume bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.finish("failed", []repository.HistorySyncError{{Message: fmt.Sprintf("history sync crashed: %v", r)}})
+		}
+	}()
+	if !resume {
+		targets, err := s.store.HistoryTargets()
+		if err != nil {
+			s.finish("failed", []repository.HistorySyncError{{Message: err.Error()}})
+			return
+		}
+		var todo []string
+		for _, t := range targets {
+			if t.Exhausted && t.Pending == 0 && !opts.IncludeExhausted {
+				continue
+			}
+			todo = append(todo, t.ChatID)
+		}
+		if err := s.store.BeginHistoryJob(todo); err != nil {
+			s.finish("failed", []repository.HistorySyncError{{Message: err.Error()}})
+			return
+		}
+		// Chats already at the start of their history count as done.
+		s.updateProgress(func(status *repository.HistorySyncStatus) {
+			status.ChatsSkipped = len(targets) - len(todo)
+			status.ChatsTotal = len(targets)
+		})
+	}
+	s.refreshTotals()
+	todo, err := s.store.PendingHistoryJobChats()
 	if err != nil {
 		s.finish("failed", []repository.HistorySyncError{{Message: err.Error()}})
 		return
 	}
-	s.updateProgress(func(status *repository.HistorySyncStatus) { status.ChatsTotal = len(targets) })
 
-	for _, target := range targets {
-		if !s.client.IsConnected() {
-			s.addError(target.ChatID, "WhatsApp disconnected during history sync")
-			break
-		}
-		pending := target.Pending
-		if pending == 0 {
-			anchor, anchorErr := s.store.OldestMessageAnchor(target.ChatID)
-			if anchorErr == nil {
-				stagedAt := s.store.HistoryConversationUpdatedAt(target.ChatID)
-				if requestErr := s.requestOlder(anchor); requestErr != nil {
-					s.addError(target.ChatID, requestErr.Error())
-				} else if !s.waitForHistoryResponse(target.ChatID, stagedAt, 30*time.Second) {
-					s.addError(target.ChatID, "primary device did not return history within 30 seconds")
-				}
+	jobs := make(chan repository.HistoryTarget)
+	var wg sync.WaitGroup
+	for i := 0; i < historyWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for target := range jobs {
+				s.syncChat(ctx, target, opts)
 			}
-		}
-		added, importErr := s.importPending(target.ChatID)
-		if importErr != nil {
-			s.addError(target.ChatID, importErr.Error())
-		}
-		s.updateProgress(func(status *repository.HistorySyncStatus) {
-			status.ChatsProcessed++
-			status.MessagesAdded += added
-		})
+		}()
 	}
+feed:
+	for _, chatID := range todo {
+		select {
+		case <-ctx.Done():
+			break feed
+		case jobs <- repository.HistoryTarget{ChatID: chatID}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
 
+	if ctx.Err() != nil {
+		s.finish("cancelled", nil)
+		return
+	}
 	s.mu.Lock()
 	hasErrors := len(s.status.Errors) > 0
 	processed := s.status.ChatsProcessed
@@ -243,43 +459,160 @@ func (s *HistorySyncService) run() {
 	s.finish(state, nil)
 }
 
-func (s *HistorySyncService) requestOlder(anchor *repository.MessageAnchor) error {
-	jid, err := waTypes.ParseJID(anchor.ChatID)
-	if err != nil {
-		return fmt.Errorf("invalid chat JID: %w", err)
+// recordChat saves how far chatID got in the job and refreshes the counters.
+// A chat that is not done (the sync was stopped) is visited again on resume.
+func (s *HistorySyncService) recordChat(chatID string, added int, done bool, outcome string) {
+	if err := s.store.RecordHistoryJobChat(chatID, added, done, outcome); err != nil {
+		s.addError(chatID, err.Error())
 	}
-	info := &waTypes.MessageInfo{
-		MessageSource: waTypes.MessageSource{Chat: jid, IsFromMe: anchor.IsFromMe},
-		ID:            waTypes.MessageID(anchor.MessageID),
-		Timestamp:     time.UnixMilli(anchor.Timestamp),
+	if done {
+		s.mu.Lock()
+		s.segmentDone++
+		s.mu.Unlock()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_, err = s.client.CoreClient().SendPeerMessage(ctx, s.client.CoreClient().BuildHistorySyncRequest(info, historyPageSize))
-	if err != nil {
-		return fmt.Errorf("request older history: %w", err)
-	}
-	return nil
+	s.refreshTotals()
 }
 
-func (s *HistorySyncService) waitForHistoryResponse(chatID string, previousUpdate int64, timeout time.Duration) bool {
+// refreshTotals recomputes the counters from the job's chats.
+func (s *HistorySyncService) refreshTotals() {
+	s.updateProgress(func(status *repository.HistorySyncStatus) {
+		applyJobTotals(status, s.store)
+	})
+}
+
+// syncChat takes one chat back as far as opts allows: it imports what the phone
+// already delivered, and keeps asking the phone for older pages until the cap or
+// the time limit is reached, or the phone has nothing more.
+func (s *HistorySyncService) syncChat(ctx context.Context, target repository.HistoryTarget, opts repository.HistorySyncOptions) {
+	chatID := target.ChatID
+	cur := &repository.HistorySyncCurrent{ChatID: chatID, Name: s.store.HistoryChatName(chatID), Phase: "importing"}
+	s.mu.Lock()
+	s.current[chatID] = cur
+	s.mu.Unlock()
+	setPhase := func(phase string, added int) {
+		s.mu.Lock()
+		cur.Phase, cur.Added = phase, added
+		s.mu.Unlock()
+	}
+
+	added, exhausted, timedOut := 0, false, false
+	lastAnchor := ""
+	for round := 0; round < historyMaxRounds && ctx.Err() == nil; round++ {
+		if opts.PerChat > 0 && added >= opts.PerChat {
+			break
+		}
+		batch := historyPageSize
+		if opts.PerChat > 0 && opts.PerChat-added < batch {
+			batch = opts.PerChat - added
+		}
+		n, consumed, reachedSince, err := s.importPending(chatID, batch, opts.SinceMs)
+		if err != nil {
+			s.addError(chatID, err.Error())
+			break
+		}
+		added += n
+		setPhase("importing", added)
+		if reachedSince {
+			break
+		}
+		if consumed > 0 {
+			continue
+		}
+
+		// Nothing staged: ask the phone for the page before our oldest message.
+		anchor, anchorErr := s.store.OldestMessageAnchor(chatID)
+		if anchorErr != nil {
+			break // a chat without a single message cannot be anchored
+		}
+		if opts.SinceMs > 0 && anchor.Timestamp < opts.SinceMs {
+			break
+		}
+		if anchor.MessageID == lastAnchor {
+			exhausted = true // asked from here already and nothing new came back
+			break
+		}
+		lastAnchor = anchor.MessageID
+		if !s.phone.IsConnected() {
+			s.addError(chatID, "WhatsApp disconnected during history sync")
+			s.cancelRun()
+			break
+		}
+		setPhase("asking-phone", added)
+		stagedAt := s.store.HistoryConversationUpdatedAt(chatID)
+		if requestErr := s.phone.RequestOlder(anchor); requestErr != nil {
+			s.addError(chatID, requestErr.Error())
+			break
+		}
+		if !s.waitForHistoryResponse(ctx, chatID, stagedAt, s.responseTimeout) {
+			if ctx.Err() == nil {
+				timedOut = true
+			}
+			break
+		}
+	}
+
+	outcome := ""
+	if exhausted || timedOut {
+		// The phone had nothing (more) for this chat. A later sync skips it
+		// unless asked to retry.
+		_ = s.store.MarkHistoryExhausted(chatID)
+		outcome = "exhausted"
+		if timedOut {
+			outcome = "timeout"
+		}
+	}
+	s.mu.Lock()
+	delete(s.current, chatID)
+	s.mu.Unlock()
+	// Stopped mid-chat: what was imported counts, but the chat is not done and
+	// is picked up again when the job resumes.
+	s.recordChat(chatID, added, ctx.Err() == nil, outcome)
+}
+
+func (s *HistorySyncService) cancelRun() {
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.mu.Unlock()
+}
+
+func (s *HistorySyncService) waitForHistoryResponse(ctx context.Context, chatID string, previousUpdate int64, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if s.store.HistoryConversationUpdatedAt(chatID) > previousUpdate {
 			return true
 		}
-		time.Sleep(400 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(300 * time.Millisecond):
+		}
 	}
 	return false
 }
 
-func (s *HistorySyncService) importPending(chatID string) (int, error) {
-	staged, err := s.store.PendingHistory(chatID, historyPageSize)
+// importPending imports up to limit staged messages of chatID. Messages older
+// than sinceMs are left staged and reachedSince reports that the time limit was
+// hit. consumed is how many staged rows were used up (some may already exist).
+func (s *HistorySyncService) importPending(chatID string, limit int, sinceMs int64) (added, consumed int, reachedSince bool, err error) {
+	staged, err := s.store.PendingHistory(chatID, limit)
 	if err != nil || len(staged) == 0 {
-		return 0, err
+		return 0, 0, false, err
 	}
-	imports := make([]repository.HistoryImportMessage, 0, len(staged))
+	eligible := staged[:0:0]
 	for _, item := range staged {
+		if sinceMs > 0 && item.Timestamp < sinceMs {
+			reachedSince = true
+			continue
+		}
+		eligible = append(eligible, item)
+	}
+	if len(eligible) == 0 {
+		return 0, 0, reachedSince, nil
+	}
+	imports := make([]repository.HistoryImportMessage, 0, len(eligible))
+	for _, item := range eligible {
 		msg, projectErr := s.project(item)
 		if projectErr != nil {
 			s.addError(chatID, fmt.Sprintf("message %s: %v", item.MessageID, projectErr))
@@ -292,7 +625,11 @@ func (s *HistorySyncService) importPending(chatID string) (int, error) {
 			imports = append(imports, repository.HistoryImportMessage{Message: *msg, Raw: item.Raw})
 		}
 	}
-	return s.store.ImportHistoryBatch(chatID, staged, imports)
+	added, err = s.store.ImportHistoryBatch(chatID, eligible, imports)
+	if err != nil {
+		return 0, 0, reachedSince, err
+	}
+	return added, len(eligible), reachedSince, nil
 }
 
 func (s *HistorySyncService) project(item repository.StagedHistoryMessage) (*repository.Message, error) {
@@ -304,7 +641,7 @@ func (s *HistorySyncService) project(item repository.StagedHistoryMessage) (*rep
 	if err != nil {
 		return nil, err
 	}
-	evt, err := s.client.CoreClient().ParseWebMessage(jid, &webMsg)
+	evt, err := s.phone.Parse(jid, &webMsg)
 	if err != nil {
 		return nil, fmt.Errorf("parse web message: %w", err)
 	}
@@ -380,6 +717,7 @@ func (s *HistorySyncService) addError(chatID, message string) {
 func (s *HistorySyncService) updateProgress(update func(*repository.HistorySyncStatus)) {
 	s.mu.Lock()
 	update(&s.status)
+	s.status.ActiveMs = s.elapsedLocked()
 	_ = s.store.SetHistorySyncStatus(s.status)
 	s.mu.Unlock()
 }
@@ -387,11 +725,17 @@ func (s *HistorySyncService) updateProgress(update func(*repository.HistorySyncS
 func (s *HistorySyncService) finish(state string, extra []repository.HistorySyncError) {
 	now := time.Now().UnixMilli()
 	s.mu.Lock()
+	s.status.ActiveMs = s.elapsedLocked()
 	s.status.State = state
 	s.status.Errors = append(s.status.Errors, extra...)
 	s.status.FinishedAt = &now
 	s.status.LastRunAt = &now
 	s.running = false
+	s.current = map[string]*repository.HistorySyncCurrent{}
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel = nil
+	}
 	_ = s.store.SetHistorySyncStatus(s.status)
 	status := s.statusWithPendingLocked()
 	s.mu.Unlock()

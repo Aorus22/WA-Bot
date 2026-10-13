@@ -119,3 +119,81 @@ func projectTestHistory(staged []StagedHistoryMessage) []HistoryImportMessage {
 	}
 	return out
 }
+
+func TestHistoryJobKeepsItsPlace(t *testing.T) {
+	store := newTestMessageStore(t)
+	if err := store.BeginHistoryJob([]string{"c", "a", "b", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	// Chats are visited in the order they were given, not alphabetically.
+	pending, _ := store.PendingHistoryJobChats()
+	if fmt.Sprint(pending) != "[c a b d]" {
+		t.Fatalf("pending: %v", pending)
+	}
+
+	store.RecordHistoryJobChat("c", 30, true, "")
+	store.RecordHistoryJobChat("a", 20, false, "") // stopped midway: not done, but what it added counts
+	store.RecordHistoryJobChat("a", 5, true, "exhausted")
+	store.RecordHistoryJobChat("b", 0, true, "timeout")
+
+	pending, _ = store.PendingHistoryJobChats()
+	if fmt.Sprint(pending) != "[d]" {
+		t.Fatalf("pending after progress: %v", pending)
+	}
+	totals, err := store.HistoryJobTotals()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := HistoryJobTotals{Chats: 4, Done: 3, Added: 55, WithNew: 2, Exhausted: 2, Timeouts: 1}
+	if totals != want {
+		t.Fatalf("totals %+v, want %+v", totals, want)
+	}
+
+	// A new job replaces the old one.
+	store.BeginHistoryJob(nil)
+	if totals, _ := store.HistoryJobTotals(); totals != (HistoryJobTotals{}) {
+		t.Fatalf("old job survived: %+v", totals)
+	}
+}
+
+func TestHistorySyncStatusRoundTripsItsOptionsAndTime(t *testing.T) {
+	store := newTestMessageStore(t)
+	now := int64(1700000000000)
+	in := HistorySyncStatus{State: "interrupted", StartedAt: &now, ChatsSkipped: 7, ActiveMs: 123456,
+		Options: HistorySyncOptions{All: true, IncludeExhausted: true}, Errors: []HistorySyncError{}}
+	if err := store.SetHistorySyncStatus(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := store.GetHistorySyncStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Options.All || !out.Options.IncludeExhausted || out.ChatsSkipped != 7 || out.ActiveMs != 123456 || out.State != "interrupted" {
+		t.Fatalf("round trip: %+v", out)
+	}
+}
+
+func TestFinishedChatCountIsWhatASyncSkips(t *testing.T) {
+	store := newTestMessageStore(t)
+	chatID := "628123@s.whatsapp.net"
+	if err := store.StageHistoryConversation(HistoryConversation{ChatID: chatID, Name: "A"}, []StagedHistoryMessage{
+		{ChatID: chatID, MessageID: "m1", Timestamp: 1, Raw: []byte{1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n := store.FinishedChatCount(); n != 0 {
+		t.Fatalf("nothing is finished yet: %d", n)
+	}
+	store.MarkHistoryExhausted(chatID)
+	// Finished, but messages are still waiting to be imported: a sync does not skip it.
+	if n := store.FinishedChatCount(); n != 0 {
+		t.Fatalf("a chat with staged messages is not skipped: %d", n)
+	}
+	staged, _ := store.PendingHistory(chatID, 10)
+	if _, err := store.ImportHistoryBatch(chatID, staged, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := store.FinishedChatCount(); n != 1 {
+		t.Fatalf("finished chat not counted: %d", n)
+	}
+}

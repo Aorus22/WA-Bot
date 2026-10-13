@@ -339,6 +339,19 @@ func (s *MessageStore) initLocked() error {
 			last_run_at INTEGER
 		)`,
 		`INSERT OR IGNORE INTO history_sync_runs (id, state) VALUES (1, 'idle')`,
+		`CREATE TABLE IF NOT EXISTS history_chat_progress (
+			chat_id TEXT PRIMARY KEY,
+			exhausted_at INTEGER
+		)`,
+		// The chats of the current history sync job and how far each got. This is
+		// what lets an interrupted job continue where it stopped.
+		`CREATE TABLE IF NOT EXISTS history_sync_job_chats (
+			chat_id TEXT PRIMARY KEY,
+			position INTEGER NOT NULL,
+			done INTEGER NOT NULL DEFAULT 0,
+			added INTEGER NOT NULL DEFAULT 0,
+			outcome TEXT NOT NULL DEFAULT ''
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_history_staged_pending ON history_staged_messages(chat_id, imported, timestamp DESC)`,
@@ -357,6 +370,9 @@ func (s *MessageStore) initLocked() error {
 	}
 
 	// Migration: Add is_automatic column if it doesn't exist
+	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN options_json TEXT DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN chats_skipped INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN active_ms INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN is_automatic INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN sender_name TEXT")
 	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN unread INTEGER DEFAULT 0")

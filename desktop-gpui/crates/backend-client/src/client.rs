@@ -561,10 +561,26 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
-    pub async fn start_history_sync(&self) -> Result<HistorySyncStatus> {
+    /// Starts a history sync of the given depth. If one is already running the
+    /// server answers 409 with that sync's status, returned as `AlreadyRunning`.
+    pub async fn start_history_sync(&self, request: &HistorySyncRequest) -> Result<HistorySyncStart> {
         let resp = self
             .client
             .post(format!("{}/history-sync", self.base_url))
+            .json(request)
+            .send()
+            .await?;
+        if resp.status() == StatusCode::CONFLICT {
+            return Ok(HistorySyncStart::AlreadyRunning(resp.json::<HistorySyncStatus>().await?));
+        }
+        Ok(HistorySyncStart::Started(Self::handle_response(resp).await?))
+    }
+
+    /// Stops the running history sync after the batch it is importing.
+    pub async fn cancel_history_sync(&self) -> Result<HistorySyncStatus> {
+        let resp = self
+            .client
+            .post(format!("{}/history-sync/cancel", self.base_url))
             .send()
             .await?;
         Self::handle_response(resp).await

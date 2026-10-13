@@ -157,8 +157,31 @@ export type HistorySyncError = {
 	message: string
 }
 
+export type HistorySyncState = "idle" | "running" | "cancelling" | "completed" | "partial" | "cancelled" | "interrupted" | "failed"
+
+/** How far back a history sync goes. Empty = 50 older messages per chat. */
+export type HistorySyncRequest = {
+	/** Cap on older messages added per chat; 0 = no cap. */
+	perChat?: number
+	/** Only go back this many days; 0 = no limit. */
+	sinceDays?: number
+	/** Everything the phone will give, retrying chats found to be at their start. */
+	all?: boolean
+	/** Also ask again for chats an earlier sync found to be at their start (or that never answered). */
+	retryFinished?: boolean
+	/** Continue the stopped or interrupted sync instead of starting one; the rest is ignored. */
+	resume?: boolean
+}
+
+export type HistorySyncCurrent = {
+	chatId: string
+	name: string
+	added: number
+	phase: "importing" | "asking-phone" | string
+}
+
 export type HistorySyncStatus = {
-	state: "idle" | "running" | "completed" | "partial" | "failed"
+	state: HistorySyncState
 	pendingChats: number
 	pendingMessages: number
 	chatsTotal: number
@@ -168,20 +191,35 @@ export type HistorySyncStatus = {
 	startedAt: number | null
 	finishedAt: number | null
 	lastRunAt: number | null
+	chatsWithNew: number
+	chatsExhausted: number
+	chatsSkipped: number
+	timeouts: number
+	current: HistorySyncCurrent[]
+	/** Chats the next sync skips unless asked to retry them. */
+	chatsFinished: number
+	/** Stopped or interrupted with chats left: "resume" continues where it left off. */
+	resumable: boolean
+	/** How long the sync actually ran, not counting the time it was stopped. */
+	elapsedMs: number
+	/** Rough time left; null until there is enough to go on. */
+	etaMs: number | null
 }
 
 export function normalizeHistorySyncStatus(raw: Partial<HistorySyncStatus> | null | undefined): HistorySyncStatus {
 	const value = raw ?? {}
-	const states: HistorySyncStatus["state"][] = ["idle", "running", "completed", "partial", "failed"]
-	const state = states.includes(value.state as HistorySyncStatus["state"])
-		? value.state as HistorySyncStatus["state"]
-		: "idle"
+	const states: HistorySyncState[] = ["idle", "running", "cancelling", "completed", "partial", "cancelled", "interrupted", "failed"]
+	const state = states.includes(value.state as HistorySyncState) ? value.state as HistorySyncState : "idle"
 	const errors = Array.isArray(value.errors)
 		? value.errors.filter((error): error is HistorySyncError => Boolean(error) && typeof error === "object")
 			.map((error) => ({
 				chatId: typeof error.chatId === "string" ? error.chatId : undefined,
 				message: typeof error.message === "string" ? error.message : "Unknown history sync error",
 			}))
+		: []
+	const current = Array.isArray(value.current)
+		? value.current.filter((c): c is HistorySyncCurrent => Boolean(c) && typeof c === "object" && typeof c.chatId === "string")
+			.map((c) => ({ chatId: c.chatId, name: typeof c.name === "string" ? c.name : "", added: Number(c.added) || 0, phase: String(c.phase ?? "") }))
 		: []
 	return {
 		state,
@@ -194,6 +232,15 @@ export function normalizeHistorySyncStatus(raw: Partial<HistorySyncStatus> | nul
 		startedAt: value.startedAt == null ? null : Number(value.startedAt),
 		finishedAt: value.finishedAt == null ? null : Number(value.finishedAt),
 		lastRunAt: value.lastRunAt == null ? null : Number(value.lastRunAt),
+		chatsWithNew: Number(value.chatsWithNew) || 0,
+		chatsExhausted: Number(value.chatsExhausted) || 0,
+		chatsSkipped: Number(value.chatsSkipped) || 0,
+		timeouts: Number(value.timeouts) || 0,
+		current,
+		chatsFinished: Number(value.chatsFinished) || 0,
+		resumable: value.resumable === true,
+		elapsedMs: Number(value.elapsedMs) || 0,
+		etaMs: value.etaMs == null ? null : Number(value.etaMs),
 	}
 }
 
@@ -466,8 +513,21 @@ class ApiClient {	private baseUrl: string
 		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
 	}
 
-	async startHistorySync(): Promise<HistorySyncStatus> {
-		const raw = await this.request<unknown>("/history-sync", { method: "POST" })
+	async startHistorySync(request: HistorySyncRequest = {}): Promise<HistorySyncStatus> {
+		const raw = await this.request<unknown>("/history-sync", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(request),
+		})
+		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
+	}
+
+	async resumeHistorySync(): Promise<HistorySyncStatus> {
+		return this.startHistorySync({ resume: true })
+	}
+
+	async cancelHistorySync(): Promise<HistorySyncStatus> {
+		const raw = await this.request<unknown>("/history-sync/cancel", { method: "POST" })
 		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
 	}
 

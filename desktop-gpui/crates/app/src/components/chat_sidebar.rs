@@ -19,18 +19,7 @@ impl ChatSidebarComponent {
         Self {
             search_query: String::new(),
             filter_mode: SidebarFilterMode::Active,
-            history_sync: HistorySyncStatus {
-                state: "idle".to_string(),
-                pending_chats: 0,
-                pending_messages: 0,
-                chats_total: 0,
-                chats_processed: 0,
-                messages_added: 0,
-                errors: Vec::new(),
-                started_at: None,
-                finished_at: None,
-                last_run_at: None,
-            },
+            history_sync: HistorySyncStatus::default(),
             is_syncing: false,
             active_chat_id: None,
         }

@@ -99,6 +99,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/chats/{id}/messages/{messageId}/media", chatHandler.GetHistoricalMedia).Methods("GET")
 	api.HandleFunc("/history-sync", historySyncHandler.Start).Methods("POST", "OPTIONS")
 	api.HandleFunc("/history-sync/status", historySyncHandler.Status).Methods("GET")
+	api.HandleFunc("/history-sync/cancel", historySyncHandler.Cancel).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/chats/{chatId}/messages/{id}/delete", msgMgmtHandler.DeleteMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/edit", msgMgmtHandler.EditMessage).Methods("POST", "OPTIONS")
