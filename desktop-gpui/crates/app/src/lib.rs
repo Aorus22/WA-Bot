@@ -21,6 +21,7 @@ pub mod router;
 pub mod state;
 pub mod text_format;
 pub mod theme;
+pub mod tray;
 pub mod views;
 pub mod window_material;
 

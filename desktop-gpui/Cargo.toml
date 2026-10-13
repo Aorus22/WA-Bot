@@ -60,6 +60,9 @@ qrcode = { version = "=0.14.1", default-features = false }
 # Already in the lockfile through gpui; used for OS notifications.
 notify-rust = "=4.18.0"
 zbus = "=5.19.0"
+# System-tray icon (StatusNotifierItem) so a backgrounded app stays visible.
+ksni = { version = "=0.3.6", default-features = false, features = ["blocking", "async-io"] }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
 
 # Local GPUI patches (Wayland backdrop blur). Keep both crates on the same rev.
 # For upstream GPUI, remove this patch block and run cargo check -p wabot

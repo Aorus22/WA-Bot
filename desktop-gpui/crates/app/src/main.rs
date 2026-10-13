@@ -25,23 +25,35 @@ use wabot_settings::DesktopSettings;
 
 fn main() {
     // `--toggle` / `--popover`: resident panel-popover instance (see popover.rs).
+    // A plain launch is resident too: closing its window leaves it in the tray
+    // (see tray.rs), and launching again just brings that instance back up.
     let args: Vec<String> = std::env::args().collect();
     let want_toggle = args.iter().any(|a| a == "--toggle");
     let popover_mode = want_toggle
         || args.iter().any(|a| a == "--popover" || a == "--background");
-    if want_toggle && popover::signal_running() {
-        return;
+    // An explicit backend (`--url`, `--port`) is a development run that must
+    // not be folded into the instance already running.
+    let standalone = args.iter().any(|a| {
+        matches!(a.as_str(), "--url" | "--backend-url" | "--port" | "-p")
+            || a.starts_with("--url=")
+            || a.starts_with("--port=")
+    });
+    if !standalone {
+        let signal = if want_toggle { popover::Signal::Toggle } else { popover::Signal::Open };
+        if popover::signal_running(signal) {
+            return;
+        }
     }
-    let toggle_rx = if popover_mode {
+    let signal_rx = if standalone {
+        None
+    } else {
         match popover::listen() {
             Some(rx) => Some(rx),
             None => {
-                eprintln!("[popover] another instance is already running");
+                eprintln!("[app] another instance is already running");
                 return;
             }
         }
-    } else {
-        None
     };
 
     let _tokio_guard = TOKIO_RT.enter();
@@ -124,9 +136,16 @@ fn main() {
             auth_state.base_url = base_url.clone();
             cx.set_global(auth_state);
 
+            // Tray icon: where a backgrounded app can be reopened or quit from.
+            let tray_rx = if signal_rx.is_some() { wabot_app::tray::spawn() } else { None };
+
             if popover_mode {
                 cx.set_global(popover::PopoverMode);
-                // The resident instance outlives its (hidden) windows.
+            }
+            // The app outlives its windows (popover: hidden; normal: closed to
+            // the tray). Without a tray there would be no way back to a closed
+            // window, so then the last window closing quits as usual.
+            if popover_mode || tray_rx.is_some() {
                 cx.set_quit_mode(gpui::QuitMode::Explicit);
             }
 
@@ -267,37 +286,73 @@ fn main() {
                 }
             };
 
-            if let Some(rx) = toggle_rx {
-                // Resident popover instance: show/hide on every `--toggle`.
-                let open_ui = Rc::new(open_ui);
-                let toggle = {
-                    let open_ui = open_ui.clone();
-                    move |cx: &mut App| {
-                        if popover::is_open(cx) {
-                            popover::close_all(cx);
-                            return;
-                        }
-                        let open_ui = open_ui.clone();
-                        popover::open(
-                            cx,
-                            Rc::new(move |cx, placement| match open_ui(cx, Some(placement)) {
-                                Some(handle) => popover::set_card(cx, handle),
-                                None => popover::close_all(cx),
-                            }),
-                        );
+            let open_ui = Rc::new(open_ui);
+
+            // Popover: show/hide the panel card.
+            let toggle_popover = {
+                let open_ui = open_ui.clone();
+                move |cx: &mut App| {
+                    if popover::is_open(cx) {
+                        popover::close_all(cx);
+                        return;
                     }
-                };
-                if want_toggle {
-                    toggle(cx);
+                    let open_ui = open_ui.clone();
+                    popover::open(
+                        cx,
+                        Rc::new(move |cx, placement| match open_ui(cx, Some(placement)) {
+                            Some(handle) => popover::set_card(cx, handle),
+                            None => popover::close_all(cx),
+                        }),
+                    );
                 }
+            };
+
+            // Bring the app up: the popover card, or the window (raised when it
+            // exists, recreated after it was closed to the tray).
+            let show = {
+                let open_ui = open_ui.clone();
+                let toggle_popover = toggle_popover.clone();
+                move |cx: &mut App, toggle: bool| {
+                    if popover_mode {
+                        if toggle || !popover::is_open(cx) {
+                            toggle_popover(cx);
+                        }
+                    } else if let Some(handle) = cx.windows().first().copied() {
+                        let _ = handle.update(cx, |_, window, _| window.activate_window());
+                    } else {
+                        open_ui(cx, None);
+                    }
+                }
+            };
+
+            if popover_mode {
+                if want_toggle {
+                    toggle_popover(cx);
+                }
+            } else if open_ui(cx, None).is_none() {
+                std::process::exit(1);
+            }
+
+            if let Some(rx) = signal_rx {
+                let show = show.clone();
                 cx.spawn(async move |cx| {
-                    while rx.recv_async().await.is_ok() {
-                        let _ = cx.update(|cx| toggle(cx));
+                    while let Ok(signal) = rx.recv_async().await {
+                        let _ = cx.update(|cx| show(cx, signal == popover::Signal::Toggle));
                     }
                 })
                 .detach();
-            } else if open_ui(cx, None).is_none() {
-                std::process::exit(1);
+            }
+
+            if let Some(rx) = tray_rx {
+                cx.spawn(async move |cx| {
+                    while let Ok(command) = rx.recv_async().await {
+                        let _ = cx.update(|cx| match command {
+                            wabot_app::tray::Command::Open => show(cx, false),
+                            wabot_app::tray::Command::Quit => cx.quit(),
+                        });
+                    }
+                })
+                .detach();
             }
 
             // WebSocket client for live updates (QR codes, auth success, messages)

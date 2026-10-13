@@ -93,4 +93,43 @@ impl ChatView {
         cx.notify();
     }
 
+
+    /// PageUp/PageDown/Home/End scroll the conversation. Returns whether the
+    /// key was consumed.
+    ///
+    /// They act while the composer or nothing in particular has focus; any
+    /// other text field keeps them for its caret. In the composer Home/End stay
+    /// caret keys once there is a draft to move through.
+    pub(crate) fn handle_scroll_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !matches!(key, "pageup" | "pagedown" | "home" | "end")
+            || self.cached_render_messages.is_empty()
+            || self.preview_image_url.is_some()
+            || !cx
+                .try_global::<crate::router::Router>()
+                .is_some_and(|router| router.current_route.is_active("/chat"))
+        {
+            return false;
+        }
+        let composer_focused = self
+            .compose_textarea
+            .as_ref()
+            .is_some_and(|textarea| textarea.read(cx).focus_handle(cx).is_focused(window));
+        if !composer_focused && window.focused(cx).is_some() {
+            return false;
+        }
+        if composer_focused && matches!(key, "home" | "end") && !self.compose_text.is_empty() {
+            return false;
+        }
+
+        let state = &self.messages_list_state;
+        match key {
+            // A little less than a screen, so a line of context carries over.
+            "pageup" => state.scroll_by(-state.viewport_bounds().size.height * 0.9),
+            "pagedown" => state.scroll_by(state.viewport_bounds().size.height * 0.9),
+            "home" => state.scroll_to(ListOffset { item_ix: 0, offset_in_item: px(0.) }),
+            _ => self.scroll_to_bottom(cx),
+        }
+        cx.notify();
+        true
+    }
 }

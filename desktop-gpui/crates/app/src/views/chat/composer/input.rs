@@ -46,7 +46,8 @@ impl ChatView {
         );
 
         // Key bindings (Enter sends, arrows move the caret) run before any key
-        // listener on an element, so the @-list has to intercept them here.
+        // listener on an element, so the @-list and the conversation scroll
+        // keys have to intercept them here.
         let view = cx.entity().downgrade();
         self._mention_key_interceptor = Some(cx.intercept_keystrokes(move |event, window, cx| {
             let key = &event.keystroke;
@@ -70,7 +71,8 @@ impl ChatView {
                     .compose_textarea
                     .as_ref()
                     .is_some_and(|textarea| textarea.read(cx).focus_handle(cx).is_focused(window));
-                focused && this.handle_mention_key(key.key.as_str(), window, cx)
+                (focused && this.handle_mention_key(key.key.as_str(), window, cx))
+                    || this.handle_scroll_key(key.key.as_str(), window, cx)
             });
             if consumed {
                 cx.stop_propagation();

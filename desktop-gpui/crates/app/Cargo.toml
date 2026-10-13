@@ -47,6 +47,8 @@ tempfile = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }
+ksni = { workspace = true }
+image = { workspace = true }
 
 [package.metadata.deb]
 name = "wa-bot"

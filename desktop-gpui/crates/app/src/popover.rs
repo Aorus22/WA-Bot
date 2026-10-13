@@ -53,17 +53,43 @@ fn socket_path() -> PathBuf {
     dir.join("wabot-popover.sock")
 }
 
-/// Ask a running instance to toggle. `true` when one answered.
-pub fn signal_running() -> bool {
+/// What another launch asks the resident instance to do.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Signal {
+    /// `--toggle`: show the popover, or hide it when it is already up.
+    Toggle,
+    /// A plain launch: bring the app to the front.
+    Open,
+}
+
+impl Signal {
+    fn wire(self) -> &'static [u8] {
+        match self {
+            Signal::Toggle => b"toggle\n",
+            Signal::Open => b"open\n",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        match text.trim() {
+            "toggle" => Some(Signal::Toggle),
+            "open" => Some(Signal::Open),
+            _ => None,
+        }
+    }
+}
+
+/// Ask a running instance to act. `true` when one answered.
+pub fn signal_running(signal: Signal) -> bool {
     match UnixStream::connect(socket_path()) {
-        Ok(mut stream) => stream.write_all(b"toggle\n").is_ok(),
+        Ok(mut stream) => stream.write_all(signal.wire()).is_ok(),
         Err(_) => false,
     }
 }
 
-/// Listen for `toggle` requests; one unit message per request.
+/// Listen for requests from later launches.
 /// `None` when another instance already owns the socket.
-pub fn listen() -> Option<flume::Receiver<()>> {
+pub fn listen() -> Option<flume::Receiver<Signal>> {
     let path = socket_path();
     if UnixStream::connect(&path).is_ok() {
         return None;
@@ -82,8 +108,10 @@ pub fn listen() -> Option<flume::Receiver<()>> {
             let Ok(mut stream) = stream else { continue };
             let mut buf = String::new();
             let _ = stream.read_to_string(&mut buf);
-            if buf.trim() == "toggle" && tx.send(()).is_err() {
-                break;
+            if let Some(signal) = Signal::parse(&buf) {
+                if tx.send(signal).is_err() {
+                    break;
+                }
             }
         }
     });

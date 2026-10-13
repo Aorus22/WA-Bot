@@ -497,6 +497,37 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
         }
     }
 
+    // PageUp/PageDown/Home/End scroll the conversation. They act with the
+    // composer or nothing focused; Home/End stay caret keys once there is a
+    // draft. The latest closure sits in a ref so one listener serves every render.
+    const scrollKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
+    scrollKeyRef.current = (e: KeyboardEvent) => {
+        if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+        if (!["PageUp", "PageDown", "Home", "End"].includes(e.key)) return
+        const list = scrollRef.current
+        if (!list || document.querySelector('[role="dialog"]')) return
+        const target = e.target as HTMLElement | null
+        const inField = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || !!target?.isContentEditable
+        if (inField) {
+            if (target !== inputRef.current) return
+            if ((e.key === "Home" || e.key === "End") && inputRef.current.value) return
+        }
+        e.preventDefault()
+        if (e.key === "End") {
+            handleScrollToBottom()
+        } else if (e.key === "Home") {
+            list.scrollTo({ top: 0, behavior: "auto" })
+        } else {
+            const page = list.clientHeight * 0.9
+            list.scrollBy({ top: e.key === "PageUp" ? -page : page, behavior: "smooth" })
+        }
+    }
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => scrollKeyRef.current(e)
+        window.addEventListener("keydown", onKey)
+        return () => window.removeEventListener("keydown", onKey)
+    }, [])
+
     const handleSendMessage = async () => {
         if (!inputMessage.trim() || !chat || sending) return
         const raw = inputMessage.trim()
