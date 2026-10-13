@@ -327,6 +327,7 @@ func InitializeApp() (*App, error) {
 }
 
 func main() {
+	teeOutputToFile()
 	app, err := InitializeApp()
 	if err != nil {
 		panic(err)

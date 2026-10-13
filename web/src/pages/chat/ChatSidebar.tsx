@@ -5,6 +5,7 @@ import { Archive, ChevronLeft, Pin, Search, VolumeX } from "lucide-react"
 import { api, type Chat } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chatStore"
+import { useTypingStore, typistsOf, typingLabel } from "@/stores/typingStore"
 import { toast } from "sonner"
 import { NewGroupDialog, JoinGroupDialog } from "./GroupPanels"
 import { Users, Link as LinkIcon } from "lucide-react"
@@ -68,6 +69,8 @@ export const ChatSidebar = memo(({
     const [joinGroupOpen, setJoinGroupOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [archivedMode, setArchivedMode] = useState(false)
+    const typing = useTypingStore(s => s.typing)
+    useTypingStore(s => s.tick)
     const processedUpdateIds = useRef<Set<string>>(new Set())
 
     useEffect(() => {
@@ -89,6 +92,8 @@ export const ChatSidebar = memo(({
             }
 
             const existingChat = chats.find(c => c.id === chatUpdate.chatId)
+            // My own messages (sent from the phone, say) are never unread.
+            const isIncoming = chatUpdate.status === "received" || (!chatUpdate.status && chatUpdate.lastMsg !== "")
 
             if (!existingChat) {
                 const newChat: Chat = {
@@ -97,7 +102,7 @@ export const ChatSidebar = memo(({
                     avatar: "",
                     lastMsg: chatUpdate.lastMsg,
                     lastTime: chatUpdate.lastTime,
-                    unread: selectedChatId === chatUpdate.chatId ? 0 : 1,
+                    unread: selectedChatId === chatUpdate.chatId || !isIncoming ? 0 : 1,
                     isActive: true,
                     isGroup: chatUpdate.chatId.includes("@g.us"),
                     archived: false,
@@ -107,7 +112,6 @@ export const ChatSidebar = memo(({
                 }
                 upsertChat(newChat)
             } else {
-                const isIncoming = chatUpdate.status === "received" || (!chatUpdate.status && chatUpdate.lastMsg !== "")
                 const currentUnread = Number(existingChat.unread) || 0
                 const newUnread = existingChat.id === selectedChatId ? 0 : (isIncoming ? currentUnread + 1 : currentUnread)
 
@@ -347,7 +351,12 @@ export const ChatSidebar = memo(({
                                         )}>
                                             <span className="inline-flex items-center gap-1 min-w-0">
                                                 {chat.muteMode !== "off" && <VolumeX className="h-3.5 w-3.5 shrink-0" />}
-                                                <span className="truncate">{chat.lastMsg || "Tap to chat"}</span>
+                                                {(() => {
+                                                    const label = typingLabel(typistsOf(typing, chat.id, jid => chats.find(c => c.id === jid)?.name), chat.isGroup)
+                                                    return label
+                                                        ? <span className="truncate font-medium text-emerald-500">{label}</span>
+                                                        : <span className="truncate">{chat.lastMsg || "Tap to chat"}</span>
+                                                })()}
                                             </span>
                                         </p>
                                     </div>

@@ -77,6 +77,7 @@ impl ChatView {
             // WhatsApp Web's mention colour.
             let selection_color: Hsla = if is_dark_bg { rgba(0xffffff40).into() } else { rgba(0x00000026).into() };
             let mention_color: Hsla = if is_dark_bg { rgb(0x06cf9c).into() } else { rgb(0x008069).into() };
+            let link_color: Hsla = if is_dark_bg { rgb(0x53bdeb).into() } else { rgb(0x027eb5).into() };
             let (bubble_bg, bubble_text) = if is_sticker {
                 (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
             } else if let Some(c) = theme.chat {
@@ -114,6 +115,7 @@ impl ChatView {
                 _ => None,
             };
             let has_rich_card = rich_card.is_some();
+            let has_edits = r_msg.msg.extra.as_ref().is_some_and(|extra| !extra.edits.is_empty());
 
             let is_highlighted = this.highlighted_message_id.as_deref() == Some(&r_msg.msg.id);
             let base_bubble_bg: Hsla = bubble_bg.into();
@@ -242,6 +244,21 @@ impl ChatView {
                                 .overflow_hidden()
                                 .relative()
                                 .cursor_pointer()
+                                // The picture has its own menu (copy, save), not the bubble's.
+                                .on_mouse_down(MouseButton::Right, cx.listener({
+                                    let url = click_url.clone();
+                                    move |this, ev: &MouseDownEvent, _, cx| {
+                                        cx.stop_propagation();
+                                        this.context_menu = None;
+                                        this.text_menu = None;
+                                        this.image_menu = Some(ImageMenu {
+                                            file_name: messages::image_menu::image_file_name(&url),
+                                            url: url.clone(),
+                                            position: ev.position,
+                                        });
+                                        cx.notify();
+                                    }
+                                }))
                                 .on_mouse_down(MouseButton::Left, cx.listener({
                                     let u = click_url.clone();
                                     let open_msg = r_msg.msg.clone();
@@ -408,6 +425,17 @@ impl ChatView {
                                         mention_color,
                                     )
                                     .formats(body_formats)
+                                    .link_color(link_color)
+                                    .on_text_menu({
+                                        let view = view.clone();
+                                        move |request, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.context_menu = None;
+                                                this.text_menu = Some(request);
+                                                cx.notify();
+                                            });
+                                        }
+                                    })
                                     .selection_color(selection_color)
                                     .on_click({
                                         let content = content.clone();
@@ -432,6 +460,26 @@ impl ChatView {
                         .justify_end()
                         .items_center()
                         .gap_1()
+                        .children(has_edits.then(|| {
+                            let msg_id = r_msg.msg.id.clone();
+                            div()
+                                .id(SharedString::from(format!("edited-{msg_id}")))
+                                .text_xs()
+                                .cursor_pointer()
+                                .text_color(bubble_text.opacity(0.6))
+                                .hover(|s| s.text_color(bubble_text.opacity(0.9)))
+                                .child("Edited")
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
+                                    cx.stop_propagation();
+                                    this.context_menu = None;
+                                    this.text_menu = None;
+                                    this.edit_history = Some(EditHistoryPopover {
+                                        msg_id: msg_id.clone(),
+                                        position: ev.position,
+                                    });
+                                    cx.notify();
+                                }))
+                        }))
                         .child(
                             div()
                                 .text_xs()

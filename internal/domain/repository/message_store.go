@@ -109,7 +109,18 @@ type LinkPreviewMeta struct {
 
 // MessageExtra carries type-specific metadata for poll/location/contact/
 // view-once/gif/link-preview messages.
+// MessageEdit is one earlier version of an edited message.
+type MessageEdit struct {
+	Content string `json:"content"`
+	// Timestamp is when this version was written, in milliseconds.
+	Timestamp int64 `json:"timestamp"`
+}
+
 type MessageExtra struct {
+	// Edits holds the versions before the current one, oldest first; the
+	// message's content is always the latest. EditedAt is when it was last edited.
+	Edits        []MessageEdit     `json:"edits,omitempty"`
+	EditedAt     int64             `json:"editedAt,omitempty"`
 	Poll         *PollMeta         `json:"poll,omitempty"`
 	Location     *LocationMeta     `json:"location,omitempty"`
 	Contact      *ContactMeta      `json:"contact,omitempty"`
@@ -470,7 +481,7 @@ func decodeMessageMeta(msg *Message, forwarded int, reactionsJSON, extraJSON str
 	}
 	if extraJSON != "" {
 		var extra MessageExtra
-		if json.Unmarshal([]byte(extraJSON), &extra) == nil && (extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0) {
+		if json.Unmarshal([]byte(extraJSON), &extra) == nil && (extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || len(extra.Edits) > 0) {
 			msg.Extra = &extra
 		}
 	}
@@ -1268,6 +1279,72 @@ func (s *MessageStore) UpdateMessageContent(msgID, content string) error {
         `, content, msgID)
 
 	return err
+}
+
+// ApplyEdit makes newContent the message's content and keeps what it replaced
+// in extra.Edits, so the edit history can be shown. It returns the message's
+// extra afterwards, or an error when the message is unknown. Repeating an edit
+// that is already the current content changes nothing.
+func (s *MessageStore) ApplyEdit(msgID, newContent string, editedAt int64) (*MessageExtra, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var content string
+	var timestamp int64
+	var extraJSON sql.NullString
+	if err := s.db.QueryRow(`SELECT content, timestamp, extra_meta FROM messages WHERE id = ?`, msgID).
+		Scan(&content, &timestamp, &extraJSON); err != nil {
+		return nil, err
+	}
+	var extra MessageExtra
+	if extraJSON.Valid && extraJSON.String != "" {
+		_ = json.Unmarshal([]byte(extraJSON.String), &extra)
+	}
+	if content == newContent {
+		return &extra, nil
+	}
+
+	versionAt := timestamp
+	if extra.EditedAt > 0 {
+		versionAt = extra.EditedAt
+	}
+	extra.Edits = append(extra.Edits, MessageEdit{Content: content, Timestamp: versionAt})
+	if editedAt <= 0 {
+		editedAt = time.Now().UnixMilli()
+	}
+	extra.EditedAt = editedAt
+
+	encoded, err := json.Marshal(&extra)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.Exec(`UPDATE messages SET content = ?, extra_meta = ? WHERE id = ?`, newContent, string(encoded), msgID); err != nil {
+		return nil, err
+	}
+	return &extra, nil
+}
+
+// SyncChatPreview puts an edited message's text into its chat's preview line
+// when it is the chat's newest message (an older message's edit leaves the
+// preview alone). It returns the chat id and whether the preview changed.
+func (s *MessageStore) SyncChatPreview(msgID, content string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var chatID string
+	var timestamp int64
+	if err := s.db.QueryRow(`SELECT chat_id, timestamp FROM messages WHERE id = ?`, msgID).Scan(&chatID, &timestamp); err != nil {
+		return "", false
+	}
+	res, err := s.db.Exec(`UPDATE chats SET last_msg = ?, updated_at = ?
+		WHERE last_time = ? AND (id = ? OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?))`,
+		content, time.Now().Unix(), timestamp, chatID, chatID, chatID)
+	if err != nil {
+		return chatID, false
+	}
+	n, _ := res.RowsAffected()
+	return chatID, n > 0
 }
 
 func (s *MessageStore) DeleteMessage(msgID string) error {

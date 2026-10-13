@@ -41,6 +41,14 @@ impl ChatView {
     /// Select a chat, mark as read, and load its messages
     pub fn select_chat(&mut self, chat_id: String, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_chat_id = Some(chat_id.clone());
+        // One-to-one typing indicators only arrive for chats we subscribed to;
+        // groups send them anyway.
+        if !chat_id.ends_with("@g.us") {
+            let (base_url, target) = (Self::compose_base_url(cx), chat_id.clone());
+            TOKIO_RT.spawn(async move {
+                let _ = HttpClient::new(&base_url).subscribe_chat_presence(&target).await;
+            });
+        }
         self.mention_query = None;
         self.group_info = None;
         self.info_sheet_tab = InfoSheetTab::Media;

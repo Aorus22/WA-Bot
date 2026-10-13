@@ -70,9 +70,25 @@ pub struct LinkPreviewMeta {
     pub thumbnail_url: Option<String>,
 }
 
+/// An earlier version of an edited message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageEdit {
+    pub content: String,
+    /// When this version was written, in milliseconds.
+    #[serde(default)]
+    pub timestamp: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageExtra {
+    /// Versions before the current content, oldest first.
+    #[serde(default)]
+    pub edits: Vec<MessageEdit>,
+    /// When the message was last edited, in milliseconds.
+    #[serde(default)]
+    pub edited_at: Option<i64>,
     pub poll: Option<PollMeta>,
     pub location: Option<LocationMeta>,
     pub contact: Option<ContactMeta>,

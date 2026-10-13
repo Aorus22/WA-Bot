@@ -50,6 +50,17 @@ impl ChatView {
         let view = cx.entity().downgrade();
         self._mention_key_interceptor = Some(cx.intercept_keystrokes(move |event, window, cx| {
             let key = &event.keystroke;
+            // Copy for text selected in the conversation. The window's own copy
+            // action only fires with focus inside the root, which a click on a
+            // bubble does not give it.
+            if key.modifiers.secondary() && !key.modifiers.shift && !key.modifiers.alt && key.key == "c" {
+                let selected = gpui_base::TextSelection::selected_text(window, cx);
+                if !selected.trim().is_empty() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(selected.trim().to_string()));
+                    cx.stop_propagation();
+                }
+                return;
+            }
             if key.modifiers.shift || key.modifiers.control || key.modifiers.alt || key.modifiers.platform {
                 return;
             }

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -27,6 +28,12 @@ import ChannelsPage from "@/pages/channels/ChannelsPage"
 import { isDesktop, getWindowState, onWindowStateChange } from "@/lib/desktop-ipc"
 import { cn } from "@/lib/utils"
 
+/** Pages that show WhatsApp data give way to the login until an account is linked. */
+function RequireWhatsApp({ children }: { children: ReactNode }) {
+	const { isLoggedIn } = useAuth()
+	return isLoggedIn === false ? <LoginPage embedded /> : <>{children}</>
+}
+
 function AppRoutes() {
 	const { isLoggedIn } = useAuth()
 
@@ -41,11 +48,11 @@ function AppRoutes() {
 	return (
 		<Routes>
 			<Route element={<AppLayout />}>
-				<Route path="/chat" element={<ChatPage />} />
-				<Route path="/chat/:id" element={<ChatPage />} />
-				<Route path="/status" element={<StatusPage />} />
-				<Route path="/channels" element={<ChannelsPage />} />
-				<Route path="/calls" element={<CallHistoryPage />} />
+				<Route path="/chat" element={<RequireWhatsApp><ChatPage /></RequireWhatsApp>} />
+				<Route path="/chat/:id" element={<RequireWhatsApp><ChatPage /></RequireWhatsApp>} />
+				<Route path="/status" element={<RequireWhatsApp><StatusPage /></RequireWhatsApp>} />
+				<Route path="/channels" element={<RequireWhatsApp><ChannelsPage /></RequireWhatsApp>} />
+				<Route path="/calls" element={<RequireWhatsApp><CallHistoryPage /></RequireWhatsApp>} />
 				<Route path="/cron" element={<CronManagementPage />} />
 				<Route path="/cron/new" element={<CronEditorPage />} />
 				<Route path="/cron/:id" element={<CronEditorPage />} />

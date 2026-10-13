@@ -31,6 +31,16 @@ pub fn sort_asc(mut msgs: Vec<Message>) -> Vec<Message> {
     msgs
 }
 
+/// How long a typing indicator lasts without being renewed.
+pub const TYPING_TTL: std::time::Duration = std::time::Duration::from_secs(6);
+
+#[derive(Debug, Clone)]
+pub struct TypingEntry {
+    pub name: Option<String>,
+    pub audio: bool,
+    pub at: std::time::Instant,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ChatStore {
     pub chats: Vec<Chat>,
@@ -45,6 +55,9 @@ pub struct ChatStore {
     pub chats_version: u64,
     pub messages_by_chat: HashMap<String, ChatMessagesEntry>,
     pub active_chat_id: Option<String>,
+    /// Who is typing where: chat id → sender → entry. Entries go stale after
+    /// [`TYPING_TTL`] unless renewed (WhatsApp repeats "composing" every few seconds).
+    pub typing: HashMap<String, HashMap<String, TypingEntry>>,
     pub peer_presence: HashMap<String, String>, // chat_id -> presence string (e.g. "available", "composing")
     /// Bumped on every message mutation (status, reaction, new/deleted/edited
     /// message) so views can rebuild their render caches even when the chat
@@ -226,6 +239,54 @@ impl ChatStore {
         self.peer_presence.insert(chat_id.to_string(), presence.to_string());
     }
 
+    /// Record (or clear) that `sender` is typing in `chat_id`.
+    pub fn set_typing(&mut self, chat_id: &str, sender: &str, name: Option<String>, composing: bool, audio: bool) {
+        let sender = if sender.is_empty() { chat_id } else { sender };
+        if composing {
+            self.typing.entry(chat_id.to_string()).or_default().insert(
+                sender.to_string(),
+                TypingEntry { name, audio, at: std::time::Instant::now() },
+            );
+        } else if let Some(entries) = self.typing.get_mut(chat_id) {
+            entries.remove(sender);
+            if entries.is_empty() {
+                self.typing.remove(chat_id);
+            }
+        }
+    }
+
+    /// Who is typing in `chat_id` right now: (sender JID, display name, recording audio).
+    pub fn typers(&self, chat_id: &str) -> Vec<(String, String, bool)> {
+        let Some(entries) = self.typing.get(chat_id) else { return Vec::new() };
+        let mut fresh: Vec<_> = entries.iter().filter(|(_, entry)| entry.at.elapsed() < TYPING_TTL).collect();
+        fresh.sort_by_key(|(_, entry)| entry.at);
+        fresh
+            .into_iter()
+            .map(|(sender, entry)| {
+                let name = entry
+                    .name
+                    .clone()
+                    .or_else(|| self.chats.iter().find(|c| c.id == *sender).map(|c| c.name.clone()))
+                    .unwrap_or_else(|| sender.split('@').next().unwrap_or(sender).to_string());
+                (sender.clone(), name, entry.audio)
+            })
+            .collect()
+    }
+
+    /// The chat-list line for a typing chat, like WhatsApp's: "typing…" in a
+    /// one-to-one chat, "Name is typing…" in a group.
+    pub fn typing_label(&self, chat_id: &str, is_group: bool) -> Option<String> {
+        let typers = self.typers(chat_id);
+        let (_, first, audio) = typers.first()?.clone();
+        let verb = if audio { "recording audio…" } else { "typing…" };
+        Some(match (is_group, typers.len()) {
+            (false, _) => verb.to_string(),
+            (true, 1) => format!("{first} is {verb}"),
+            (true, 2) => format!("{first} and {} are {verb}", typers[1].1),
+            (true, n) => format!("{first} and {} others are {verb}", n - 1),
+        })
+    }
+
     pub fn get_presence(&self, chat_id: &str) -> Option<&String> {
         self.peer_presence.get(chat_id)
     }
@@ -265,12 +326,22 @@ impl ChatStore {
                 self.delete_message(chat_id, id);
                 true
             }
-            WsEvent::MessageEdited { chat_id, id, content } => {
-                self.patch_message(chat_id, id, |m| m.content = content.clone());
+            WsEvent::MessageEdited { chat_id, id, content, extra } => {
+                self.patch_message(chat_id, id, |m| {
+                    m.content = content.clone();
+                    if extra.is_some() {
+                        m.extra = extra.clone();
+                    }
+                });
                 true
             }
             WsEvent::MessageReaction { chat_id, id, reactions } => {
                 self.patch_message(chat_id, id, |m| m.reactions = Some(reactions.clone()));
+                true
+            }
+            // A fresh login brings the chats along; the view loads them next render.
+            WsEvent::AuthSuccess { .. } => {
+                self.chats_stale = true;
                 true
             }
             WsEvent::PollUpdate { chat_id, message_id, payload } => {
@@ -287,8 +358,12 @@ impl ChatStore {
             }
             WsEvent::NewMessage(msg) => {
                 let chat_id = msg.chat_id.clone();
-                let mentions_me = msg.extra.as_ref().is_some_and(|extra| extra.mentions_me);
-                let unread_here = !chat_is_visible || self.active_chat_id.as_deref() != Some(&chat_id);
+                // Only what others send is unread; the echo of my own message
+                // (sent from the phone or another device) is not.
+                let incoming = msg.status == "received";
+                let mentions_me = incoming && msg.extra.as_ref().is_some_and(|extra| extra.mentions_me);
+                let unread_here = incoming
+                    && (!chat_is_visible || self.active_chat_id.as_deref() != Some(&chat_id));
                 self.upsert_message(&chat_id, *msg.clone());
 
                 if let Some(pos) = self.chats.iter().position(|c| c.id == chat_id) {
@@ -333,6 +408,10 @@ impl ChatStore {
                 } else {
                     false
                 }
+            }
+            WsEvent::Typing { chat_id, sender, sender_name, composing, audio } => {
+                self.set_typing(chat_id, sender, sender_name.clone(), *composing, *audio);
+                true
             }
             WsEvent::ChatPresence { chat_id, presence } => {
                 self.set_presence(chat_id, presence);
@@ -382,7 +461,7 @@ impl ChatStore {
             WsEvent::ChatsChanged { reason } => {
                 self.chats_loaded = false;
                 self.chats_stale = true;
-                if reason == "names" {
+                if reason == "names" || reason == "history_sync" {
                     // Cached messages carry sender names from before the
                     // change; the open chat is refetched in place, the rest reload.
                     self.names_changed = true;
@@ -421,6 +500,55 @@ mod tests {
             reactions: None,
             extra: None,
         }
+    }
+
+    #[test]
+    fn typing_shows_who_and_expires() {
+        let mut store = ChatStore::new();
+        assert_eq!(store.typing_label("a@s.whatsapp.net", false), None);
+
+        store.set_typing("a@s.whatsapp.net", "a@s.whatsapp.net", None, true, false);
+        assert_eq!(store.typing_label("a@s.whatsapp.net", false).as_deref(), Some("typing…"));
+
+        store.set_typing("g@g.us", "628@s.whatsapp.net", Some("Budi".into()), true, true);
+        assert_eq!(store.typing_label("g@g.us", true).as_deref(), Some("Budi is recording audio…"));
+        store.set_typing("g@g.us", "629@s.whatsapp.net", None, true, false);
+        assert_eq!(store.typing_label("g@g.us", true).as_deref(), Some("Budi and 629 are recording audio…"));
+
+        store.set_typing("g@g.us", "628@s.whatsapp.net", None, false, false);
+        assert_eq!(store.typing_label("g@g.us", true).as_deref(), Some("629 is typing…"));
+
+        // A renewal that never comes: the entry goes stale.
+        store.typing.get_mut("a@s.whatsapp.net").unwrap().values_mut().for_each(|e| {
+            e.at = std::time::Instant::now() - TYPING_TTL - std::time::Duration::from_secs(1);
+        });
+        assert_eq!(store.typing_label("a@s.whatsapp.net", false), None);
+    }
+
+    #[test]
+    fn my_own_messages_never_count_as_unread() {
+        let mut store = ChatStore::new();
+        let mut chat = Chat {
+            id: "chat-1".into(), name: "A".into(), avatar: String::new(), last_msg: String::new(),
+            last_time: 0, unread: 0, has_unread_mention: false, is_active: true, is_group: false,
+            archived: false, pinned_at: None, mute_mode: "off".into(), muted_until: None,
+        };
+        store.set_chats(vec![chat.clone()]);
+
+        let mine = make_test_msg("m1", 1, "hi", "sent");
+        store.handle_ws_event_with_visibility(&WsEvent::NewMessage(Box::new(mine)), false);
+        assert_eq!(store.chats[0].unread, 0, "an echo of my message is not unread");
+
+        let theirs = make_test_msg("m2", 2, "yo", "received");
+        store.handle_ws_event_with_visibility(&WsEvent::NewMessage(Box::new(theirs)), false);
+        assert_eq!(store.chats[0].unread, 1);
+
+        // A chat first seen through my own message starts read.
+        chat.id = "chat-2".into();
+        let mut first = make_test_msg("m3", 3, "hello", "sent");
+        first.chat_id = "chat-2".into();
+        store.handle_ws_event_with_visibility(&WsEvent::NewMessage(Box::new(first)), false);
+        assert_eq!(store.chats.iter().find(|c| c.id == "chat-2").map(|c| c.unread), Some(0));
     }
 
     #[test]

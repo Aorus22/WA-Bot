@@ -98,6 +98,9 @@ pub struct SpawnOptions {
     pub readiness_timeout: Duration,
     /// Max time to wait for the BACKEND_PORT handshake (default 15s).
     pub handshake_timeout: Duration,
+    /// Port to bind instead of an ephemeral one, so a restarted backend comes
+    /// back where the app and its websocket already expect it.
+    pub preferred_port: Option<u16>,
 }
 
 impl SpawnOptions {
@@ -131,7 +134,13 @@ impl SpawnOptions {
             work_dir: None,
             readiness_timeout: Duration::from_secs(15),
             handshake_timeout: Duration::from_secs(15),
+            preferred_port: None,
         })
+    }
+
+    pub fn with_preferred_port(mut self, port: u16) -> Self {
+        self.preferred_port = Some(port);
+        self
     }
 
     pub fn with_allowed_origins(mut self, origins: impl Into<String>) -> Self {
@@ -168,7 +177,7 @@ impl SpawnOptions {
     /// encryption key (wa-bot has none — see module docs).
     pub fn env_vars(&self) -> Vec<(&'static str, String)> {
         vec![
-            ("PORT", ":0".to_string()),
+            ("PORT", format!(":{}", self.preferred_port.unwrap_or(0))),
             ("ALLOWED_ORIGINS", self.allowed_origins.clone()),
             ("DB_PATH", self.db_path.to_string_lossy().to_string()),
             ("MEDIA_PATH", self.media_path.to_string_lossy().to_string()),
@@ -724,6 +733,16 @@ mod tests {
             parse_handshake_line("BACKEND_PORT:1111 BACKEND_PORT:2222"),
             Some(1111)
         );
+    }
+
+    #[test]
+    fn a_preferred_port_replaces_the_ephemeral_one() {
+        let dir = std::env::temp_dir();
+        let opts = SpawnOptions::new("/bin/true", dir.clone(), dir)
+            .unwrap()
+            .with_preferred_port(3090);
+        let port = opts.env_vars().into_iter().find(|(k, _)| *k == "PORT").map(|(_, v)| v);
+        assert_eq!(port.as_deref(), Some(":3090"));
     }
 
     #[test]

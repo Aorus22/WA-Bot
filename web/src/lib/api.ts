@@ -64,7 +64,16 @@ export type LinkPreviewMeta = {
 	thumbnailUrl?: string
 }
 
+export type MessageEdit = {
+	content: string
+	/** When this version was written, in milliseconds. */
+	timestamp: number
+}
+
 export type MessageExtra = {
+	/** Versions before the current content, oldest first. */
+	edits?: MessageEdit[]
+	editedAt?: number
 	poll?: PollMeta
 	location?: LocationMeta
 	contact?: ContactMeta

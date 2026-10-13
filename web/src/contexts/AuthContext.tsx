@@ -112,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				if (message.payload) {
 					setIncomingMessage({
 						chatId: message.payload.chatId,
-						message: { id: message.payload.id, content: message.payload.content, type: "edited" } as any,
+						message: { id: message.payload.id, content: message.payload.content, extra: message.payload.extra, type: "edited" } as any,
 					})
 				}
 				break

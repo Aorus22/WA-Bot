@@ -179,6 +179,11 @@ impl ChatView {
                                     MessageBubbleHelper::decode_content(first_line)
                                 };
 
+                                // Someone typing replaces the preview, in WhatsApp's green.
+                                let typing_label = cx
+                                    .has_global::<ChatStore>()
+                                    .then(|| ChatStore::global(cx).typing_label(&chat.id, chat.is_group))
+                                    .flatten();
                                 let formatted_time = Self::format_chat_time(chat.last_time);
                                 let unread = chat.unread;
 
@@ -332,8 +337,15 @@ impl ChatView {
                                                 div()
                                                     .truncate()
                                                     .text_xs()
-                                                    .text_color(if unread > 0 { text_color } else { muted_text })
-                                                    .child(last_msg_snippet),
+                                                    .text_color(if typing_label.is_some() {
+                                                        Hsla::from(if theme.background.l < 0.5 { rgb(0x25d366) } else { rgb(0x008069) })
+                                                    } else if unread > 0 {
+                                                        text_color
+                                                    } else {
+                                                        muted_text
+                                                    })
+                                                    .when(typing_label.is_some(), |d| d.font_weight(FontWeight::MEDIUM))
+                                                    .child(typing_label.unwrap_or(last_msg_snippet)),
                                             ),
                                     )
                                     // Timestamp & Unread Badge

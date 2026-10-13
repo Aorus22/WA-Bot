@@ -6,7 +6,8 @@ import { QRCodeSVG } from "qrcode.react"
 import { useNavigate } from "react-router-dom"
 import { api } from "@/lib/api"
 
-export function LoginPage() {
+/** `embedded` fills the page area next to the navigation instead of the whole screen. */
+export function LoginPage({ embedded = false }: { embedded?: boolean }) {
 	const [activeTab, setActiveTab] = useState<"qr" | "phone">("qr")
 	const [qrCode, setQrCode] = useState<string | null>(null)
 	const [loading, setLoading] = useState(true)
@@ -34,7 +35,7 @@ export function LoginPage() {
 	}, [fetchQrCode])
 
 	return (
-		<div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+		<div className={embedded ? "h-full overflow-y-auto bg-background flex flex-col items-center justify-center p-4" : "min-h-screen bg-background flex flex-col items-center justify-center p-4"}>
 			<div className="w-full max-w-lg flex flex-col items-center gap-6">
 
 				{/* Header */}
@@ -158,14 +159,16 @@ export function LoginPage() {
 					<span>End-to-end encrypted</span>
 				</div>
 
-				<Button
-					variant="ghost"
-					size="sm"
-					className="text-muted-foreground text-xs"
-					onClick={() => navigate(-1)}
-				>
-					← Back
-				</Button>
+				{!embedded && (
+					<Button
+						variant="ghost"
+						size="sm"
+						className="text-muted-foreground text-xs"
+						onClick={() => navigate(-1)}
+					>
+						← Back
+					</Button>
+				)}
 			</div>
 		</div>
 	)

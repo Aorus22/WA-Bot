@@ -298,6 +298,51 @@ func (s *MessageStore) LatestMessageAnchor(chatID string) (*MessageAnchor, error
 	return &anchor, nil
 }
 
+// ChatAliases returns every id the chat is stored under, LID form first: the
+// phone addresses a migrated one-to-one chat by its LID even though the app
+// lists it under the phone number, and app-state changes only land on the form
+// the phone knows.
+func (s *MessageStore) ChatAliases(chatID string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT id FROM chats WHERE deleted_at IS NULL AND (id = ?
+		OR id IN (SELECT lid FROM lid_mapping WHERE pn_jid = ?)
+		OR id IN (SELECT pn_jid FROM lid_mapping WHERE lid = ?))
+		ORDER BY (id LIKE '%@lid') DESC, id`, chatID, chatID, chatID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// LatestMessageAnchorAmong is the newest message across all of a chat's ids.
+func (s *MessageStore) LatestMessageAnchorAmong(chatIDs []string) (*MessageAnchor, error) {
+	var newest *MessageAnchor
+	var lastErr error = sql.ErrNoRows
+	for _, id := range chatIDs {
+		anchor, err := s.LatestMessageAnchor(id)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if newest == nil || anchor.Timestamp > newest.Timestamp {
+			newest = anchor
+		}
+	}
+	if newest == nil {
+		return nil, lastErr
+	}
+	return newest, nil
+}
+
 func (s *MessageStore) PendingHistoryCounts() (int, int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

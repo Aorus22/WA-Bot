@@ -37,6 +37,7 @@ impl ChatView {
                         .child(self.render_chat_header(cx, pages, active_chat))
                         // Messages History View (Optimized for 60fps scrolling) with visual scrollbar
                         .child(self.render_message_list(cx))
+                        .children(self.render_typing_indicator(cx))
                         // Bottom Compose Container (Banner + Input Field + Integrated Send Icon)
                         .child(self.render_composer(window, cx))
                         // Opening a conversation slides it in (a push, in pages

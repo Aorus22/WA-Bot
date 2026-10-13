@@ -30,6 +30,21 @@ pub struct MessageContextMenu {
     pub reaction_picker: bool,
 }
 
+/// Right-click menu for a picture (copy it, save it).
+#[derive(Clone, Debug)]
+pub struct ImageMenu {
+    pub url: String,
+    pub file_name: String,
+    pub position: Point<Pixels>,
+}
+
+/// The popover listing an edited message's earlier versions.
+#[derive(Clone, Debug)]
+pub struct EditHistoryPopover {
+    pub msg_id: String,
+    pub position: Point<Pixels>,
+}
+
 /// Context menu popup state when right-clicking a sidebar chat item
 #[derive(Clone, Debug)]
 pub struct ChatContextMenu {

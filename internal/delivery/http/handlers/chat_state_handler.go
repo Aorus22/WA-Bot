@@ -36,7 +36,9 @@ func (ch *ChatHandler) PinChat(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	if err := ch.handler.client.SetChatPinned(ctx, jid, body.Pinned); err != nil {
+	if err := applyToTargets(ch.mutationTargets(chatID, jid), func(target waTypes.JID) error {
+		return ch.handler.client.SetChatPinned(ctx, target, body.Pinned)
+	}); err != nil {
 		ch.handler.sendError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -62,24 +64,35 @@ func (ch *ChatHandler) ArchiveChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	targets := ch.mutationTargets(chatID, jid)
+	aliases := make([]string, 0, len(targets))
+	for _, target := range targets {
+		aliases = append(aliases, target.String())
+	}
 	var timestamp time.Time
-	var key *waCommon.MessageKey
-	if anchor, err := ch.handler.msgRepo.LatestMessageAnchor(chatID); err == nil {
+	var anchor *repository.MessageAnchor
+	if found, err := ch.handler.msgRepo.LatestMessageAnchorAmong(aliases); err == nil {
+		anchor = found
 		timestamp = time.UnixMilli(anchor.Timestamp)
-		key = &waCommon.MessageKey{
-			RemoteJID: proto.String(chatID),
-			FromMe:    proto.Bool(anchor.IsFromMe),
-			ID:        proto.String(anchor.MessageID),
-		}
-		if !anchor.IsFromMe && strings.HasSuffix(chatID, "@g.us") && anchor.SenderID != "" {
-			key.Participant = proto.String(anchor.SenderID)
-		}
 	}
 	// App-state conflicts may require a full sync and a recovery snapshot from
 	// the primary device before this mutation can be retried.
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	if err := ch.handler.client.SetChatArchived(ctx, jid, body.Archived, timestamp, key); err != nil {
+	if err := applyToTargets(targets, func(target waTypes.JID) error {
+		var key *waCommon.MessageKey
+		if anchor != nil {
+			key = &waCommon.MessageKey{
+				RemoteJID: proto.String(target.String()),
+				FromMe:    proto.Bool(anchor.IsFromMe),
+				ID:        proto.String(anchor.MessageID),
+			}
+			if !anchor.IsFromMe && target.Server == waTypes.GroupServer && anchor.SenderID != "" {
+				key.Participant = proto.String(anchor.SenderID)
+			}
+		}
+		return ch.handler.client.SetChatArchived(ctx, target, body.Archived, timestamp, key)
+	}); err != nil {
 		ch.handler.sendError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -119,7 +132,9 @@ func (ch *ChatHandler) MuteChat(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	if err := ch.handler.client.SetChatMuted(ctx, jid, muted, duration); err != nil {
+	if err := applyToTargets(ch.mutationTargets(chatID, jid), func(target waTypes.JID) error {
+		return ch.handler.client.SetChatMuted(ctx, target, muted, duration)
+	}); err != nil {
 		ch.handler.sendError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -133,6 +148,42 @@ func (ch *ChatHandler) MuteChat(w http.ResponseWriter, r *http.Request) {
 		state.MutedUntil = &until
 	}
 	ch.commitChatState(w, state)
+}
+
+// mutationTargets lists the JIDs an app-state change must be addressed to: the
+// stored forms of the chat (the phone only honours the one it knows), or just
+// the requested one when nothing is stored under an alias.
+func (ch *ChatHandler) mutationTargets(chatID string, requested waTypes.JID) []waTypes.JID {
+	var targets []waTypes.JID
+	for _, id := range ch.handler.msgRepo.ChatAliases(chatID) {
+		if jid, err := waTypes.ParseJID(id); err == nil {
+			targets = append(targets, jid)
+		}
+	}
+	if len(targets) == 0 {
+		targets = append(targets, requested)
+	}
+	return targets
+}
+
+// applyToTargets runs change for every target and succeeds when at least one
+// was accepted: a stale alias the phone never heard of is not an error.
+func applyToTargets(targets []waTypes.JID, change func(waTypes.JID) error) error {
+	var firstErr error
+	accepted := false
+	for _, jid := range targets {
+		if err := change(jid); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		accepted = true
+	}
+	if accepted {
+		return nil
+	}
+	return firstErr
 }
 
 func (ch *ChatHandler) chatMutationState(w http.ResponseWriter, chatID string) (waTypes.JID, repository.ChatState, bool) {

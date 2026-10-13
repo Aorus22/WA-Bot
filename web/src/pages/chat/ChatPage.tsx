@@ -28,7 +28,11 @@ export function ChatPage() {
 		if (type === "deleted") {
 			useChatStore.getState().deleteMessage(cid, message.id)
 		} else if (type === "edited") {
-			useChatStore.getState().patchMessage(cid, message.id, { content: (message as any).content })
+			const edited = message as any
+			useChatStore.getState().patchMessage(cid, message.id, {
+				content: edited.content,
+				...(edited.extra ? { extra: edited.extra } : {}),
+			})
 		} else {
 			useChatStore.getState().upsertMessage(cid, message)
 		}

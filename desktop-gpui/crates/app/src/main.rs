@@ -347,6 +347,17 @@ fn main() {
                                 needs_refresh = true;
                             }
                         }
+                        // A typing indicator ends by itself when no renewal comes; make
+                        // sure the window redraws then.
+                        if matches!(&event, wabot_backend_client::ws::WsEvent::Typing { composing: true, .. }) {
+                            cx.spawn(async move |cx| {
+                                cx.background_executor()
+                                    .timer(wabot_app::state::chat::TYPING_TTL + std::time::Duration::from_millis(300))
+                                    .await;
+                                let _ = cx.update(|cx| cx.refresh_windows());
+                            })
+                            .detach();
+                        }
                         if needs_refresh {
                             cx.refresh_windows();
                         }

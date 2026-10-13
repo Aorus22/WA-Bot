@@ -45,10 +45,8 @@ impl Render for LoginView {
             .id("login-view")
             .size_full()
             .bg(window_material::glass_fill(theme.background, window_transparency))
-            .when(framed, |s| {
-                s.rounded_bl(px(window_material::WINDOW_CORNER_RADIUS))
-                    .rounded_br(px(window_material::WINDOW_CORNER_RADIUS))
-            })
+            // Sits beside the navigation sidebar, which owns the bottom-left corner.
+            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
             .items_center()
             .p_4()
             // Scrolls when the column is taller than the window (popover,

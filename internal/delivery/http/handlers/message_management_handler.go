@@ -69,15 +69,26 @@ func (mh *MessageManagementHandler) EditMessage(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if mh.handler.msgRepo != nil {
-		mh.handler.msgRepo.UpdateMessageContent(msgID, req.Content)
-	}
-
-	mh.handler.BroadcastMessage("message_edited", map[string]string{
+	payload := map[string]interface{}{
 		"chatId":  chatID,
 		"id":      msgID,
 		"content": req.Content,
-	})
+	}
+	if mh.handler.msgRepo != nil {
+		if extra, err := mh.handler.msgRepo.ApplyEdit(msgID, req.Content, 0); err == nil {
+			payload["extra"] = extra
+			if chat, changed := mh.handler.msgRepo.SyncChatPreview(msgID, req.Content); changed {
+				mh.handler.BroadcastMessage("chat_update", map[string]interface{}{
+					"chatId":  mh.handler.msgRepo.ResolveChatID(chat),
+					"lastMsg": req.Content,
+				})
+			}
+		} else {
+			mh.handler.msgRepo.UpdateMessageContent(msgID, req.Content)
+		}
+	}
+
+	mh.handler.BroadcastMessage("message_edited", payload)
 
 	mh.handler.sendSuccess(w, nil)
 }

@@ -95,6 +95,9 @@ pub struct SettingsView {
     // Account & sync state
     pub history_status: Option<HistorySyncStatus>,
     pub is_syncing_history: bool,
+    /// A loop is already polling the sync status.
+    history_polling: bool,
+    pub is_restarting_backend: bool,
 
     // Asynchronous action states
     pub is_saving_ai: bool,
@@ -170,6 +173,8 @@ impl SettingsView {
 
             history_status: None,
             is_syncing_history: false,
+            history_polling: false,
+            is_restarting_backend: false,
 
             is_saving_ai: false,
             is_saving_tts: false,
@@ -249,14 +254,152 @@ impl SettingsView {
 
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = view_weak.upgrade() {
-                        view.update(cx, |this, _cx| {
+                        view.update(cx, |this, cx| {
                             if let Ok(Ok(status)) = res {
                                 this.is_syncing_history = status.state == "running";
                                 this.history_status = Some(status);
+                                this.watch_history_sync(cx);
                             }
                         });
                     }
                 });
+            }
+        })
+        .detach();
+    }
+
+    /// Restart the local backend, then pick the session back up: the same port
+    /// when it can be reused, a fresh status check, and a chat list reload.
+    pub fn restart_backend(&mut self, cx: &mut Context<Self>) {
+        if self.is_restarting_backend {
+            return;
+        }
+        self.is_restarting_backend = true;
+        cx.notify();
+
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let old_url = base_url.clone();
+                let outcome = TOKIO_RT
+                    .spawn(async move {
+                        let url = crate::backend::restart(&base_url).await?;
+                        // The session reconnects on its own; wait for the API to say so.
+                        let client = HttpClient::new(&url);
+                        let mut status = None;
+                        for _ in 0..30 {
+                            if let Ok(found) = client.get_status().await {
+                                status = Some(found);
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        }
+                        Ok::<_, String>((url, status))
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()));
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    let message = match &outcome {
+                        Ok((url, status)) => {
+                            if cx.has_global::<AuthState>() {
+                                let auth = AuthState::global_mut(cx);
+                                auth.base_url = url.clone();
+                                if let Some(status) = status {
+                                    auth.set_status(if status.is_logged_in {
+                                        AuthStatus::Authenticated
+                                    } else {
+                                        AuthStatus::Unauthenticated
+                                    });
+                                }
+                            }
+                            if cx.has_global::<crate::state::ChatStore>() {
+                                crate::state::ChatStore::global_mut(cx).chats_stale = true;
+                            }
+                            if let Ok(mut saved) = DesktopSettings::load() {
+                                saved.last_backend_url = Some(url.clone());
+                                let _ = saved.save();
+                            }
+                            if *url == old_url {
+                                None
+                            } else {
+                                Some("Backend restarted on a new port; restart the app to reconnect live updates".to_string())
+                            }
+                        }
+                        Err(error) => Some(format!("Backend restart failed: {error}")),
+                    };
+                    match (&outcome, message) {
+                        (Ok(_), None) => toast::success("Backend restarted", cx),
+                        (Ok(_), Some(note)) => toast::info(note, cx),
+                        (Err(_), Some(error)) => toast::error(error, cx),
+                        (Err(_), None) => {}
+                    }
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_restarting_backend = false;
+                            cx.notify();
+                        });
+                    }
+                    cx.refresh_windows();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Follow a running history sync: the status is refetched every couple of
+    /// seconds until it ends, so the card shows progress instead of freezing.
+    fn watch_history_sync(&mut self, cx: &mut Context<Self>) {
+        if self.history_polling || !self.is_syncing_history {
+            return;
+        }
+        self.history_polling = true;
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                loop {
+                    cx_handle.background_executor().timer(std::time::Duration::from_secs(2)).await;
+                    let Some(base_url) = cx_handle.update(|cx: &mut App| {
+                        cx.has_global::<AuthState>().then(|| AuthState::global(cx).base_url.clone())
+                    }) else {
+                        break;
+                    };
+                    let res = TOKIO_RT
+                        .spawn(async move { HttpClient::new(&base_url).get_history_sync_status().await })
+                        .await;
+                    let Ok(Ok(status)) = res else { continue };
+                    let running = status.state == "running";
+                    let alive = cx_handle
+                        .update(|cx: &mut App| {
+                            let Some(view) = this.upgrade() else { return false };
+                            view.update(cx, |this, cx| {
+                                this.is_syncing_history = running;
+                                if !running {
+                                    this.history_polling = false;
+                                    if cx.has_global::<crate::state::ChatStore>() {
+                                        let store = crate::state::ChatStore::global_mut(cx);
+                                        store.chats_stale = true;
+                                        store.names_changed = true;
+                                    }
+                                    toast::success(format!("History sync added {} messages", status.messages_added), cx);
+                                }
+                                this.history_status = Some(status);
+                                cx.notify();
+                            });
+                            true
+                        });
+                    if !alive || !running {
+                        break;
+                    }
+                }
             }
         })
         .detach();
@@ -289,6 +432,7 @@ impl SettingsView {
                                 Ok(Ok(status)) => {
                                     this.is_syncing_history = status.state == "running";
                                     this.history_status = Some(status);
+                                    this.watch_history_sync(cx);
                                     toast::success("History sync started", cx);
                                 }
                                 _ => {
@@ -1479,6 +1623,7 @@ impl Render for SettingsView {
                                                             .text_xs()
                                                             .text_color(muted_text)
                                                             .child(format!("Status: {}", st.state))
+                                                            .children((st.chats_total > 0).then(|| format!("Chats: {}/{}", st.chats_processed, st.chats_total)))
                                                             .child(format!("Staged: {} msgs in {} chats", st.pending_messages, st.pending_chats))
                                                             .child(format!("Added: {}", st.messages_added)),
                                                     )
@@ -1493,7 +1638,11 @@ impl Render for SettingsView {
                                                                 .child(
                                                                     div()
                                                                         .h_full()
-                                                                        .w(px(140.0))
+                                                                        .w(relative(if st.chats_total > 0 {
+                                                                            (st.chats_processed as f32 / st.chats_total as f32).clamp(0.02, 1.0)
+                                                                        } else {
+                                                                            0.05
+                                                                        }))
                                                                         .bg(primary_color),
                                                                 ),
                                                         )
@@ -1501,6 +1650,63 @@ impl Render for SettingsView {
                                                         None
                                                     })
                                             })),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Row 3: restart the local backend
+                                    .child(
+                                        div()
+                                            .px_4()
+                                            .py_4()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap_3()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .gap_0p5()
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(text_color)
+                                                            .child("Backend"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(muted_text)
+                                                            .child("Restart the local WhatsApp backend if messages stop arriving or it stops responding. Your session is kept."),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id("restart-backend")
+                                                    .flex_none()
+                                                    .px_3()
+                                                    .py_1p5()
+                                                    .rounded_md()
+                                                    .bg(tag_bg)
+                                                    .border_1()
+                                                    .border_color(border_color)
+                                                    .when(!self.is_restarting_backend, |d| {
+                                                        d.cursor_pointer().hover(|s| s.bg(secondary_bg))
+                                                    })
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(text_color)
+                                                            .child(if self.is_restarting_backend { "Restarting..." } else { "Restart backend" }),
+                                                    )
+                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                        this.restart_backend(cx);
+                                                    })),
+                                            ),
                                     ),
                             ),
                     )

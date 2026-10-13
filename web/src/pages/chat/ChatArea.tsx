@@ -7,6 +7,7 @@ import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus
 import { api, type Chat, type GroupCache, type GroupParticipantInfo, type Message, type MessageReceipt } from "@/lib/api"
 import { useCall } from "@/contexts/CallContext"
 import { cn } from "@/lib/utils"
+import { useTypingStore, typistsOf } from "@/stores/typingStore"
 import { renderFormattedContent, encodeMarkdown } from "./renderMd"
 import { toast } from "sonner"
 import { ChatInfoSheetModal } from "./ChatInfoSheetModal"
@@ -144,6 +145,8 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
     const [mentionTrigger, setMentionTrigger] = useState<{ start: number; end: number; query: string } | null>(null)
     // Highlighted row of the @-list; the arrow keys move it.
     const [mentionIndex, setMentionIndex] = useState(0)
+    const typingByChat = useTypingStore(s => s.typing)
+    useTypingStore(s => s.tick)
     const [viewedByMessage, setViewedByMessage] = useState<Message | null>(null)
     const [viewedByReceipts, setViewedByReceipts] = useState<MessageReceipt[]>([])
     const [loadingViewedBy, setLoadingViewedBy] = useState(false)
@@ -1033,6 +1036,26 @@ const handleReplyMessage = (message: Message) => {
                     </button>
                 )}
             </div>
+
+            {(() => {
+                const typists = chat ? typistsOf(typingByChat, chat.id, () => undefined) : []
+                if (typists.length === 0 || !chat) return null
+                return (
+                    <div className="px-6 pb-2 pt-1 flex items-end gap-2 shrink-0">
+                        {chat.isGroup && (
+                            <Avatar className="h-7 w-7">
+                                <AvatarImage src={getAvatarUrl(typists[0].sender)} />
+                                <AvatarFallback>{typists[0].name.slice(0, 1).toUpperCase()}</AvatarFallback>
+                            </Avatar>
+                        )}
+                        <div className="flex items-center gap-1.5 rounded-2xl bg-card px-3 py-3 shadow-sm border border-border/40" title={`${typists[0].name} is ${typists[0].audio ? "recording audio" : "typing"}`}>
+                            {[0, 1, 2].map(i => (
+                                <span key={i} className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" style={{ animationDelay: `${i * 180}ms` }} />
+                            ))}
+                        </div>
+                    </div>
+                )
+            })()}
 
             <footer className="p-4 bg-background/80 backdrop-blur-xl border-t border-border/40 z-10">
                 {(replyTo || editingMessage) && (

@@ -14,11 +14,9 @@ use crate::components::motion;
 use crate::state::auth::{AuthState, AuthStatus};
 use crate::theme::manager::{AppThemeExt, ThemeManager};
 use crate::window_material;
-use crate::views::auth::login::LoginView;
 use crate::views::shell::AppShellView;
 
 pub struct RootGateView {
-    login_view: Entity<LoginView>,
     shell_view: Entity<AppShellView>,
     /// Edge of the window the pointer is over, so the cursor and the resize
     /// handle follow it.
@@ -32,7 +30,6 @@ impl RootGateView {
             cx.notify();
         });
         Self {
-            login_view: cx.new(|cx| LoginView::new(cx)),
             shell_view: cx.new(|cx| AppShellView::new(cx)),
             resize_hover: Rc::new(Cell::new(None)),
             _auth_sub: auth_sub,
@@ -111,25 +108,9 @@ impl Render for RootGateView {
                     )
                     .into_any_element()
             }
-            AuthStatus::Unauthenticated => {
-                v_flex()
-                    .size_full()
-                    .child(crate::components::titlebar::AppTitleBar::new())
-                    .child(
-                        motion::rise_in(
-                            div()
-                                .relative()
-                                .flex_1()
-                                .overflow_hidden()
-                                .child(self.login_view.clone()),
-                            "login-in",
-                            motion::BASE_MS + 80,
-                            14.0,
-                        ),
-                    )
-                    .into_any_element()
-            }
-            AuthStatus::Authenticated => {
+            // The shell shows either way: without a linked account its WhatsApp
+            // pages carry the login (see `AppShellView`).
+            AuthStatus::Unauthenticated | AuthStatus::Authenticated => {
                 div()
                     .size_full()
                     .child(self.shell_view.clone())

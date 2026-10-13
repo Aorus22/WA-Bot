@@ -65,6 +65,10 @@ pub struct ChatView {
 
     // Context menu popup on message right click
     pub context_menu: Option<MessageContextMenu>,
+    /// Right-click menu for a link or selected text inside a bubble.
+    pub text_menu: Option<crate::components::mention_text::TextMenuRequest>,
+    pub edit_history: Option<EditHistoryPopover>,
+    pub image_menu: Option<ImageMenu>,
     /// Message being forwarded: (source chat id, message).
     pub forward_msg: Option<(String, Message)>,
     pub forward_selected: HashSet<String>,
@@ -203,6 +207,9 @@ impl ChatView {
             sidebar_animate: false,
 
             context_menu: None,
+            text_menu: None,
+            edit_history: None,
+            image_menu: None,
             forward_msg: None,
             forward_selected: HashSet::new(),
             is_forwarding: false,
@@ -446,6 +453,9 @@ impl Render for ChatView {
             // CONTEXT MENU POPOVER (RIGHT-CLICK ON BUBBLE)
             // ====================================================
             .children(self.render_message_context_menu(window, cx))
+            .children(self.render_text_menu(window, cx))
+            .children(self.render_edit_history(window, cx))
+            .children(self.render_image_menu(window, cx))
             // ====================================================
             // CHAT SIDEBAR CONTEXT MENU POPOVER (RIGHT-CLICK ON CHAT)
             // ====================================================

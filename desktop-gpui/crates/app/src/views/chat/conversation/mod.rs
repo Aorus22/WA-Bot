@@ -6,3 +6,4 @@ mod message_row;
 mod pane;
 mod rich_cards;
 mod scroll;
+mod typing;

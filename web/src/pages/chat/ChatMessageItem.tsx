@@ -310,6 +310,34 @@ export const ChatMessageItem = memo(({
 										<span className="font-bold text-[9px] tracking-wide">BOT</span>
 									</div>
 								)}
+								{(message.extra?.edits?.length ?? 0) > 0 && (
+									<Popover>
+										<PopoverTrigger asChild>
+											<button
+												type="button"
+												onClick={(e) => e.stopPropagation()}
+												className="normal-case hover:underline underline-offset-2"
+											>
+												edited
+											</button>
+										</PopoverTrigger>
+										<PopoverContent className="w-80 max-h-72 overflow-y-auto p-0 normal-case tracking-normal opacity-100 text-foreground" align="end">
+											<div className="px-4 py-2.5 text-sm font-bold">Edit history</div>
+											{[
+												{ label: "Current", content: message.content, at: message.extra?.editedAt ?? message.timestamp },
+												...[...(message.extra?.edits ?? [])].reverse().map((edit) => ({ label: "Earlier", content: edit.content, at: edit.timestamp })),
+											].map((version, index) => (
+												<div key={index} className="flex flex-col gap-1 border-t px-4 py-2.5">
+													<div className="flex justify-between text-xs">
+														<span className={cn("font-semibold", index === 0 ? "text-primary" : "text-muted-foreground")}>{version.label}</span>
+														<span className="text-muted-foreground">{new Date(version.at).toLocaleString()}</span>
+													</div>
+													<p className="whitespace-pre-wrap break-words text-sm">{version.content}</p>
+												</div>
+											))}
+										</PopoverContent>
+									</Popover>
+								)}
 								<span>{formatTime(message.timestamp)}</span>
 								{isMe && (
 									<span className="flex items-center ml-0.5">

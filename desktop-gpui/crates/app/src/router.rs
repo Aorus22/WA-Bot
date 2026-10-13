@@ -40,6 +40,16 @@ impl AppRoute {
         }
     }
 
+    /// Pages that show WhatsApp data (chats, statuses, channels, calls). They
+    /// need a linked account; settings, triggers, cron, webhooks and the docs
+    /// work without one.
+    pub fn needs_whatsapp(&self) -> bool {
+        matches!(
+            self,
+            Self::Chat | Self::ChatDetail(_) | Self::Status | Self::Channels | Self::Calls
+        )
+    }
+
     pub fn is_active(&self, prefix: &str) -> bool {
         self.path_prefix() == prefix
     }
@@ -83,6 +93,16 @@ impl Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_pages_with_whatsapp_data_need_a_linked_account() {
+        for route in [AppRoute::Chat, AppRoute::ChatDetail("a@s.whatsapp.net".into()), AppRoute::Status, AppRoute::Channels, AppRoute::Calls] {
+            assert!(route.needs_whatsapp(), "{route:?}");
+        }
+        for route in [AppRoute::Settings, AppRoute::Triggers, AppRoute::Cron, AppRoute::Webhooks, AppRoute::WebhookLogs, AppRoute::Documentation] {
+            assert!(!route.needs_whatsapp(), "{route:?}");
+        }
+    }
 
     #[test]
     fn test_route_prefixes() {

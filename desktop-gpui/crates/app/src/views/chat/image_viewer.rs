@@ -300,6 +300,18 @@ impl ChatView {
                         .w(px(box_w))
                         .h(px(box_h))
                         .cursor(if zoom > 1.0 + 1e-3 { CursorStyle::OpenHand } else { CursorStyle::Arrow })
+                        .on_mouse_down(MouseButton::Right, cx.listener({
+                            let url = url.clone();
+                            move |this, ev: &MouseDownEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.image_menu = Some(ImageMenu {
+                                    file_name: messages::image_menu::image_file_name(&url),
+                                    url: url.clone(),
+                                    position: ev.position,
+                                });
+                                cx.notify();
+                            }
+                        }))
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
                             if ev.click_count >= 2 {
                                 // Double-click: toggle between fit and 2.5x at the cursor.

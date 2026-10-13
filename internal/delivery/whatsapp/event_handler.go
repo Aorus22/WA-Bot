@@ -646,7 +646,104 @@ func (h *WhatsAppEventHandler) handleContact(evt *events.Contact) {
 	}
 }
 
+// applyEdit stores an edit (keeping the replaced text in the history) and tells
+// the clients. An empty text is ignored: it would wipe the message.
+func (h *WhatsAppEventHandler) applyEdit(chatID, targetID, newContent string, editedAtMs int64) {
+	if h.msgStore == nil || targetID == "" || newContent == "" {
+		fmt.Printf("[EDIT] Nothing to apply (target=%q, text %d bytes)\n", targetID, len(newContent))
+		return
+	}
+	extra, err := h.msgStore.ApplyEdit(targetID, newContent, editedAtMs)
+	if err != nil {
+		fmt.Printf("[EDIT] Failed to apply edit to %s: %v\n", targetID, err)
+		return
+	}
+	fmt.Printf("[EDIT] Applied edit to %s\n", targetID)
+	if chat, changed := h.msgStore.SyncChatPreview(targetID, newContent); changed {
+		h.broadcastChatEvent("chat_update", chat, map[string]interface{}{"lastMsg": newContent})
+	}
+	if h.httpServer != nil {
+		h.httpServer.BroadcastMessage("message_edited", map[string]interface{}{
+			"chatId":  chatID,
+			"id":      targetID,
+			"content": newContent,
+			"extra":   extra,
+		})
+	}
+}
+
+// handleProtocolChange applies "delete for everyone" and message edits. It
+// runs before the duplicate check on purpose: these events refer to a message
+// that is already stored, so they must never be dropped as duplicates.
+func (h *WhatsAppEventHandler) handleProtocolChange(evt *events.Message) bool {
+	chatID := evt.Info.Chat.String()
+	if chatID == "status@broadcast" {
+		return false
+	}
+	if evt.IsEdit || evt.Info.Edit == waTypes.EditAttributeMessageEdit {
+		fmt.Printf("[EDIT] event id=%s chat=%s fromMe=%v isEdit=%v fields=%v\n",
+			evt.Info.ID, chatID, evt.Info.IsFromMe, evt.IsEdit, populatedFields(evt.Message))
+	}
+
+	// Handle Protocol Messages (Edit/Revoke)
+	if evt.Message.GetProtocolMessage() != nil {
+		pm := evt.Message.GetProtocolMessage()
+		fmt.Printf("[PROTO] type=%v target=%s chat=%s fromMe=%v edit=%q isEdit=%v\n",
+			pm.GetType(), pm.GetKey().GetID(), chatID, evt.Info.IsFromMe, evt.Info.Edit, evt.IsEdit)
+		// Clients know a chat by the id the list shows (phone number when the
+		// LID is mapped), so broadcast that one.
+		eventChatID := chatID
+		if h.msgStore != nil {
+			eventChatID = h.msgStore.ResolveChatID(chatID)
+		}
+		if isRevoke(pm) {
+			targetID := pm.GetKey().GetID()
+			if h.msgStore != nil {
+				h.msgStore.DeleteMessage(targetID)
+			}
+			if h.httpServer != nil {
+				h.httpServer.BroadcastMessage("message_deleted", map[string]string{
+					"chatId": eventChatID,
+					"id":     targetID,
+				})
+			}
+			return true
+		} else if isEdit(pm) {
+			h.applyEdit(eventChatID, pm.GetKey().GetID(), editedText(pm.GetEditedMessage()), pm.GetTimestampMS())
+			return true
+		}
+	}
+
+	// Newer clients send an edit as an encrypted payload instead of a
+	// protocol message: decrypt it to get the new text.
+	if secret := evt.Message.GetSecretEncryptedMessage(); secret != nil &&
+		secret.GetSecretEncType() == waProto.SecretEncryptedMessage_MESSAGE_EDIT {
+		eventChatID := chatID
+		if h.msgStore != nil {
+			eventChatID = h.msgStore.ResolveChatID(chatID)
+		}
+		var edited *waProto.Message
+		if h.waClient != nil && h.waClient.CoreClient() != nil {
+			var err error
+			if edited, err = h.waClient.CoreClient().DecryptSecretEncryptedMessage(context.Background(), evt); err != nil {
+				fmt.Printf("[EDIT] Failed to decrypt edit of %s: %v\n", secret.GetTargetMessageKey().GetID(), err)
+				return true
+			}
+		}
+		if editedText(edited) == "" {
+			fmt.Printf("[EDIT] decrypted edit carries no text; fields=%v\n", populatedFields(edited))
+		}
+		h.applyEdit(eventChatID, secret.GetTargetMessageKey().GetID(), editedText(edited), evt.Info.Timestamp.UnixMilli())
+		return true
+	}
+	return false
+}
+
 func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
+	if h.handleProtocolChange(evt) {
+		return
+	}
+
 	// Linked-device echoes may follow messages already persisted by the send
 	// handler. Ignore an existing ID, while allowing messages sent directly
 	// from the paired phone to be stored through the normal chat path.
@@ -684,44 +781,6 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 	// Ignore WhatsApp Status updates
 	if chatID == "status@broadcast" {
 		return
-	}
-
-	// Handle Protocol Messages (Edit/Revoke)
-	if evt.Message.GetProtocolMessage() != nil {
-		pm := evt.Message.GetProtocolMessage()
-		if pm.GetType() == 14 { // REVOKE is 14
-			targetID := pm.GetKey().GetID()
-			if h.msgStore != nil {
-				h.msgStore.DeleteMessage(targetID)
-			}
-			if h.httpServer != nil {
-				h.httpServer.BroadcastMessage("message_deleted", map[string]string{
-					"chatId": chatID,
-					"id":     targetID,
-				})
-			}
-			return
-		} else if pm.GetType() == 16 { // MESSAGE_EDIT is 16
-			targetID := pm.GetKey().GetID()
-			newContent := ""
-			if pm.GetEditedMessage().GetConversation() != "" {
-				newContent = pm.GetEditedMessage().GetConversation()
-			} else if pm.GetEditedMessage().GetExtendedTextMessage() != nil {
-				newContent = pm.GetEditedMessage().GetExtendedTextMessage().GetText()
-			}
-
-			if h.msgStore != nil {
-				h.msgStore.UpdateMessageContent(targetID, newContent)
-			}
-			if h.httpServer != nil {
-				h.httpServer.BroadcastMessage("message_edited", map[string]string{
-					"chatId":  chatID,
-					"id":      targetID,
-					"content": newContent,
-				})
-			}
-			return
-		}
 	}
 
 	senderName := evt.Info.PushName
@@ -1566,14 +1625,19 @@ func (h *WhatsAppEventHandler) handleChatPresence(evt *events.ChatPresence) {
 	if evt.Media == waTypes.ChatPresenceMediaAudio {
 		media = "audio"
 	}
+	senderName := ""
 	if h.msgStore != nil {
 		chatID = h.msgStore.ResolveChatID(chatID)
+		if sender != "" {
+			senderName, _ = h.msgStore.GetContactName(sender)
+		}
 	}
 	h.httpServer.BroadcastMessage("chat_presence", map[string]interface{}{
-		"chatId": chatID,
-		"sender": sender,
-		"state":  state,
-		"media":  media,
+		"chatId":     chatID,
+		"sender":     sender,
+		"senderName": senderName,
+		"state":      state,
+		"media":      media,
 	})
 }
 

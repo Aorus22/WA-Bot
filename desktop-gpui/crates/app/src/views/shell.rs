@@ -13,6 +13,8 @@ use crate::components::titlebar::AppTitleBar;
 use crate::router::{AppRoute, Router};
 use crate::theme::manager::{AppThemeExt, ThemeManager};
 use crate::window_material;
+use crate::state::auth::{AuthState, AuthStatus};
+use crate::views::auth::login::LoginView;
 use crate::views::calls::CallsView;
 use crate::views::channels::ChannelsView;
 use crate::views::chat::ChatView;
@@ -22,6 +24,8 @@ use crate::views::status::StatusView;
 pub struct AppShellView {
     _router_sub: gpui::Subscription,
     _conn_sub: gpui::Subscription,
+    _auth_sub: gpui::Subscription,
+    login_view: Entity<LoginView>,
     settings_view: Entity<SettingsView>,
     chat_view: Entity<ChatView>,
     status_view: Entity<StatusView>,
@@ -38,6 +42,10 @@ impl AppShellView {
         let conn_sub = cx.observe_global::<ConnectionState>(|_this, cx| {
             cx.notify();
         });
+        let auth_sub = cx.observe_global::<AuthState>(|_this, cx| {
+            cx.notify();
+        });
+        let login_view = cx.new(|cx| LoginView::new(cx));
         let settings_view = cx.new(|cx| SettingsView::new(cx));
         let chat_view = cx.new(|cx| ChatView::new(cx));
         let status_view = cx.new(|cx| StatusView::new(cx));
@@ -49,6 +57,8 @@ impl AppShellView {
         Self {
             _router_sub: router_sub,
             _conn_sub: conn_sub,
+            _auth_sub: auth_sub,
+            login_view,
             settings_view,
             chat_view,
             status_view,
@@ -118,6 +128,14 @@ impl AppShellView {
             theme.background,
             ThemeManager::global(cx).window_transparency,
         );
+
+        // Without a linked account the pages that show WhatsApp data give way
+        // to the login; the navigation and the other pages stay usable.
+        let unlinked = cx.has_global::<AuthState>()
+            && AuthState::global(cx).status == AuthStatus::Unauthenticated;
+        if unlinked && route.needs_whatsapp() {
+            return self.login_view.clone().into_any_element();
+        }
 
         match route {
             AppRoute::Chat | AppRoute::ChatDetail(_) => {

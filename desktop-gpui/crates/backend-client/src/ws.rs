@@ -37,6 +37,8 @@ pub enum WsEvent {
         chat_id: String,
         id: String,
         content: String,
+        /// The message's extra after the edit, which carries its edit history.
+        extra: Option<crate::dto::MessageExtra>,
     },
     MessageReaction {
         chat_id: String,
@@ -92,6 +94,15 @@ pub enum WsEvent {
     ChatPresence {
         chat_id: String,
         presence: String,
+    },
+    /// Someone started or stopped typing (or recording) in a chat.
+    Typing {
+        chat_id: String,
+        /// Who is typing; empty when the backend does not say.
+        sender: String,
+        sender_name: Option<String>,
+        composing: bool,
+        audio: bool,
     },
     CallEvent {
         event_type: String,
@@ -195,6 +206,10 @@ impl WsMessage {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
+                extra: self
+                    .payload
+                    .get("extra")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
             },
             "message_reaction" => WsEvent::MessageReaction {
                 chat_id: self
@@ -323,7 +338,24 @@ impl WsMessage {
                     .unwrap_or_default()
                     .to_string(),
             },
-            "chat_presence" | "presence" => WsEvent::ChatPresence {
+            "chat_presence" => WsEvent::Typing {
+                chat_id: self.chat_id_field(),
+                sender: self
+                    .payload
+                    .get("sender")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                sender_name: self
+                    .payload
+                    .get("senderName")
+                    .and_then(|v| v.as_str())
+                    .filter(|name| !name.trim().is_empty())
+                    .map(str::to_string),
+                composing: self.payload.get("state").and_then(|v| v.as_str()) == Some("composing"),
+                audio: self.payload.get("media").and_then(|v| v.as_str()) == Some("audio"),
+            },
+            "presence" => WsEvent::ChatPresence {
                 chat_id: self
                     .payload
                     .get("chatId")
@@ -510,6 +542,40 @@ mod tests {
             "id": "m1", "chatId": "123@g.us"
         })) else { panic!("expected legacy new_message") };
         assert!(!msg.notification_suppressed);
+    }
+
+    #[test]
+    fn message_edited_carries_the_edit_history() {
+        let WsEvent::MessageEdited { content, extra, .. } = event("message_edited", serde_json::json!({
+            "chatId": "a@s.whatsapp.net", "id": "m1", "content": "second",
+            "extra": {"edits": [{"content": "first", "timestamp": 1000}], "editedAt": 2000}
+        })) else { panic!("expected message_edited") };
+        assert_eq!(content, "second");
+        let extra = extra.expect("extra");
+        assert_eq!(extra.edits.len(), 1);
+        assert_eq!(extra.edits[0].content, "first");
+        assert_eq!(extra.edited_at, Some(2000));
+    }
+
+    #[test]
+    fn chat_presence_is_a_typing_event() {
+        assert_eq!(
+            event("chat_presence", serde_json::json!({
+                "chatId": "g@g.us", "sender": "628@s.whatsapp.net", "senderName": "Budi",
+                "state": "composing", "media": "audio"
+            })),
+            WsEvent::Typing {
+                chat_id: "g@g.us".into(),
+                sender: "628@s.whatsapp.net".into(),
+                sender_name: Some("Budi".into()),
+                composing: true,
+                audio: true,
+            }
+        );
+        let WsEvent::Typing { composing, audio, sender_name, .. } = event("chat_presence", serde_json::json!({
+            "chatId": "a@s.whatsapp.net", "state": "paused", "media": "text", "senderName": ""
+        })) else { panic!("expected typing") };
+        assert!(!composing && !audio && sender_name.is_none());
     }
 
     #[test]

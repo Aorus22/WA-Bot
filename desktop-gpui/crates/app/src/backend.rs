@@ -101,6 +101,10 @@ pub fn find_running(last_backend_url: Option<&str>) -> Option<String> {
 /// Start the bundled backend with its data under [`data_dir`]. Returns the API
 /// base URL (`http://127.0.0.1:<port>/api`).
 pub fn start_bundled() -> Result<String, String> {
+    TOKIO_RT.block_on(spawn_bundled(None))
+}
+
+async fn spawn_bundled(preferred_port: Option<u16>) -> Result<String, String> {
     let binary = backend_binary().ok_or_else(|| {
         "wa-bot-backend not found next to the app (set WABOT_BACKEND to its path)".to_string()
     })?;
@@ -109,21 +113,48 @@ pub fn start_bundled() -> Result<String, String> {
     let (db_dir, media_dir) =
         wabot_supervisor::ensure_data_dirs(&base).map_err(|e| format!("data dirs: {e}"))?;
 
-    let opts = SpawnOptions::new(&binary, db_dir, media_dir)
+    let mut opts = SpawnOptions::new(&binary, db_dir, media_dir)
         .map_err(|e| e.to_string())?
         // The Go backend opens `database/*.db` relative to its cwd.
         .with_work_dir(&base);
+    if let Some(port) = preferred_port {
+        opts = opts.with_preferred_port(port);
+    }
 
     let mut supervisor = Supervisor::new();
-    let info = TOKIO_RT
-        .block_on(supervisor.spawn(opts))
-        .map_err(|e| e.to_string())?;
+    let info = supervisor.spawn(opts).await.map_err(|e| e.to_string())?;
     eprintln!(
         "[backend] started {binary:?} on port {} (data: {base:?})",
         info.port
     );
     *BACKEND.lock() = Some(supervisor);
     Ok(format!("{}/api", info.base_url))
+}
+
+/// Restart the backend and return its API base URL, which is `api_url` again
+/// whenever its port could be reused.
+///
+/// A backend this process started is stopped through its supervisor. One it
+/// merely adopted (started by the resident daemon, say) is found by its port
+/// and stopped from here. Either way this process then owns the new one.
+pub async fn restart(api_url: &str) -> Result<String, String> {
+    let port = loopback_port(api_url);
+    let owned = BACKEND.lock().take();
+    if let Some(mut supervisor) = owned {
+        let _ = supervisor.stop(Duration::from_secs(5)).await;
+    }
+    if let Some(port) = port {
+        if TOKIO_RT.spawn_blocking(move || is_wabot_backend(port)).await.unwrap_or(false) {
+            crate::backend_process::stop_listener(port, Duration::from_secs(5), move || is_wabot_backend(port)).await?;
+        }
+    }
+
+    match spawn_bundled(port).await {
+        Ok(url) => Ok(url),
+        // The port can linger for a moment; any free one beats staying down.
+        Err(_) if port.is_some() => spawn_bundled(None).await,
+        Err(e) => Err(e),
+    }
 }
 
 /// Stop the backend this process started, if any.

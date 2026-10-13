@@ -590,6 +590,8 @@ impl ChatView {
                 None
             } else {
                 Some(wabot_backend_client::dto::MessageExtra {
+                    edits: Vec::new(),
+                    edited_at: None,
                     poll: None,
                     location: None,
                     contact: None,
