@@ -6,12 +6,12 @@ impl ChatView {
             return;
         }
 
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Type a message..."));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Type a message"));
         // Enter sends and Shift+Enter inserts a newline, as in WhatsApp Web.
         // Markdown mode flips that: plain Enter is a newline, Ctrl+Enter sends.
         let textarea = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Type a message...")
+                .placeholder("Type a message")
                 .submit_on_enter(true)
         });
 
@@ -142,7 +142,7 @@ impl ChatView {
         } else if self.is_md_mode {
             "Write markdown..."
         } else {
-            "Type a message..."
+            "Type a message"
         }
     }
 

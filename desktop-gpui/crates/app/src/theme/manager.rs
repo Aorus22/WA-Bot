@@ -3,7 +3,8 @@
 use gpui::{App, BorrowAppContext, Global, Hsla, Window};
 use gpui_component::{Theme, ThemeMode as GpuiThemeMode};
 use wabot_settings::{
-    DesktopSettings, MAX_WINDOW_TRANSPARENCY, ThemeMode as SettingsThemeMode,
+    DesktopSettings, MAX_FONT_SCALE, MAX_WINDOW_TRANSPARENCY, MIN_FONT_SCALE,
+    ThemeMode as SettingsThemeMode,
 };
 
 use super::color::parse_hex_hsla;
@@ -89,6 +90,10 @@ pub struct ThemeManager {
     pub mode: SettingsThemeMode,
     pub window_transparency: u8,
     pub window_blur_enabled: bool,
+    /// Interface text scale in percent (drives the window's rem size).
+    pub ui_font_scale: u8,
+    /// Extra scale in percent for text inside message bubbles.
+    pub chat_font_scale: u8,
     pub tokens: ActiveTokens,
     /// The desktop (GTK) palette, when the user's GTK config provides one.
     pub gtk_preset: Option<ThemePreset>,
@@ -115,6 +120,8 @@ impl ThemeManager {
             mode: settings.theme_mode,
             window_transparency: settings.window_transparency.min(MAX_WINDOW_TRANSPARENCY),
             window_blur_enabled: settings.window_blur_enabled,
+            ui_font_scale: settings.ui_font_scale.clamp(MIN_FONT_SCALE, MAX_FONT_SCALE),
+            chat_font_scale: settings.chat_font_scale.clamp(MIN_FONT_SCALE, MAX_FONT_SCALE),
             tokens,
             gtk_preset,
             gtk_key: gtk::current_key(),
@@ -157,6 +164,7 @@ impl ThemeManager {
                 GpuiThemeMode::Light
             };
             Theme::change(gpui_mode, window, cx);
+            self.sync_font_size(cx);
 
             // Persist to DesktopSettings
             if let Ok(mut settings) = DesktopSettings::load() {
@@ -178,6 +186,7 @@ impl ThemeManager {
             GpuiThemeMode::Light
         };
         Theme::change(gpui_mode, window, cx);
+        self.sync_font_size(cx);
 
         if let Ok(mut settings) = DesktopSettings::load() {
             settings.theme_mode = mode;
@@ -185,6 +194,64 @@ impl ThemeManager {
         }
 
         cx.refresh_windows();
+    }
+
+    /// Push the interface scale into gpui-component's theme, whose `font_size`
+    /// becomes the window's rem size (16px at 100%). Loading a theme resets it,
+    /// so this runs after every `Theme::change`.
+    pub fn sync_font_size(&self, cx: &mut App) {
+        Theme::global_mut(cx).font_size = gpui::px(16.0 * self.ui_font_scale as f32 / 100.0);
+    }
+
+    fn change_ui_font_scale(&mut self, value: u8, persist: bool, cx: &mut App) {
+        let value = value.clamp(MIN_FONT_SCALE, MAX_FONT_SCALE);
+        let changed = self.ui_font_scale != value;
+        self.ui_font_scale = value;
+
+        if persist {
+            if let Ok(mut settings) = DesktopSettings::load() {
+                settings.ui_font_scale = value;
+                let _ = settings.save();
+            }
+        }
+
+        if changed {
+            self.sync_font_size(cx);
+            cx.refresh_windows();
+        }
+    }
+
+    fn change_chat_font_scale(&mut self, value: u8, persist: bool, cx: &mut App) {
+        let value = value.clamp(MIN_FONT_SCALE, MAX_FONT_SCALE);
+        let changed = self.chat_font_scale != value;
+        self.chat_font_scale = value;
+
+        if persist {
+            if let Ok(mut settings) = DesktopSettings::load() {
+                settings.chat_font_scale = value;
+                let _ = settings.save();
+            }
+        }
+
+        if changed {
+            cx.refresh_windows();
+        }
+    }
+
+    pub fn preview_ui_font_scale(value: u8, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| this.change_ui_font_scale(value, false, cx));
+    }
+
+    pub fn apply_ui_font_scale(value: u8, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| this.change_ui_font_scale(value, true, cx));
+    }
+
+    pub fn preview_chat_font_scale(value: u8, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| this.change_chat_font_scale(value, false, cx));
+    }
+
+    pub fn apply_chat_font_scale(value: u8, cx: &mut App) {
+        cx.update_global::<Self, _>(|this, cx| this.change_chat_font_scale(value, true, cx));
     }
 
     fn change_window_transparency(&mut self, value: u8, persist: bool, cx: &mut App) {
@@ -272,6 +339,19 @@ impl ThemeManager {
         });
     }
 }
+
+/// Sizes text relative to the window's rem size, scaled by the chat text
+/// setting (`scale` in percent). `base_rem`/`line_rem` are the Tailwind values,
+/// e.g. `0.875`/`1.25` for `text_sm`.
+pub trait ChatTextExt: gpui::Styled + Sized {
+    fn chat_text(self, base_rem: f32, line_rem: f32, scale: u8) -> Self {
+        let scale = scale as f32 / 100.0;
+        self.text_size(gpui::rems(base_rem * scale))
+            .line_height(gpui::rems(line_rem * scale))
+    }
+}
+
+impl<T: gpui::Styled> ChatTextExt for T {}
 
 /// Helper extension trait on `App` and `Context` for convenient token access.
 pub trait AppThemeExt {

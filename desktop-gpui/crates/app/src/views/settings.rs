@@ -38,7 +38,7 @@ use wabot_backend_client::ClientError;
 use super::history_media;
 use super::history_sync::{self, SyncDepth};
 use wabot_settings::{
-    ChatLayout, DesktopSettings, MAX_WINDOW_TRANSPARENCY, ThemeMode as SettingsThemeMode,
+    ChatLayout, DesktopSettings, MAX_FONT_SCALE, MAX_WINDOW_TRANSPARENCY, MIN_FONT_SCALE, ThemeMode as SettingsThemeMode,
 };
 
 use crate::components::connection_banner::{ConnectionState, ConnectionStatus};
@@ -79,6 +79,10 @@ pub struct SettingsView {
     pub show_theme_mode_picker: bool,
     window_transparency_slider: Entity<SliderState>,
     _window_transparency_subscription: Subscription,
+    ui_font_scale_slider: Entity<SliderState>,
+    _ui_font_scale_subscription: Subscription,
+    chat_font_scale_slider: Entity<SliderState>,
+    _chat_font_scale_subscription: Subscription,
     settings_scroll_handle: ScrollHandle,
 
     // Backend settings
@@ -159,6 +163,52 @@ impl SettingsView {
             },
         );
 
+        let (initial_ui_scale, initial_chat_scale) = {
+            let mgr = ThemeManager::global(cx);
+            (mgr.ui_font_scale as f32, mgr.chat_font_scale as f32)
+        };
+        let scale_slider = |cx: &mut Context<Self>, initial: f32| {
+            cx.new(|_| {
+                SliderState::new()
+                    .min(MIN_FONT_SCALE as f32)
+                    .max(MAX_FONT_SCALE as f32)
+                    .step(5.0)
+                    .default_value(initial)
+            })
+        };
+        let ui_font_scale_slider = scale_slider(cx, initial_ui_scale);
+        let ui_font_scale_subscription = cx.subscribe(
+            &ui_font_scale_slider,
+            |_: &mut Self,
+             _: Entity<SliderState>,
+             event: &SliderEvent,
+             cx: &mut Context<Self>| match event {
+                SliderEvent::Change(SliderValue::Single(value)) => {
+                    ThemeManager::preview_ui_font_scale(value.round() as u8, cx);
+                }
+                SliderEvent::Release(SliderValue::Single(value)) => {
+                    ThemeManager::apply_ui_font_scale(value.round() as u8, cx);
+                }
+                _ => {}
+            },
+        );
+        let chat_font_scale_slider = scale_slider(cx, initial_chat_scale);
+        let chat_font_scale_subscription = cx.subscribe(
+            &chat_font_scale_slider,
+            |_: &mut Self,
+             _: Entity<SliderState>,
+             event: &SliderEvent,
+             cx: &mut Context<Self>| match event {
+                SliderEvent::Change(SliderValue::Single(value)) => {
+                    ThemeManager::preview_chat_font_scale(value.round() as u8, cx);
+                }
+                SliderEvent::Release(SliderValue::Single(value)) => {
+                    ThemeManager::apply_chat_font_scale(value.round() as u8, cx);
+                }
+                _ => {}
+            },
+        );
+
         // Load initial theme mode filter from settings
         let theme_mode_filter = if let Ok(settings) = DesktopSettings::load() {
             match settings.theme_mode {
@@ -175,6 +225,10 @@ impl SettingsView {
             show_theme_mode_picker: false,
             window_transparency_slider,
             _window_transparency_subscription: transparency_subscription,
+            ui_font_scale_slider,
+            _ui_font_scale_subscription: ui_font_scale_subscription,
+            chat_font_scale_slider,
+            _chat_font_scale_subscription: chat_font_scale_subscription,
             settings_scroll_handle: ScrollHandle::new(),
 
             settings_loaded: false,
@@ -1665,6 +1719,8 @@ impl Render for SettingsView {
         let theme_mgr = ThemeManager::global(cx);
         let active_preset_name = theme_mgr.active_preset.name.clone();
         let window_transparency = theme_mgr.window_transparency;
+        let ui_font_scale = theme_mgr.ui_font_scale;
+        let chat_font_scale = theme_mgr.chat_font_scale;
         let window_blur_enabled = theme_mgr.window_blur_enabled;
 
         // Filter theme presets
@@ -1947,6 +2003,102 @@ impl Render for SettingsView {
                                                                 Slider::new(&self.window_transparency_slider)
                                                                     .flex_1(),
                                                             ),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Interface text scale.
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                h_flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(text_color)
+                                                                    .child("Interface text size"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .child("Scales menus, lists, headers and settings"),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        h_flex()
+                                                            .w(px(280.0))
+                                                            .items_center()
+                                                            .gap_3()
+                                                            .child(
+                                                                div()
+                                                                    .w(px(42.0))
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .text_align(TextAlign::Right)
+                                                                    .child(format!("{ui_font_scale}%")),
+                                                            )
+                                                            .child(Slider::new(&self.ui_font_scale_slider).flex_1()),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    // Message bubble text scale.
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                h_flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(text_color)
+                                                                    .child("Chat text size"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .child("Scales the text inside message bubbles only"),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        h_flex()
+                                                            .w(px(280.0))
+                                                            .items_center()
+                                                            .gap_3()
+                                                            .child(
+                                                                div()
+                                                                    .w(px(42.0))
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .text_align(TextAlign::Right)
+                                                                    .child(format!("{chat_font_scale}%")),
+                                                            )
+                                                            .child(Slider::new(&self.chat_font_scale_slider).flex_1()),
                                                     ),
                                             ),
                                     )

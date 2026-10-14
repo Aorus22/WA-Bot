@@ -87,11 +87,19 @@ fn default_theme_preset() -> String {
 
 pub const DEFAULT_WINDOW_TRANSPARENCY: u8 = 28;
 pub const MAX_WINDOW_TRANSPARENCY: u8 = 100;
+/// Text scale in percent; 100 is the normal size.
+pub const DEFAULT_FONT_SCALE: u8 = 100;
+pub const MIN_FONT_SCALE: u8 = 75;
+pub const MAX_FONT_SCALE: u8 = 150;
 const LEGACY_MAX_WINDOW_TRANSPARENCY: u8 = 70;
 const SETTINGS_SCHEMA_VERSION: u8 = 1;
 
 fn default_window_transparency() -> u8 {
     DEFAULT_WINDOW_TRANSPARENCY
+}
+
+fn default_font_scale() -> u8 {
+    DEFAULT_FONT_SCALE
 }
 
 fn default_window_blur_enabled() -> bool {
@@ -137,6 +145,12 @@ pub struct DesktopSettings {
     /// Whether to request the compositor's default backdrop blur.
     #[serde(default = "default_window_blur_enabled")]
     pub window_blur_enabled: bool,
+    /// Scale of the interface text in percent (`MIN_FONT_SCALE`..=`MAX_FONT_SCALE`).
+    #[serde(default = "default_font_scale")]
+    pub ui_font_scale: u8,
+    /// Scale of the text inside message bubbles, on top of the interface scale.
+    #[serde(default = "default_font_scale")]
+    pub chat_font_scale: u8,
     /// Whether incoming messages raise an OS notification.
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
@@ -161,6 +175,8 @@ impl Default for DesktopSettings {
             settings_version: SETTINGS_SCHEMA_VERSION,
             window_transparency: default_window_transparency(),
             window_blur_enabled: default_window_blur_enabled(),
+            ui_font_scale: default_font_scale(),
+            chat_font_scale: default_font_scale(),
             notifications_enabled: default_notifications_enabled(),
             format_messages: default_format_messages(),
             custom_base: None,
@@ -239,6 +255,8 @@ impl DesktopSettings {
             self.settings_version = SETTINGS_SCHEMA_VERSION;
         }
         self.window_transparency = self.window_transparency.min(MAX_WINDOW_TRANSPARENCY);
+        self.ui_font_scale = self.ui_font_scale.clamp(MIN_FONT_SCALE, MAX_FONT_SCALE);
+        self.chat_font_scale = self.chat_font_scale.clamp(MIN_FONT_SCALE, MAX_FONT_SCALE);
         // Relative backend overrides are meaningless across cwd changes.
         if let Some(p) = &self.backend_path_override {
             if !p.is_absolute() {

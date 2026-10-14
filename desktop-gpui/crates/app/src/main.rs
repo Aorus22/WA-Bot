@@ -115,6 +115,7 @@ fn main() {
                 gpui_component::ThemeMode::Light
             };
             gpui_component::Theme::change(gpui_mode, None, cx);
+            ThemeManager::global(cx).clone().sync_font_size(cx);
 
             // Toasts appear top-center like the web app's
             // `<Toaster position="top-center" />` (sonner).

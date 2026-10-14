@@ -10,6 +10,7 @@ impl ChatView {
         is_group_chat: bool,
     ) -> AnyElement {
         let theme = *cx.app_theme();
+        let chat_scale = ThemeManager::global(cx).chat_font_scale;
         let primary_color = theme.primary;
         let muted_text = theme.muted_foreground;
         let base_url = if cx.has_global::<AuthState>() {
@@ -206,14 +207,14 @@ impl ChatView {
                             }))
                             .child(
                                 div()
-                                    .text_xs()
+                                    .chat_text(0.75, 1.0, chat_scale)
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(primary_color)
                                     .child(q_sender),
                             )
                             .child(
                                 div()
-                                    .text_xs()
+                                    .chat_text(0.75, 1.0, chat_scale)
                                     .text_color(muted_text)
                                     .overflow_hidden()
                                     .child(
@@ -294,7 +295,7 @@ impl ChatView {
                                     .bg(rgba(0x00000099))
                                     .child(
                                         div()
-                                            .text_xs()
+                                            .chat_text(0.75, 1.0, chat_scale)
                                             .text_color(rgb(0xffffff))
                                             .child(time_str.clone()),
                                     )
@@ -393,7 +394,7 @@ impl ChatView {
                     if !content.is_empty() && !is_media_placeholder {
                         Some(
                             div()
-                                .text_sm()
+                                .chat_text(0.875, 1.25, chat_scale)
                                 .text_color(bubble_text)
                                 .child({
                                     let view = cx.entity();
@@ -466,7 +467,7 @@ impl ChatView {
                             let msg_id = r_msg.msg.id.clone();
                             div()
                                 .id(SharedString::from(format!("edited-{msg_id}")))
-                                .text_xs()
+                                .chat_text(0.75, 1.0, chat_scale)
                                 .cursor_pointer()
                                 .text_color(bubble_text.opacity(0.6))
                                 .hover(|s| s.text_color(bubble_text.opacity(0.9)))
@@ -484,7 +485,7 @@ impl ChatView {
                         }))
                         .child(
                             div()
-                                .text_xs()
+                                .chat_text(0.75, 1.0, chat_scale)
                                 .text_color(bubble_text.opacity(0.6))
                                 .child(time_str),
                         )
@@ -552,7 +553,7 @@ impl ChatView {
                                     .border_1()
                                     .border_color(theme.border.opacity(0.5))
                                     .bg(if is_dark_bg { rgba(0xffffff1a) } else { rgba(0x0000000d) })
-                                    .text_size(px(12.0))
+                                    .chat_text(0.75, 1.0, chat_scale)
                                     .hover(|s| s.bg(if is_dark_bg { rgba(0xffffff33) } else { rgba(0x0000001a) }))
                                     .child(h_flex()
                                         .items_center()
@@ -560,7 +561,7 @@ impl ChatView {
                                         .child(r.emoji.clone())
                                         .children(if count_label.is_empty() { None } else { Some(
                                             div()
-                                                .text_size(px(10.0))
+                                                .chat_text(0.625, 0.875, chat_scale)
                                                 .font_weight(FontWeight::BOLD)
                                                 .opacity(0.7)
                                                 .child(count_label),
@@ -607,7 +608,7 @@ impl ChatView {
                     .children(if is_first_in_sequence {
                         Some(
                             div()
-                                .text_xs()
+                                .chat_text(0.75, 1.0, chat_scale)
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(sender_color)
                                 .ml_1()

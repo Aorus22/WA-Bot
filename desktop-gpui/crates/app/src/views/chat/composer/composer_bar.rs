@@ -9,7 +9,6 @@ impl ChatView {
     ) -> impl IntoElement {
         let theme = *cx.app_theme();
         let border_color = theme.border;
-        let bg_color = theme.background;
         let card_bg = theme.card;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
@@ -23,11 +22,9 @@ impl ChatView {
         };
         let compose_rows = self.compose_text.split('\n').count().clamp(1, 6);
         let compose_textarea_height = px(compose_rows as f32 * 20.0 + 12.0);
+        // No bar behind the pill: it floats over the chat, as in WhatsApp Web.
         v_flex()
             .relative()
-            .border_t_1()
-            .border_color(border_color.opacity(0.4))
-            .bg(bg_color)
             .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
             // Reply Preview Banner
             .children(if let Some(ref r_msg) = self.reply_to {
@@ -260,60 +257,39 @@ impl ChatView {
                         .into_any_element()
                 })
             })
-            // Input Row matching Web
-            .child(
+            // Input row in WhatsApp Web's style: one pill holding the attach and
+            // emoji buttons, the field, and mic (empty) or send (has text).
+            .child({
+                let has_text = !self.compose_text.trim().is_empty() || self.pending_attachment.is_some();
+                let emoji_open = matches!(self.attach_panel, AttachPanel::Emoji | AttachPanel::Sticker);
+                let attach_open = self.attach_panel == AttachPanel::Menu;
+                let icon_button = |id: &'static str, active: bool| {
+                    div()
+                        .id(id)
+                        .p_2()
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .flex_shrink_0()
+                        .cursor_pointer()
+                        .bg(if active { primary_color.opacity(0.15) } else { rgba(0x00000000).into() })
+                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                };
                 h_flex()
                     .p_3()
-                    .items_center()
-                    .gap_2()
-                    // Plus / Attachment icon
-                    .child(
-                        div()
-                            .id("btn-attach")
-                            .p_2()
-                            .rounded_full()
-                            .cursor_pointer()
-                            .bg(if self.attach_panel.is_open() {
-                                primary_color.opacity(0.15)
-                            } else {
-                                rgba(0x00000000).into()
-                            })
-                            .hover(|s| s.bg(theme.muted.opacity(0.65)))
-                            .tooltip(move |window, cx| {
-                                Tooltip::new("Attach").build(window, cx)
-                            })
-                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                this.toggle_attach_panel(cx);
-                            }))
-                            .child(svg().data(PLUS_SVG).size(px(18.0)).text_color(
-                                if self.attach_panel.is_open() { primary_color } else { muted_text }
-                            )),
-                    )
-                    // Mic icon
-                    .child(
-                        div()
-                            .id("btn-mic")
-                            .p_2()
-                            .rounded_full()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme.muted.opacity(0.65)))
-                            .tooltip(move |window, cx| {
-                                Tooltip::new("Voice message").build(window, cx)
-                            })
-                            .child(svg().data(MIC_SVG).size(px(18.0)).text_color(muted_text)),
-                    )
-                    // Text Input Field with Integrated Send Button
                     .child(
                         h_flex()
                             .flex_1()
-                            .px_4()
-                            .py_2()
-                            .rounded_2xl()
+                            .min_w(px(0.0))
+                            .px_2()
+                            .py_1()
+                            .rounded_3xl()
                             .border_1()
                             .border_color(border_color.opacity(0.2))
                             .bg(theme.muted.opacity(0.5))
                             .items_center()
-                            .gap_2()
+                            .gap_1()
                             .cursor_text()
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                 this.focus_composer(window, cx);
@@ -329,60 +305,71 @@ impl ChatView {
                                     }
                                 }
                             }))
+                            // Attach: media, poll, location, contact...
+                            .child(
+                                icon_button("btn-attach", attach_open)
+                                    .tooltip(move |window, cx| Tooltip::new("Attach").build(window, cx))
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.toggle_attach_panel(cx);
+                                    }))
+                                    .child(svg().data(PAPERCLIP_SVG).size(px(20.0)).text_color(
+                                        if attach_open { primary_color } else { muted_text }
+                                    )),
+                            )
+                            // Emoji and stickers
+                            .child(
+                                icon_button("btn-emoji", emoji_open)
+                                    .tooltip(move |window, cx| Tooltip::new("Emoji and stickers").build(window, cx))
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        if matches!(this.attach_panel, AttachPanel::Emoji | AttachPanel::Sticker) {
+                                            this.close_attach_panel(cx);
+                                        } else {
+                                            this.open_emoji_panel(cx);
+                                        }
+                                    }))
+                                    .child(svg().data(STICKER_SVG).size(px(20.0)).text_color(
+                                        if emoji_open { primary_color } else { muted_text }
+                                    )),
+                            )
                             .child({
                                 let state = self.compose_textarea.as_ref().expect("composer textarea initialized");
                                 let view = cx.entity();
-                                Textarea::new(state)
-                                    .on_paste(move |item, _window, cx| {
-                                        view.update(cx, |this, cx| this.stage_clipboard_image(item, cx))
-                                    })
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .w_full()
-                                    .h(compose_textarea_height)
-                                    .max_h(px(150.0))
-                                    .text_sm()
-                                    .text_color(text_color)
-                                    .into_any_element()
+                                div().flex_1().min_w(px(0.0)).px_1().child(
+                                    Textarea::new(state)
+                                        .on_paste(move |item, _window, cx| {
+                                            view.update(cx, |this, cx| this.stage_clipboard_image(item, cx))
+                                        })
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .w_full()
+                                        .h(compose_textarea_height)
+                                        .max_h(px(150.0))
+                                        .text_sm()
+                                        .text_color(text_color)
+                                        .into_any_element(),
+                                )
                             })
-                            // Send Button: Integrated inside input bar on the right
-                            .child({
-                                let has_text = !self.compose_text.trim().is_empty() || self.pending_attachment.is_some();
-                                div()
-                                    .id("btn-send")
-                                    .cursor_pointer()
-                                    .p_1p5()
-                                    .rounded_xl()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .flex_shrink_0()
-                                    .bg(if has_text { primary_color } else { rgba(0x00000000).into() })
-                                    .hover(|h| {
-                                        if has_text {
-                                            h.opacity(0.85)
-                                        } else {
-                                            h.bg(theme.muted.opacity(0.5))
-                                        }
-                                    })
-                                    .tooltip(move |window, cx| {
-                                        Tooltip::new("Send message").build(window, cx)
-                                    })
-                                    .child(
-                                        svg()
-                                            .data(SEND_SVG)
-                                            .size(px(16.0))
-                                            .text_color(if has_text {
-                                                theme.primary_foreground
-                                            } else {
-                                                muted_text.opacity(0.6)
-                                            }),
-                                    )
+                            // Send once there is something to send, mic otherwise.
+                            .child(if has_text {
+                                icon_button("btn-send", false)
+                                    .bg(primary_color)
+                                    .hover(|h| h.opacity(0.85))
+                                    .tooltip(move |window, cx| Tooltip::new("Send message").build(window, cx))
+                                    .child(svg().data(SEND_SVG).size(px(18.0)).text_color(theme.primary_foreground))
                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                        cx.stop_propagation();
                                         this.send_current_message(window, cx);
                                     }))
+                                    .into_any_element()
+                            } else {
+                                icon_button("btn-mic", false)
+                                    .tooltip(move |window, cx| Tooltip::new("Voice message").build(window, cx))
+                                    .child(svg().data(MIC_SVG).size(px(20.0)).text_color(muted_text))
+                                    .into_any_element()
                             }),
-                    ),
-            )
+                    )
+            })
     }
 }

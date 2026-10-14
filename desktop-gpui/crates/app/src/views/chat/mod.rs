@@ -36,7 +36,7 @@ use crate::views::viewer_math::{
 use crate::state::auth::AuthState;
 use crate::state::call::CallManager;
 use crate::state::chat::ChatStore;
-use crate::theme::manager::{ActiveTokens, AppThemeExt, ThemeManager};
+use crate::theme::manager::{ActiveTokens, AppThemeExt, ChatTextExt, ThemeManager};
 use crate::window_material;
 use crate::TOKIO_RT;
 

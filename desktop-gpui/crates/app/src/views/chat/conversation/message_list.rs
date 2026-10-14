@@ -11,6 +11,19 @@ impl ChatView {
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         let is_loading_messages = self.is_loading_messages;
+        // Row heights are cached; a text size change makes them stale, so
+        // re-measure every row (the splice keeps the scroll anchor).
+        let scales = {
+            let mgr = ThemeManager::global(cx);
+            (mgr.ui_font_scale, mgr.chat_font_scale)
+        };
+        if scales != self.measured_text_scale {
+            self.measured_text_scale = scales;
+            let count = self.messages_list_state.item_count();
+            if count > 0 {
+                self.messages_list_state.splice(0..count, count);
+            }
+        }
         div()
             .flex_1()
             .relative()

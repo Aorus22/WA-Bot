@@ -48,6 +48,8 @@ pub struct ChatView {
     // Scroll handles for visual scrollbars (uniform_list and virtual list)
     pub chat_list_scroll_handle: UniformListScrollHandle,
     pub messages_list_state: ListState,
+    /// Text scales (interface, chat) the list's cached row heights were measured at.
+    pub measured_text_scale: (u8, u8),
     /// Messages that just arrived live (id -> arrival). They play a short
     /// entrance; history, scroll-back and chat switches never do.
     pub(crate) fresh_msgs: std::collections::HashMap<String, std::time::Instant>,
@@ -198,6 +200,7 @@ impl ChatView {
                 state.set_follow_mode(FollowMode::Tail);
                 state
             },
+            measured_text_scale: (100, 100),
             fresh_msgs: std::collections::HashMap::new(),
 
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
