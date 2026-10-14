@@ -190,6 +190,28 @@ func OpenSQLite(opts SQLiteOptions) (*SQLiteStore, error) {
 // Path is the absolute path of the database file.
 func (s *SQLiteStore) Path() string { return s.path }
 
+// DatabaseSize is the size of the database in bytes: the pages SQLite has
+// allocated, free ones included, as the file occupies them on disk. The
+// account is ignored; a store of this kind is one file.
+func (s *SQLiteStore) DatabaseSize(ctx context.Context, _ string) (int64, error) {
+	if s.isClosed() {
+		return 0, ErrStoreClosed
+	}
+	return sqliteSize(ctx, s.db)
+}
+
+// sqliteSize is page_count x page_size of the database behind db.
+func sqliteSize(ctx context.Context, db *sql.DB) (int64, error) {
+	var pages, pageSize int64
+	if err := db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pages); err != nil {
+		return 0, mapErr(err)
+	}
+	if err := db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageSize); err != nil {
+		return 0, mapErr(err)
+	}
+	return pages * pageSize, nil
+}
+
 func (s *SQLiteStore) migrate() error {
 	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`); err != nil {

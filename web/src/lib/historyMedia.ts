@@ -1,4 +1,4 @@
-import type { HistoryMediaKind, HistoryMediaStatus } from './api'
+import type { HistoryMediaKind, HistoryMediaStatus, StorageUsage } from './api'
 
 /** The kinds of media a download can be limited to. Video and documents are big, so they are off by default. */
 export const MEDIA_KINDS = [
@@ -42,11 +42,26 @@ export function formatBytes(bytes: number): string {
 /** Share of the files handled (downloaded, gone or failed), 0..1. */
 export function mediaProgress(st: HistoryMediaStatus): { done: number; unavailable: number; failed: number } {
 	if (st.total <= 0) return { done: 0, unavailable: 0, failed: 0 }
-	return { done: st.done / st.total, unavailable: st.unavailable / st.total, failed: st.failed / st.total }
+	// Media the phone does not have either is "gone" too: the grey part of the bar.
+	return { done: st.done / st.total, unavailable: (st.unavailable + st.missing) / st.total, failed: st.failed / st.total }
+}
+
+/** How many files of the chosen kinds a download would try; expired ones count only when the phone is asked. */
+export function filesToDownload(st: HistoryMediaStatus | null, kinds: readonly HistoryMediaKind[], askPhone: boolean): number {
+	return kinds.reduce((sum, kind) => sum + (st?.available[kind] ?? 0) + (askPhone ? (st?.expired[kind] ?? 0) : 0), 0)
+}
+
+/** "Chats 62.4 MB · Media 540 MB" from the sizes of the two databases; null when neither is known. */
+export function usageText(usage: StorageUsage | null): string | null {
+	if (!usage) return null
+	const parts: string[] = []
+	if (usage.chatBytes != null) parts.push(`Chats ${formatBytes(usage.chatBytes)}`)
+	if (usage.mediaBytes != null) parts.push(`Media ${formatBytes(usage.mediaBytes)}`)
+	return parts.length > 0 ? parts.join(' · ') : null
 }
 
 export function mediaHeadline(st: HistoryMediaStatus): string {
-	const handled = st.done + st.unavailable + st.failed
+	const handled = st.done + st.unavailable + st.failed + st.missing
 	const parts = [mediaStateLabel(st.state)]
 	if (st.total > 0) parts.push(`${handled} of ${st.total} files (${Math.round((handled / st.total) * 100)}%)`)
 	return parts.join(' · ')
@@ -54,7 +69,9 @@ export function mediaHeadline(st: HistoryMediaStatus): string {
 
 export function mediaResultText(st: HistoryMediaStatus): string {
 	const parts = [`Downloaded ${st.done} files (${formatBytes(st.bytes)})`]
+	if (st.recovered > 0) parts.push(`${st.recovered} recovered from your phone`)
 	if (st.unavailable > 0) parts.push(`${st.unavailable} no longer on WhatsApp's servers`)
+	if (st.missing > 0) parts.push(`${st.missing} not on your phone either`)
 	if (st.failed > 0) parts.push(`${st.failed} failed`)
 	return parts.join(' · ')
 }

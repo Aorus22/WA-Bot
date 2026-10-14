@@ -19,6 +19,9 @@ type historyMediaRequest struct {
 	Types []string `json:"types"`
 	// RetryUnavailable also tries media an earlier download found to be gone.
 	RetryUnavailable bool `json:"retryUnavailable"`
+	// AskPhone asks the phone to upload media again when WhatsApp's servers no
+	// longer have it.
+	AskPhone bool `json:"askPhone"`
 	// Resume continues the stopped or interrupted download instead of starting
 	// one; the other fields are then ignored.
 	Resume bool `json:"resume"`
@@ -43,7 +46,7 @@ func (h *HistoryMediaHandler) Start(w http.ResponseWriter, r *http.Request) {
 	if req.Resume {
 		status, err = h.handler.historyMedia.Resume()
 	} else {
-		status, err = h.handler.historyMedia.Start(repository.HistoryMediaOptions{Types: req.Types, RetryUnavailable: req.RetryUnavailable})
+		status, err = h.handler.historyMedia.Start(repository.HistoryMediaOptions{Types: req.Types, RetryUnavailable: req.RetryUnavailable, AskPhone: req.AskPhone})
 	}
 	switch {
 	case err == nil:

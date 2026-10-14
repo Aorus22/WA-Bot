@@ -586,6 +586,18 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
+    // --- Storage ---
+
+    /// The sizes of the account's chat database and media database.
+    pub async fn get_storage_usage(&self) -> Result<StorageUsage> {
+        let resp = self
+            .client
+            .get(format!("{}/storage/usage", self.base_url))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
     // --- History media ---
 
     pub async fn get_history_media_status(&self) -> Result<HistoryMediaStatus> {

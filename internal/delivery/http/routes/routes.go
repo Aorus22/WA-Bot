@@ -51,6 +51,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	chatHandler := handlers.NewChatHandler(r.handler)
 	historySyncHandler := handlers.NewHistorySyncHandler(r.handler)
 	historyMediaHandler := handlers.NewHistoryMediaHandler(r.handler)
+	storageUsageHandler := handlers.NewStorageUsageHandler(r.handler)
 	triggerHandler := handlers.NewTriggerHandler(r.handler)
 
 	// Type assertion needed because handler interface doesn't match concrete type directly in struct initialization
@@ -102,6 +103,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/history-media", historyMediaHandler.Start).Methods("POST", "OPTIONS")
 	api.HandleFunc("/history-media/status", historyMediaHandler.Status).Methods("GET")
 	api.HandleFunc("/history-media/cancel", historyMediaHandler.Cancel).Methods("POST", "OPTIONS")
+	api.HandleFunc("/storage/usage", storageUsageHandler.Get).Methods("GET")
 
 	api.HandleFunc("/chats/{chatId}/messages/{id}/delete", msgMgmtHandler.DeleteMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/edit", msgMgmtHandler.EditMessage).Methods("POST", "OPTIONS")

@@ -49,6 +49,7 @@ type WhatsAppEventHandler struct {
 	luaService   LuaService
 	aiClient     *ai.AIClient
 	historySync  *HistorySyncService
+	mediaRetries *MediaRetryHub
 	settingsRepo repository.SettingsRepository
 }
 
@@ -101,8 +102,18 @@ func (h *WhatsAppEventHandler) SetHistorySyncService(service *HistorySyncService
 	h.historySync = service
 }
 
+// SetMediaRetryHub is where the phone's answers to "upload this media again"
+// requests are passed on to.
+func (h *WhatsAppEventHandler) SetMediaRetryHub(hub *MediaRetryHub) {
+	h.mediaRetries = hub
+}
+
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 	switch v := evt.(type) {
+	case *events.MediaRetry:
+		if h.mediaRetries != nil {
+			h.mediaRetries.Deliver(v)
+		}
 	case *events.PairSuccess:
 		// Must run synchronously: the account data dir has to be bound before
 		// the first history sync / messages of the new account are stored.

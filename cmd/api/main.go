@@ -166,7 +166,9 @@ func InitializeApp() (*App, error) {
 	historySyncService.SetBroadcaster(httpServer)
 	httpServer.SetHistorySync(historySyncService)
 	eventHandler.SetHistorySyncService(historySyncService)
-	historyMediaService := whatsapp.NewHistoryMediaService(waClient, msgStore, storageRepo)
+	mediaRetries := whatsapp.NewMediaRetryHub()
+	eventHandler.SetMediaRetryHub(mediaRetries)
+	historyMediaService := whatsapp.NewHistoryMediaService(waClient, msgStore, storageRepo, mediaRetries)
 	historyMediaService.SetBroadcaster(httpServer)
 	httpServer.SetHistoryMedia(historyMediaService)
 

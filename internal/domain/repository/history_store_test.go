@@ -222,7 +222,10 @@ func TestHistoryMediaSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	avail := store.AvailableHistoryMedia()
+	avail, expired := store.AvailableHistoryMedia()
+	if expired["image"] != 0 {
+		t.Fatalf("nothing is expired yet: %v", expired)
+	}
 	if avail["image"] != 2 || avail["audio"] != 2 || avail["video"] != 1 || avail["document"] != 1 || avail["sticker"] != 0 {
 		t.Fatalf("available: %v", avail)
 	}
@@ -257,14 +260,87 @@ func TestHistoryMediaSelection(t *testing.T) {
 	if n := store.CountHistoryMedia(HistoryMediaOptions{Types: opts.Types, RetryUnavailable: true}, 2); n != 3 {
 		t.Fatalf("retrying unavailable: %d", n)
 	}
-	if u, f := store.HistoryMediaFailures(1); u != 1 || f != 1 {
-		t.Fatalf("failures: %d %d", u, f)
+	if u, f, m := store.HistoryMediaFailures(1); u != 1 || f != 1 || m != 0 {
+		t.Fatalf("failures: %d %d %d", u, f, m)
 	}
 
 	if err := store.HistoryMediaDownloaded("m3", "/media/history/m3.jpg"); err != nil {
 		t.Fatal(err)
 	}
-	if u, f := store.HistoryMediaFailures(1); u != 1 || f != 0 {
+	if u, f, _ := store.HistoryMediaFailures(1); u != 1 || f != 0 {
 		t.Fatalf("a download clears its failure: %d %d", u, f)
+	}
+}
+
+func TestDatabaseSizeGrowsWithMessages(t *testing.T) {
+	store := newTestMessageStore(t)
+	before, err := store.DatabaseSize()
+	if err != nil || before <= 0 {
+		t.Fatalf("an empty database still has pages: %d %v", before, err)
+	}
+	chatID := "628123@s.whatsapp.net"
+	var staged []StagedHistoryMessage
+	for i := 0; i < 200; i++ {
+		staged = append(staged, StagedHistoryMessage{ChatID: chatID, MessageID: fmt.Sprintf("m%d", i), Timestamp: int64(i), Raw: make([]byte, 4096)})
+	}
+	if err := store.StageHistoryConversation(HistoryConversation{ChatID: chatID}, staged); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := store.DatabaseSize()
+	if after <= before {
+		t.Fatalf("size did not grow with 800 KB of staged history: %d -> %d", before, after)
+	}
+}
+
+func TestHistoryMediaSelectionWithThePhone(t *testing.T) {
+	store := newTestMessageStore(t)
+	chatID := "628123@s.whatsapp.net"
+	var imports []HistoryImportMessage
+	for i, id := range []string{"new", "gone", "lost"} {
+		imports = append(imports, HistoryImportMessage{
+			Message: Message{ID: id, ChatID: chatID, From: chatID, To: "me", Content: "x", Timestamp: int64(100 + i), Status: "received", Type: "image",
+				MediaURL: fmt.Sprintf("/chats/%s/messages/%s/media", chatID, id)},
+			Raw: []byte(id),
+		})
+	}
+	if _, err := store.ImportHistoryBatch(chatID, nil, imports); err != nil {
+		t.Fatal(err)
+	}
+	store.MarkHistoryMedia("gone", "unavailable", "404", 1) // the servers no longer have it
+	store.MarkHistoryMedia("lost", "missing", "phone", 1)   // the phone does not have it either
+
+	plain := HistoryMediaOptions{Types: []string{"image"}}
+	phone := HistoryMediaOptions{Types: []string{"image"}, AskPhone: true}
+	retry := HistoryMediaOptions{Types: []string{"image"}, RetryUnavailable: true}
+	// A later job (id 2): only the new file, unless the phone is asked, which
+	// also takes up what the servers lost; what the phone lacks needs a retry.
+	if n := store.CountHistoryMedia(plain, 2); n != 1 {
+		t.Fatalf("plain: %d", n)
+	}
+	if n := store.CountHistoryMedia(phone, 2); n != 2 {
+		t.Fatalf("asking the phone: %d", n)
+	}
+	if n := store.CountHistoryMedia(retry, 2); n != 3 {
+		t.Fatalf("retrying: %d", n)
+	}
+
+	available, expired := store.AvailableHistoryMedia()
+	if available["image"] != 1 || expired["image"] != 1 {
+		t.Fatalf("on offer: available %v expired %v (what the phone lacks is in neither)", available, expired)
+	}
+	if u, f, m := store.HistoryMediaFailures(1); u != 1 || f != 0 || m != 1 {
+		t.Fatalf("failures: %d %d %d", u, f, m)
+	}
+
+	// Forgetting the "no answer" failures makes them to do again.
+	store.MarkHistoryMedia("new", "failed", "the phone did not answer", 2)
+	if n := store.CountHistoryMedia(plain, 2); n != 0 {
+		t.Fatalf("a failure is left alone within its job: %d", n)
+	}
+	if err := store.ForgetHistoryMediaFailures(2, "the phone did not answer"); err != nil {
+		t.Fatal(err)
+	}
+	if n := store.CountHistoryMedia(plain, 2); n != 1 {
+		t.Fatalf("after forgetting: %d", n)
 	}
 }

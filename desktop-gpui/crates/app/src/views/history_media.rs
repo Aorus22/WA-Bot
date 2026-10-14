@@ -1,7 +1,7 @@
 //! What the "Chat media" section shows: the kinds of media a download can be
 //! limited to and the plain-language reading of its progress.
 
-use wabot_backend_client::dto::HistoryMediaStatus;
+use wabot_backend_client::dto::{HistoryMediaStatus, StorageUsage};
 
 use super::history_sync::format_duration;
 
@@ -70,14 +70,29 @@ pub fn progress_shares(st: &HistoryMediaStatus) -> (f32, f32, f32) {
         return (0.0, 0.0, 0.0);
     }
     let share = |n: u64| (n as f32 / st.total as f32).clamp(0.0, 1.0);
-    (share(st.done), share(st.unavailable), share(st.failed))
+    // Media the phone does not have either is "gone" too: the grey part of the bar.
+    (share(st.done), share(st.unavailable + st.missing), share(st.failed))
+}
+
+/// "Chats 62.4 MB · Media 540 MB" from the sizes of the two databases; `None`
+/// when neither is known.
+pub fn usage_text(usage: Option<&StorageUsage>) -> Option<String> {
+    let usage = usage?;
+    let mut parts = Vec::new();
+    if let Some(bytes) = usage.chat_bytes {
+        parts.push(format!("Chats {}", format_bytes(bytes)));
+    }
+    if let Some(bytes) = usage.media_bytes {
+        parts.push(format!("Media {}", format_bytes(bytes)));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// "Downloading · 130 of 9800 files (1%)".
 pub fn headline(st: &HistoryMediaStatus) -> String {
     let mut parts = vec![state_label(&st.state).to_string()];
     if st.total > 0 {
-        let handled = st.done + st.unavailable + st.failed;
+        let handled = st.done + st.unavailable + st.failed + st.missing;
         parts.push(format!("{handled} of {} files ({}%)", st.total, (handled * 100 + st.total / 2) / st.total));
     }
     parts.join(" · ")
@@ -103,8 +118,14 @@ pub fn timing_text(st: &HistoryMediaStatus) -> Option<String> {
 
 pub fn result_text(st: &HistoryMediaStatus) -> String {
     let mut parts = vec![format!("Downloaded {} files ({})", st.done, format_bytes(st.bytes))];
+    if st.recovered > 0 {
+        parts.push(format!("{} recovered from your phone", st.recovered));
+    }
     if st.unavailable > 0 {
         parts.push(format!("{} no longer on WhatsApp's servers", st.unavailable));
+    }
+    if st.missing > 0 {
+        parts.push(format!("{} not on your phone either", st.missing));
     }
     if st.failed > 0 {
         parts.push(format!("{} failed", st.failed));
@@ -139,15 +160,21 @@ pub fn error_text(st: &HistoryMediaStatus) -> Option<String> {
     })
 }
 
+/// How many files of a kind a download would try: those WhatsApp's servers may
+/// still have, plus the expired ones when the phone is asked.
+pub fn files_of_kind(st: Option<&HistoryMediaStatus>, kind: &str, ask_phone: bool) -> u64 {
+    let Some(st) = st else { return 0 };
+    let available = st.available.get(kind).copied().unwrap_or(0);
+    let expired = if ask_phone { st.expired.get(kind).copied().unwrap_or(0) } else { 0 };
+    available + expired
+}
+
 /// "4826 files to download" for the chosen kinds.
-pub fn chosen_text(st: Option<&HistoryMediaStatus>, kinds: &[String]) -> String {
+pub fn chosen_text(st: Option<&HistoryMediaStatus>, kinds: &[String], ask_phone: bool) -> String {
     if kinds.is_empty() {
         return "Choose at least one kind of media.".to_string();
     }
-    let count: u64 = kinds
-        .iter()
-        .map(|k| st.and_then(|st| st.available.get(k)).copied().unwrap_or(0))
-        .sum();
+    let count: u64 = kinds.iter().map(|k| files_of_kind(st, k, ask_phone)).sum();
     format!("{count} files to download. Videos and documents can be large, so they are off by default.")
 }
 
@@ -182,6 +209,16 @@ mod tests {
         assert_eq!(format_bytes(812), "812 B");
         assert_eq!(format_bytes(35_651_584), "34.0 MB");
         assert_eq!(format_bytes(1_288_490_189), "1.2 GB");
+    }
+
+    #[test]
+    fn usage_names_the_sizes_that_are_known() {
+        assert_eq!(usage_text(None), None);
+        assert_eq!(usage_text(Some(&StorageUsage::default())), None);
+        let both = StorageUsage { chat_bytes: Some(65_000_000), media_bytes: Some(540 * 1024 * 1024) };
+        assert_eq!(usage_text(Some(&both)).unwrap(), "Chats 62.0 MB · Media 540 MB");
+        let chat_only = StorageUsage { chat_bytes: Some(2048), media_bytes: None };
+        assert_eq!(usage_text(Some(&chat_only)).unwrap(), "Chats 2.0 KB");
     }
 
     #[test]
@@ -241,8 +278,18 @@ mod tests {
         st.available.insert("image".into(), 4826);
         st.available.insert("video".into(), 228);
         let kinds = vec!["image".to_string(), "sticker".to_string()];
-        assert!(chosen_text(Some(&st), &kinds).starts_with("4826 files"));
-        assert!(chosen_text(None, &kinds).starts_with("0 files"));
-        assert_eq!(chosen_text(Some(&st), &[]), "Choose at least one kind of media.");
+        assert!(chosen_text(Some(&st), &kinds, false).starts_with("4826 files"));
+        assert!(chosen_text(None, &kinds, false).starts_with("0 files"));
+        assert_eq!(chosen_text(Some(&st), &[], false), "Choose at least one kind of media.");
+        // Expired files count only when the phone is asked.
+        st.expired.insert("image".into(), 9000);
+        assert!(chosen_text(Some(&st), &kinds, false).starts_with("4826 files"));
+        assert!(chosen_text(Some(&st), &kinds, true).starts_with("13826 files"));
+        assert_eq!(files_of_kind(Some(&st), "image", true), 13826);
+
+        st.recovered = 3;
+        st.missing = 4;
+        let text = result_text(&st);
+        assert!(text.contains("3 recovered from your phone") && text.contains("4 not on your phone either"), "{text}");
     }
 }

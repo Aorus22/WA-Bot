@@ -43,7 +43,11 @@ func TestHistoryMediaStartReadsTheOptions(t *testing.T) {
 	if len(got.Types) != 2 || got.Types[0] != "image" || !got.RetryUnavailable {
 		t.Fatalf("options: %+v", got)
 	}
-	if rec := postMedia(h, `{"resume":true}`); rec.Code != http.StatusAccepted || fake.resumed != 1 || len(fake.started) != 1 {
+	postMedia(h, `{"types":["image"],"askPhone":true}`)
+	if got := fake.started[1]; !got.AskPhone || got.RetryUnavailable {
+		t.Fatalf("askPhone: %+v", got)
+	}
+	if rec := postMedia(h, `{"resume":true}`); rec.Code != http.StatusAccepted || fake.resumed != 1 || len(fake.started) != 2 {
 		t.Fatalf("resume: %d, resumed %d, started %d", rec.Code, fake.resumed, len(fake.started))
 	}
 	if rec := postMedia(h, `{not json`); rec.Code != http.StatusBadRequest {

@@ -104,6 +104,19 @@ func (w *Wrapper) Store() Store { return w.store }
 
 func (w *Wrapper) Bucket() string { return w.bucket }
 
+// DatabaseSize is how big the SQLite database holding an account's media is.
+// ok is false for providers that are not SQLite (S3 has no such file).
+func (w *Wrapper) DatabaseSize(ctx context.Context, account string) (size int64, ok bool, err error) {
+	sizer, isSQLite := w.store.(interface {
+		DatabaseSize(ctx context.Context, account string) (int64, error)
+	})
+	if !isSQLite {
+		return 0, false, nil
+	}
+	size, err = sizer.DatabaseSize(ctx, account)
+	return size, err == nil, err
+}
+
 func (w *Wrapper) Close() error { return w.store.Close() }
 
 func (w *Wrapper) ref(account, key string) ObjectRef {

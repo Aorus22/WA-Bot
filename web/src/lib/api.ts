@@ -206,6 +206,14 @@ export type HistorySyncStatus = {
 	etaMs: number | null
 }
 
+/** How big the account's two SQLite databases are; null when not known (media kept in S3). */
+export type StorageUsage = {
+	/** The message database: chats, messages and staged history. */
+	chatBytes: number | null
+	/** The database holding the media files. */
+	mediaBytes: number | null
+}
+
 export type HistoryMediaKind = "image" | "sticker" | "audio" | "video" | "document"
 
 export type HistoryMediaState = "idle" | "running" | "cancelling" | "completed" | "partial" | "cancelled" | "interrupted" | "failed"
@@ -215,6 +223,8 @@ export type HistoryMediaRequest = {
 	types?: HistoryMediaKind[]
 	/** Also try media an earlier download found to be gone. */
 	retryUnavailable?: boolean
+	/** Ask the phone to upload media again when WhatsApp's servers no longer have it. */
+	askPhone?: boolean
 	/** Continue the stopped or interrupted download instead of starting one; the rest is ignored. */
 	resume?: boolean
 }
@@ -227,15 +237,21 @@ export type HistoryMediaStatus = {
 	remaining: number
 	/** Gone from WhatsApp's servers. */
 	unavailable: number
+	/** Of `done`, how many the phone uploaded again after the servers had lost them. */
+	recovered: number
+	/** Gone from the servers, and the phone does not have them either. */
+	missing: number
 	/** Could not be downloaded (try again with a new download). */
 	failed: number
 	bytes: number
 	errors: HistorySyncError[]
 	startedAt: number | null
 	finishedAt: number | null
-	options: { types: HistoryMediaKind[]; retryUnavailable: boolean }
-	/** Per kind, the media a new download could still fetch. */
+	options: { types: HistoryMediaKind[]; retryUnavailable: boolean; askPhone: boolean }
+	/** Per kind, the media a new download could still fetch from WhatsApp's servers. */
 	available: Partial<Record<HistoryMediaKind, number>>
+	/** Per kind, media the servers no longer have, that only the phone can give back. */
+	expired: Partial<Record<HistoryMediaKind, number>>
 	/** Files being downloaded right now. */
 	current: number
 	resumable: boolean
@@ -255,20 +271,23 @@ export function normalizeHistoryMediaStatus(raw: Partial<HistoryMediaStatus> | n
 				message: typeof error.message === "string" ? error.message : "Unknown media download error",
 			}))
 		: []
-	const options = value.options ?? { types: [], retryUnavailable: false }
+	const options = value.options ?? { types: [], retryUnavailable: false, askPhone: false }
 	return {
 		state,
 		total: Number(value.total) || 0,
 		done: Number(value.done) || 0,
 		remaining: Number(value.remaining) || 0,
 		unavailable: Number(value.unavailable) || 0,
+		recovered: Number(value.recovered) || 0,
+		missing: Number(value.missing) || 0,
 		failed: Number(value.failed) || 0,
 		bytes: Number(value.bytes) || 0,
 		errors,
 		startedAt: value.startedAt == null ? null : Number(value.startedAt),
 		finishedAt: value.finishedAt == null ? null : Number(value.finishedAt),
-		options: { types: Array.isArray(options.types) ? options.types : [], retryUnavailable: options.retryUnavailable === true },
+		options: { types: Array.isArray(options.types) ? options.types : [], retryUnavailable: options.retryUnavailable === true, askPhone: options.askPhone === true },
 		available: value.available && typeof value.available === "object" ? value.available : {},
+		expired: value.expired && typeof value.expired === "object" ? value.expired : {},
 		current: Number(value.current) || 0,
 		resumable: value.resumable === true,
 		elapsedMs: Number(value.elapsedMs) || 0,
@@ -599,6 +618,14 @@ class ApiClient {	private baseUrl: string
 	async cancelHistorySync(): Promise<HistorySyncStatus> {
 		const raw = await this.request<unknown>("/history-sync/cancel", { method: "POST" })
 		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
+	}
+
+	async getStorageUsage(): Promise<StorageUsage> {
+		const raw = await this.request<Partial<StorageUsage>>("/storage/usage")
+		return {
+			chatBytes: raw.chatBytes == null ? null : Number(raw.chatBytes),
+			mediaBytes: raw.mediaBytes == null ? null : Number(raw.mediaBytes),
+		}
 	}
 
 	async getHistoryMediaStatus(): Promise<HistoryMediaStatus> {

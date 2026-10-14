@@ -32,6 +32,7 @@ use gpui_component::switch::Switch;
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{
     HistoryMediaRequest, HistoryMediaStart, HistoryMediaStatus, HistorySyncRequest, HistorySyncStart, HistorySyncStatus,
+    StorageUsage,
 };
 use wabot_backend_client::ClientError;
 use super::history_media;
@@ -113,7 +114,11 @@ pub struct SettingsView {
     /// The kinds of media the next download fetches (backend names).
     pub media_kinds: Vec<String>,
     pub media_retry_unavailable: bool,
+    /// Ask the phone to upload media again that WhatsApp's servers lost.
+    pub media_ask_phone: bool,
     media_polling: bool,
+    /// Sizes of the chat and media databases.
+    pub storage_usage: Option<StorageUsage>,
     pub is_restarting_backend: bool,
 
     // Asynchronous action states
@@ -197,7 +202,9 @@ impl SettingsView {
             is_downloading_media: false,
             media_kinds: history_media::default_kinds(),
             media_retry_unavailable: false,
+            media_ask_phone: false,
             media_polling: false,
+            storage_usage: None,
             is_restarting_backend: false,
 
             is_saving_ai: false,
@@ -212,6 +219,7 @@ impl SettingsView {
         view.load_backend_settings(cx);
         view.load_history_status(cx);
         view.load_media_status(cx);
+        view.load_storage_usage(cx);
 
         view
     }
@@ -301,6 +309,28 @@ impl SettingsView {
         }
     }
 
+    /// Load the sizes of the chat and media databases via GET /api/storage/usage.
+    pub fn load_storage_usage(&mut self, cx: &mut Context<Self>) {
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).get_storage_usage().await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let (Some(view), Ok(Ok(usage))) = (this.upgrade(), res) {
+                        view.update(cx, |this, cx| {
+                            this.storage_usage = Some(usage);
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Load the media download status via GET /api/history-media/status.
     pub fn load_media_status(&mut self, cx: &mut Context<Self>) {
         let base_url = Self::backend_base_url(cx);
@@ -337,6 +367,7 @@ impl SettingsView {
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let cx_handle = cx.clone();
             async move {
+                let mut polls = 0u32;
                 loop {
                     cx_handle.background_executor().timer(std::time::Duration::from_millis(1000)).await;
                     let Some(base_url) = cx_handle.update(|cx: &mut App| {
@@ -353,6 +384,10 @@ impl SettingsView {
                         let Some(view) = this.upgrade() else { return false };
                         view.update(cx, |this, cx| {
                             this.is_downloading_media = running;
+                            polls += 1;
+                            if !running || polls % 5 == 0 {
+                                this.load_storage_usage(cx);
+                            }
                             if !running {
                                 this.media_polling = false;
                                 if cx.has_global::<crate::state::ChatStore>() {
@@ -393,6 +428,7 @@ impl SettingsView {
             HistoryMediaRequest {
                 types: self.media_kinds.clone(),
                 retry_unavailable: self.media_retry_unavailable,
+                ask_phone: self.media_ask_phone,
                 resume: false,
             }
         };
@@ -1322,12 +1358,12 @@ impl SettingsView {
         let resumable = !active && self.media_status.as_ref().is_some_and(|st| st.resumable);
         let nothing_chosen = self.media_kinds.is_empty();
         let retry = self.media_retry_unavailable;
+        let ask_phone = self.media_ask_phone;
 
         let chips = history_media::MEDIA_KINDS.into_iter().map(|kind| {
             let selected = self.media_kinds.iter().any(|k| k == kind.id);
-            let count = self.media_status.as_ref().and_then(|st| st.available.get(kind.id)).copied();
-            let label = match count {
-                Some(n) => format!("{} · {n}", kind.label),
+            let label = match self.media_status.as_ref() {
+                Some(st) => format!("{} · {}", kind.label, history_media::files_of_kind(Some(st), kind.id, ask_phone)),
                 None => kind.label.to_string(),
             };
             div()
@@ -1440,7 +1476,10 @@ impl SettingsView {
                             .child(div().text_xs().text_color(muted_text).child(
                                 "History messages only keep their text. Download their photos, stickers and files \
                                  into the app so they open instantly.",
-                            )),
+                            ))
+                            .children(history_media::usage_text(self.storage_usage.as_ref()).map(|usage| {
+                                div().text_xs().text_color(muted_text).child(format!("Storage used: {usage}"))
+                            })),
                     )
                     .child(div().flex_none().child(action)),
             )
@@ -1449,7 +1488,54 @@ impl SettingsView {
                 div()
                     .text_xs()
                     .text_color(muted_text)
-                    .child(history_media::chosen_text(self.media_status.as_ref(), &self.media_kinds)),
+                    .child(history_media::chosen_text(self.media_status.as_ref(), &self.media_kinds, self.media_ask_phone)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap_2()
+                    .when(!active, |d| d.cursor_pointer())
+                    .child(
+                        div()
+                            .mt_0p5()
+                            .size(px(14.0))
+                            .flex_none()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(if ask_phone { primary_color } else { border_color })
+                            .bg(if ask_phone { primary_color } else { gpui::transparent_black() })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(ask_phone, |d| {
+                                d.child(div().text_color(rgb(0xffffff)).text_size(px(10.0)).child("✓"))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(text_color)
+                                    .child("Ask my phone for media that expired"),
+                            )
+                            .child(div().text_xs().text_color(muted_text).child(
+                                "Your phone must be online with WhatsApp open. Only files still stored on the phone \
+                                 can be recovered; this can take a while.",
+                            )),
+                    )
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        if !this.is_downloading_media {
+                            this.media_ask_phone = !this.media_ask_phone;
+                            cx.notify();
+                        }
+                    })),
             )
             .child(
                 div()

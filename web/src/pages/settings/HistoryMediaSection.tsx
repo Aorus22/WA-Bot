@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Image as ImageIcon, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, type HistoryMediaKind, type HistoryMediaStatus } from '@/lib/api'
+import { api, type HistoryMediaKind, type HistoryMediaStatus, type StorageUsage } from '@/lib/api'
 import { formatDuration } from '@/lib/historySync'
 import {
-	MEDIA_KINDS, defaultMediaKinds, isMediaActive, mediaHeadline, mediaResultText, mediaPausedText, mediaErrorText, mediaProgress,
+	MEDIA_KINDS, defaultMediaKinds, isMediaActive, mediaHeadline, mediaResultText, mediaPausedText, mediaErrorText, mediaProgress, usageText, filesToDownload,
 } from '@/lib/historyMedia'
 import { useChatStore } from '@/stores/chatStore'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,8 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 	const [loading, setLoading] = useState(true)
 	const [kinds, setKinds] = useState<HistoryMediaKind[]>(defaultMediaKinds)
 	const [retryUnavailable, setRetryUnavailable] = useState(false)
+	const [askPhone, setAskPhone] = useState(false)
+	const [usage, setUsage] = useState<StorageUsage | null>(null)
 	const wasRunning = useRef(false)
 	const active = status ? isMediaActive(status.state) : false
 
@@ -42,6 +44,25 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 		void load()
 	}, [load])
 
+	// The sizes of the databases: when the section opens and whenever a download starts or ends.
+	const state = status?.state
+	useEffect(() => {
+		let cancelled = false
+		api.getStorageUsage().then((next) => !cancelled && setUsage(next)).catch(() => {})
+		return () => {
+			cancelled = true
+		}
+	}, [state])
+
+	// While downloading the media database grows: keep the size current.
+	useEffect(() => {
+		if (!active) return
+		const timer = window.setInterval(() => {
+			api.getStorageUsage().then(setUsage).catch(() => {})
+		}, 5000)
+		return () => window.clearInterval(timer)
+	}, [active])
+
 	useEffect(() => {
 		if (!active) return
 		const timer = window.setInterval(() => void load(), 1000)
@@ -51,7 +72,7 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 	const start = async (resume: boolean) => {
 		setLoading(true)
 		try {
-			const next = await api.startHistoryMedia(resume ? { resume: true } : { types: kinds, retryUnavailable })
+			const next = await api.startHistoryMedia(resume ? { resume: true } : { types: kinds, retryUnavailable, askPhone })
 			wasRunning.current = true
 			setStatus(next)
 			toast.success(resume ? 'Media download resumed' : 'Media download started')
@@ -81,7 +102,7 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 	const toggleKind = (kind: HistoryMediaKind, on: boolean) =>
 		setKinds((current) => (on ? [...current, kind] : current.filter((k) => k !== kind)))
 
-	const chosenCount = kinds.reduce((sum, kind) => sum + (status?.available[kind] ?? 0), 0)
+	const chosenCount = filesToDownload(status, kinds, askPhone)
 	const progress = status ? mediaProgress(status) : null
 	const shown = status && (status.startedAt != null || active)
 	const paused = status ? mediaPausedText(status) : null
@@ -103,6 +124,7 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 						<span className="text-xs text-muted-foreground">
 							History messages only keep their text. Download their photos, stickers and files into the app so they open instantly.
 						</span>
+						{usageText(usage) && <span className="text-xs text-muted-foreground">Storage used: {usageText(usage)}</span>}
 					</div>
 				</div>
 				{active ? (
@@ -128,7 +150,7 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 			<div className="flex flex-wrap gap-1.5">
 				{MEDIA_KINDS.map((kind) => {
 					const on = kinds.includes(kind.id)
-					const count = status?.available[kind.id]
+					const count = status ? (status.available[kind.id] ?? 0) + (askPhone ? (status.expired[kind.id] ?? 0) : 0) : undefined
 					return (
 						<button
 							key={kind.id}
@@ -150,6 +172,15 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 					: `${chosenCount} files to download. Videos and documents can be large, so they are off by default.`}
 			</p>
 			<div className="flex items-start gap-3">
+				<Switch id="history_media_phone" checked={askPhone} onCheckedChange={setAskPhone} disabled={active} />
+				<div className="flex flex-col gap-0.5">
+					<Label htmlFor="history_media_phone" className="text-xs font-medium">Ask my phone for media that expired</Label>
+					<span className="text-xs text-muted-foreground">
+						Your phone must be online with WhatsApp open. Only files still stored on the phone can be recovered; this can take a while.
+					</span>
+				</div>
+			</div>
+			<div className="flex items-start gap-3">
 				<Switch id="history_media_retry" checked={retryUnavailable} onCheckedChange={setRetryUnavailable} disabled={active} />
 				<div className="flex flex-col gap-0.5">
 					<Label htmlFor="history_media_retry" className="text-xs font-medium">Also retry media that was no longer available</Label>
@@ -166,7 +197,7 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 							role="progressbar"
 							aria-valuemin={0}
 							aria-valuemax={status.total}
-							aria-valuenow={status.done + status.unavailable + status.failed}
+							aria-valuenow={status.done + status.unavailable + status.failed + status.missing}
 							className="flex h-2 rounded-full bg-muted overflow-hidden"
 						>
 							<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.round(progress.done * 1000) / 10}%` }} />

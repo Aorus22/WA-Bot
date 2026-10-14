@@ -7,6 +7,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
+	"google.golang.org/protobuf/proto"
 )
 
 // HistoricalMedia is the downloadable part of a message imported from history,
@@ -36,6 +37,23 @@ func ResolveHistoricalMedia(msg *waE2E.Message) (HistoricalMedia, bool) {
 		return HistoricalMedia{media, fallbackMime(media.GetMimetype(), "image/webp"), "sticker.webp"}, true
 	}
 	return HistoricalMedia{}, false
+}
+
+// SetDirectPath points the media at a new place on WhatsApp's servers, as the
+// phone does when it uploads a file again.
+func (m HistoricalMedia) SetDirectPath(path string) {
+	switch media := m.Message.(type) {
+	case *waE2E.ImageMessage:
+		media.DirectPath = proto.String(path)
+	case *waE2E.VideoMessage:
+		media.DirectPath = proto.String(path)
+	case *waE2E.DocumentMessage:
+		media.DirectPath = proto.String(path)
+	case *waE2E.AudioMessage:
+		media.DirectPath = proto.String(path)
+	case *waE2E.StickerMessage:
+		media.DirectPath = proto.String(path)
+	}
 }
 
 // HistoricalMediaKey is where the downloaded file of a history message is kept

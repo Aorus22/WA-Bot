@@ -45,6 +45,12 @@ func NewObjectMediaStorage(w *objectstorage.Wrapper, staging *objectstorage.Stag
 	return m
 }
 
+// MediaSize is the size of the SQLite database that holds the current
+// account's media. ok is false when the media is kept elsewhere (S3).
+func (m *ObjectMediaStorage) MediaSize(ctx context.Context) (size int64, ok bool, err error) {
+	return m.w.DatabaseSize(ctx, m.Account())
+}
+
 // Account is the account media currently belongs to.
 func (m *ObjectMediaStorage) Account() string { return m.account.Load().(string) }
 

@@ -142,6 +142,16 @@ func (p *PerAccountStore) Open(ctx context.Context, ref ObjectRef, opts GetOptio
 	return s.Open(ctx, ref, opts)
 }
 
+// DatabaseSize is the size of the database file of account in bytes (0 when the
+// account has no database yet).
+func (p *PerAccountStore) DatabaseSize(ctx context.Context, account string) (int64, error) {
+	s, err := p.existing(account)
+	if err != nil || s == nil {
+		return 0, err
+	}
+	return s.DatabaseSize(ctx, account)
+}
+
 func (p *PerAccountStore) Stat(ctx context.Context, ref ObjectRef) (ObjectInfo, error) {
 	s, err := p.existing(ref.AccountID)
 	if err != nil {

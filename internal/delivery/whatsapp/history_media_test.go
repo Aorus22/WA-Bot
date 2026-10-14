@@ -23,9 +23,16 @@ type scriptedMedia struct {
 	gone      map[string]bool // never downloadable
 	broken    map[string]bool // fails with a network error
 	attempts  map[string]int
-	hold      chan struct{} // when set, downloads wait for it (or the context)
-	started   chan struct{}
-	startOnce sync.Once
+	// What the phone does when asked to upload a file again: "" = nothing was
+	// asked of it, "ok" = has the file, "missing" = does not, "silent" = no answer.
+	phone      map[string]string
+	phoneAsked map[string]int
+	phoneNow   int // requests open right now
+	phoneMax   int // the most that were open at once
+	phoneHold  time.Duration
+	hold       chan struct{} // when set, downloads wait for it (or the context)
+	started    chan struct{}
+	startOnce  sync.Once
 }
 
 func (m *scriptedMedia) IsConnected() bool { return m.connected }
@@ -54,6 +61,39 @@ func (m *scriptedMedia) Download(ctx context.Context, _ string, raw []byte, file
 	}
 	_, err := file.WriteString("bytes of " + id)
 	return "image/jpeg", "image.jpg", err
+}
+
+func (m *scriptedMedia) RequestFromPhone(ctx context.Context, _ string, raw []byte, file *os.File) (string, string, error) {
+	id := string(raw)
+	m.mu.Lock()
+	m.phoneAsked[id]++
+	m.phoneNow++
+	if m.phoneNow > m.phoneMax {
+		m.phoneMax = m.phoneNow
+	}
+	behaviour, hold := m.phone[id], m.phoneHold
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.phoneNow--
+		m.mu.Unlock()
+	}()
+	if hold > 0 {
+		select {
+		case <-time.After(hold):
+		case <-ctx.Done():
+			return "", "", ctx.Err()
+		}
+	}
+	switch behaviour {
+	case "ok":
+		_, err := file.WriteString("from the phone: " + id)
+		return "image/jpeg", "image.jpg", err
+	case "missing":
+		return "", "", errNotOnPhone
+	default:
+		return "", "", errPhoneSilent
+	}
 }
 
 type memoryFiles struct {
@@ -106,7 +146,8 @@ func newMediaServiceUnderTest(t *testing.T) (*HistoryMediaService, *scriptedMedi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	src := &scriptedMedia{connected: true, gone: map[string]bool{}, broken: map[string]bool{}, attempts: map[string]int{}}
+	src := &scriptedMedia{connected: true, gone: map[string]bool{}, broken: map[string]bool{}, attempts: map[string]int{},
+		phone: map[string]string{}, phoneAsked: map[string]int{}}
 	files := &memoryFiles{saved: map[string]string{}, saves: map[string]int{}}
 	svc := &HistoryMediaService{source: src, files: files, store: store, timeout: 10 * time.Second}
 	svc.status = svc.loadStatus()
@@ -174,8 +215,8 @@ func TestMediaThatIsGoneIsRememberedUntilAskedToRetry(t *testing.T) {
 	if st.State != "completed" || st.Done != 1 || st.Unavailable != 1 || st.Total != 2 {
 		t.Fatalf("first job: %+v", st)
 	}
-	if st.Available["image"] != 0 {
-		t.Fatalf("media found to be gone is still offered: %+v", st.Available)
+	if st.Available["image"] != 0 || st.Expired["image"] != 1 {
+		t.Fatalf("media found to be gone is offered as expired, not as available: %+v / %+v", st.Available, st.Expired)
 	}
 
 	svc.Start(photos())
@@ -313,4 +354,161 @@ func TestMediaDownloadRefusesNonsense(t *testing.T) {
 	if _, err := svc.Cancel(); err == nil {
 		t.Fatal("cancelled a job that is not running")
 	}
+}
+
+func askingPhone() repository.HistoryMediaOptions {
+	return repository.HistoryMediaOptions{Types: []string{"image"}, AskPhone: true}
+}
+
+func TestPhoneIsNotAskedUnlessTheOptionIsOn(t *testing.T) {
+	svc, src, _, store := newMediaServiceUnderTest(t)
+	addMedia(t, store, "image", "old")
+	src.gone["old"] = true
+	src.phone["old"] = "ok"
+
+	svc.Start(photos())
+	st := waitMediaDone(t, svc)
+	if st.Unavailable != 1 || len(src.phoneAsked) != 0 {
+		t.Fatalf("the phone was asked without the option: %+v asked %v", st, src.phoneAsked)
+	}
+	if st.Expired["image"] != 1 {
+		t.Fatalf("the expired file should be on offer for the phone: %+v", st.Expired)
+	}
+}
+
+func TestPhoneGivesBackExpiredMediaAndSaysWhenItHasNone(t *testing.T) {
+	svc, src, files, store := newMediaServiceUnderTest(t)
+	addMedia(t, store, "image", "fine", "back", "lost")
+	for _, id := range []string{"back", "lost"} {
+		src.gone[id] = true
+	}
+	src.phone["back"], src.phone["lost"] = "ok", "missing"
+
+	// A first job without the phone finds the two expired files.
+	svc.Start(photos())
+	if st := waitMediaDone(t, svc); st.Unavailable != 2 || st.Done != 1 {
+		t.Fatalf("first job: %+v", st)
+	}
+
+	// A job that asks the phone takes the expired ones up again.
+	if _, err := svc.Start(askingPhone()); err != nil {
+		t.Fatal(err)
+	}
+	st := waitMediaDone(t, svc)
+	if st.State != "completed" || st.Done != 1 || st.Recovered != 1 || st.Missing != 1 || st.Unavailable != 0 || st.Total != 2 {
+		t.Fatalf("with the phone: %+v", st)
+	}
+	url := mediaURL(t, store, "back")
+	if files.saved[strings.TrimPrefix(url, "/media/")] != "from the phone: back" || !strings.HasPrefix(url, "/media/history/") {
+		t.Fatalf("recovered file not stored: %q %v", url, files.saved)
+	}
+	if got := mediaURL(t, store, "lost"); !strings.Contains(got, "/messages/") {
+		t.Fatalf("a file the phone does not have was stored: %q", got)
+	}
+	if st.Expired["image"] != 0 || st.Available["image"] != 0 {
+		t.Fatalf("what the phone does not have is not on offer any more: %+v / %+v", st.Available, st.Expired)
+	}
+
+	// Not asked again, until asked to retry what is gone.
+	svc.Start(askingPhone())
+	waitMediaDone(t, svc)
+	if src.phoneAsked["lost"] != 1 {
+		t.Fatalf("the phone was asked again for a file it does not have: %v", src.phoneAsked)
+	}
+	svc.Start(repository.HistoryMediaOptions{Types: []string{"image"}, AskPhone: true, RetryUnavailable: true})
+	waitMediaDone(t, svc)
+	if src.phoneAsked["lost"] != 2 {
+		t.Fatalf("retry did not ask again: %v", src.phoneAsked)
+	}
+}
+
+func TestPhoneRequestsAreLimitedToAFewAtOnce(t *testing.T) {
+	svc, src, _, store := newMediaServiceUnderTest(t)
+	var ids []string
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("e%02d", i)
+		ids = append(ids, id)
+		src.gone[id] = true
+		src.phone[id] = "ok"
+	}
+	addMedia(t, store, "image", ids...)
+	src.phoneHold = 20 * time.Millisecond
+	svc.Start(photos())
+	waitMediaDone(t, svc)
+	svc.Start(askingPhone())
+	st := waitMediaDone(t, svc)
+	if st.Recovered != 12 {
+		t.Fatalf("recovered: %+v", st)
+	}
+	if src.phoneMax > historyMediaPhoneParallel || src.phoneMax < 2 {
+		t.Fatalf("up to %d requests open at once, want 2", src.phoneMax)
+	}
+}
+
+func TestJobStopsWhenThePhoneStopsAnsweringAndResumes(t *testing.T) {
+	svc, src, _, store := newMediaServiceUnderTest(t)
+	var ids []string
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("e%02d", i)
+		ids = append(ids, id)
+		src.gone[id] = true
+		src.phone[id] = "silent"
+	}
+	addMedia(t, store, "image", ids...)
+	svc.Start(photos())
+	waitMediaDone(t, svc)
+
+	svc.Start(askingPhone())
+	st := waitMediaDone(t, svc)
+	if st.State != "cancelled" || !st.Resumable {
+		t.Fatalf("a silent phone should stop the job, resumable: %+v", st)
+	}
+	if asked := len(src.phoneAsked); asked > historyMediaPhoneSilentLimit+historyMediaPhoneParallel+historyMediaWorkers {
+		t.Fatalf("%d requests went to a phone that never answers", asked)
+	}
+	if !strings.Contains(strings.Join(errorTexts(st), " "), "not answering") {
+		t.Fatalf("the status does not say why: %v", st.Errors)
+	}
+	if st.Failed != 0 || st.Remaining != 20 {
+		t.Fatalf("files that failed for want of an answer must be to do again: %+v", st)
+	}
+
+	// The phone wakes up; resuming finishes the job.
+	src.mu.Lock()
+	for _, id := range ids {
+		src.phone[id] = "ok"
+	}
+	src.mu.Unlock()
+	if _, err := svc.Resume(); err != nil {
+		t.Fatal(err)
+	}
+	st = waitMediaDone(t, svc)
+	if st.State != "completed" || st.Recovered != 20 {
+		t.Fatalf("after the phone answers again: %+v", st)
+	}
+}
+
+func TestAnIsolatedSilenceIsAFailureNotAReasonToStop(t *testing.T) {
+	svc, src, _, store := newMediaServiceUnderTest(t)
+	addMedia(t, store, "image", "a", "b", "c", "d", "e", "f")
+	for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
+		src.gone[id] = true
+		src.phone[id] = "ok"
+	}
+	src.phone["c"] = "silent"
+	svc.Start(photos())
+	waitMediaDone(t, svc)
+	svc.Start(askingPhone())
+	st := waitMediaDone(t, svc)
+	if st.State != "partial" || st.Recovered != 5 || st.Failed != 1 {
+		t.Fatalf("one unanswered request among answered ones: %+v", st)
+	}
+}
+
+func errorTexts(st repository.HistoryMediaStatus) []string {
+	var out []string
+	for _, e := range st.Errors {
+		out = append(out, e.Message)
+	}
+	return out
 }

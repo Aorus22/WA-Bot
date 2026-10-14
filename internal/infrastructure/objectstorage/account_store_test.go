@@ -169,3 +169,25 @@ func TestGatewayOverPerAccountStores(t *testing.T) {
 		t.Fatal("object not visible through the store")
 	}
 }
+
+func TestDatabaseSizeIsTheSQLiteFileOfTheAccount(t *testing.T) {
+	p, _ := newPerAccount(t)
+	ctx := context.Background()
+	if size, err := p.DatabaseSize(ctx, "628111"); err != nil || size != 0 {
+		t.Fatalf("an account without media has no database: %d %v", size, err)
+	}
+	empty := strings.Repeat("x", 10)
+	p.Put(ctx, ObjectRef{AccountID: "628111", Key: "small.bin"}, strings.NewReader(empty), PutOptions{})
+	small, err := p.DatabaseSize(ctx, "628111")
+	if err != nil || small <= 0 {
+		t.Fatalf("size after one file: %d %v", small, err)
+	}
+	p.Put(ctx, ObjectRef{AccountID: "628111", Key: "big.bin"}, strings.NewReader(strings.Repeat("y", 3<<20)), PutOptions{})
+	big, _ := p.DatabaseSize(ctx, "628111")
+	if big < small+3<<20 {
+		t.Fatalf("size did not grow with a 3 MB file: %d -> %d", small, big)
+	}
+	if other, _ := p.DatabaseSize(ctx, "628222"); other != 0 {
+		t.Fatalf("another account's database is counted: %d", other)
+	}
+}

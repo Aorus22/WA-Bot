@@ -360,6 +360,7 @@ func (s *MessageStore) initLocked() error {
 			state TEXT NOT NULL DEFAULT 'idle',
 			options_json TEXT DEFAULT '',
 			done INTEGER DEFAULT 0,
+			recovered INTEGER DEFAULT 0,
 			bytes INTEGER DEFAULT 0,
 			errors_json TEXT DEFAULT '[]',
 			started_at INTEGER,
@@ -391,6 +392,7 @@ func (s *MessageStore) initLocked() error {
 	}
 
 	// Migration: Add is_automatic column if it doesn't exist
+	_, _ = s.db.Exec("ALTER TABLE history_media_runs ADD COLUMN recovered INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN options_json TEXT DEFAULT ''")
 	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN chats_skipped INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN active_ms INTEGER DEFAULT 0")
