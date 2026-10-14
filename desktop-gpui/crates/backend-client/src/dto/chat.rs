@@ -177,7 +177,7 @@ impl Default for HistorySyncStatus {
 }
 
 /// A list that the server may send as JSON `null` when it is empty.
-fn list_or_null<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
+pub(super) fn list_or_null<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de>,

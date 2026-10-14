@@ -45,6 +45,7 @@ type Handler struct {
 	ttsProvider    call.TTSProvider
 	settingsRepo   repository.SettingsRepository
 	historySync    HistorySyncService
+	historyMedia   HistoryMediaService
 	accounts       AccountController
 }
 
@@ -172,6 +173,19 @@ type HistorySyncService interface {
 
 func (h *Handler) SetHistorySync(service HistorySyncService) {
 	h.historySync = service
+}
+
+// HistoryMediaService downloads the media of messages imported from history.
+type HistoryMediaService interface {
+	Start(opts repository.HistoryMediaOptions) (repository.HistoryMediaStatus, error)
+	// Resume continues a stopped or interrupted download where it left off.
+	Resume() (repository.HistoryMediaStatus, error)
+	Cancel() (repository.HistoryMediaStatus, error)
+	Status() repository.HistoryMediaStatus
+}
+
+func (h *Handler) SetHistoryMedia(service HistoryMediaService) {
+	h.historyMedia = service
 }
 
 func (h *Handler) GetSettingsRepo() repository.SettingsRepository {

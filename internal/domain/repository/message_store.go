@@ -352,6 +352,27 @@ func (s *MessageStore) initLocked() error {
 			added INTEGER NOT NULL DEFAULT 0,
 			outcome TEXT NOT NULL DEFAULT ''
 		)`,
+		// The media download job of history messages (one row) and the messages it
+		// could not download. A message that did download needs no row: its
+		// media_url no longer is the history placeholder.
+		`CREATE TABLE IF NOT EXISTS history_media_runs (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			state TEXT NOT NULL DEFAULT 'idle',
+			options_json TEXT DEFAULT '',
+			done INTEGER DEFAULT 0,
+			bytes INTEGER DEFAULT 0,
+			errors_json TEXT DEFAULT '[]',
+			started_at INTEGER,
+			finished_at INTEGER,
+			active_ms INTEGER DEFAULT 0
+		)`,
+		`INSERT OR IGNORE INTO history_media_runs (id, state) VALUES (1, 'idle')`,
+		`CREATE TABLE IF NOT EXISTS history_media_state (
+			message_id TEXT PRIMARY KEY,
+			state TEXT NOT NULL,
+			reason TEXT DEFAULT '',
+			run_id INTEGER NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_history_staged_pending ON history_staged_messages(chat_id, imported, timestamp DESC)`,

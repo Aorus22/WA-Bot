@@ -197,3 +197,74 @@ func TestFinishedChatCountIsWhatASyncSkips(t *testing.T) {
 		t.Fatalf("finished chat not counted: %d", n)
 	}
 }
+
+func TestHistoryMediaSelection(t *testing.T) {
+	store := newTestMessageStore(t)
+	chatID := "628123@s.whatsapp.net"
+	var imports []HistoryImportMessage
+	for i, kind := range []string{"image", "image", "ptt", "audio", "video", "document", "text"} {
+		id := fmt.Sprintf("m%d", i)
+		url := fmt.Sprintf("/chats/%s/messages/%s/media", chatID, id)
+		if kind == "text" {
+			url = ""
+		}
+		imports = append(imports, HistoryImportMessage{
+			Message: Message{ID: id, ChatID: chatID, From: chatID, To: "me", Content: kind, Timestamp: int64(100 + i), Status: "received", Type: kind, MediaURL: url},
+			Raw:     []byte(id),
+		})
+	}
+	// An already downloaded one is not selected.
+	imports = append(imports, HistoryImportMessage{
+		Message: Message{ID: "cached", ChatID: chatID, From: chatID, To: "me", Content: "x", Timestamp: 200, Status: "received", Type: "image", MediaURL: "/media/history/x.jpg"},
+		Raw:     []byte("cached"),
+	})
+	if _, err := store.ImportHistoryBatch(chatID, nil, imports); err != nil {
+		t.Fatal(err)
+	}
+
+	avail := store.AvailableHistoryMedia()
+	if avail["image"] != 2 || avail["audio"] != 2 || avail["video"] != 1 || avail["document"] != 1 || avail["sticker"] != 0 {
+		t.Fatalf("available: %v", avail)
+	}
+	opts := HistoryMediaOptions{Types: []string{"audio", "video"}}
+	if n := store.CountHistoryMedia(opts, 1); n != 3 {
+		t.Fatalf("audio (incl. voice notes) and video: %d", n)
+	}
+	if n := store.CountHistoryMedia(HistoryMediaOptions{}, 1); n != 0 {
+		t.Fatalf("nothing chosen selects nothing: %d", n)
+	}
+
+	// Newest first, in pages that continue after the cursor.
+	ts, id := FirstHistoryMediaCursor()
+	page, err := store.NextHistoryMedia(opts, 1, ts, id, 2)
+	if err != nil || len(page) != 2 || page[0].MessageID != "m4" || page[1].MessageID != "m3" {
+		t.Fatalf("first page: %v %v", page, err)
+	}
+	page, _ = store.NextHistoryMedia(opts, 1, page[1].Timestamp, page[1].MessageID, 2)
+	if len(page) != 1 || page[0].MessageID != "m2" {
+		t.Fatalf("second page: %v", page)
+	}
+
+	// Gone media is left alone; a failure only for the job it happened in.
+	store.MarkHistoryMedia("m4", "unavailable", "gone", 1)
+	store.MarkHistoryMedia("m3", "failed", "net", 1)
+	if n := store.CountHistoryMedia(opts, 1); n != 1 {
+		t.Fatalf("in the job of the failure: %d", n)
+	}
+	if n := store.CountHistoryMedia(opts, 2); n != 2 {
+		t.Fatalf("in the next job (m3 is tried again, m4 is not): %d", n)
+	}
+	if n := store.CountHistoryMedia(HistoryMediaOptions{Types: opts.Types, RetryUnavailable: true}, 2); n != 3 {
+		t.Fatalf("retrying unavailable: %d", n)
+	}
+	if u, f := store.HistoryMediaFailures(1); u != 1 || f != 1 {
+		t.Fatalf("failures: %d %d", u, f)
+	}
+
+	if err := store.HistoryMediaDownloaded("m3", "/media/history/m3.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	if u, f := store.HistoryMediaFailures(1); u != 1 || f != 0 {
+		t.Fatalf("a download clears its failure: %d %d", u, f)
+	}
+}

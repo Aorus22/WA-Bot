@@ -105,6 +105,10 @@ func (s *HTTPServer) SetSettingsRepo(repo repository.SettingsRepository) {
 	s.handler.SetSettingsRepo(repo)
 }
 
+func (s *HTTPServer) SetHistoryMedia(service handlers.HistoryMediaService) {
+	s.handler.SetHistoryMedia(service)
+}
+
 func (s *HTTPServer) SetHistorySync(service handlers.HistorySyncService) {
 	s.handler.SetHistorySync(service)
 }

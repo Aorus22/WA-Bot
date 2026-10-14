@@ -206,6 +206,76 @@ export type HistorySyncStatus = {
 	etaMs: number | null
 }
 
+export type HistoryMediaKind = "image" | "sticker" | "audio" | "video" | "document"
+
+export type HistoryMediaState = "idle" | "running" | "cancelling" | "completed" | "partial" | "cancelled" | "interrupted" | "failed"
+
+export type HistoryMediaRequest = {
+	/** The kinds of media to download. */
+	types?: HistoryMediaKind[]
+	/** Also try media an earlier download found to be gone. */
+	retryUnavailable?: boolean
+	/** Continue the stopped or interrupted download instead of starting one; the rest is ignored. */
+	resume?: boolean
+}
+
+export type HistoryMediaStatus = {
+	state: HistoryMediaState
+	/** Everything the download has to do: done + unavailable + failed + remaining. */
+	total: number
+	done: number
+	remaining: number
+	/** Gone from WhatsApp's servers. */
+	unavailable: number
+	/** Could not be downloaded (try again with a new download). */
+	failed: number
+	bytes: number
+	errors: HistorySyncError[]
+	startedAt: number | null
+	finishedAt: number | null
+	options: { types: HistoryMediaKind[]; retryUnavailable: boolean }
+	/** Per kind, the media a new download could still fetch. */
+	available: Partial<Record<HistoryMediaKind, number>>
+	/** Files being downloaded right now. */
+	current: number
+	resumable: boolean
+	elapsedMs: number
+	etaMs: number | null
+}
+
+const HISTORY_MEDIA_STATES: HistoryMediaState[] = ["idle", "running", "cancelling", "completed", "partial", "cancelled", "interrupted", "failed"]
+
+export function normalizeHistoryMediaStatus(raw: Partial<HistoryMediaStatus> | null | undefined): HistoryMediaStatus {
+	const value = raw ?? {}
+	const state = HISTORY_MEDIA_STATES.includes(value.state as HistoryMediaState) ? value.state as HistoryMediaState : "idle"
+	const errors = Array.isArray(value.errors)
+		? value.errors.filter((error): error is HistorySyncError => Boolean(error) && typeof error === "object")
+			.map((error) => ({
+				chatId: typeof error.chatId === "string" ? error.chatId : undefined,
+				message: typeof error.message === "string" ? error.message : "Unknown media download error",
+			}))
+		: []
+	const options = value.options ?? { types: [], retryUnavailable: false }
+	return {
+		state,
+		total: Number(value.total) || 0,
+		done: Number(value.done) || 0,
+		remaining: Number(value.remaining) || 0,
+		unavailable: Number(value.unavailable) || 0,
+		failed: Number(value.failed) || 0,
+		bytes: Number(value.bytes) || 0,
+		errors,
+		startedAt: value.startedAt == null ? null : Number(value.startedAt),
+		finishedAt: value.finishedAt == null ? null : Number(value.finishedAt),
+		options: { types: Array.isArray(options.types) ? options.types : [], retryUnavailable: options.retryUnavailable === true },
+		available: value.available && typeof value.available === "object" ? value.available : {},
+		current: Number(value.current) || 0,
+		resumable: value.resumable === true,
+		elapsedMs: Number(value.elapsedMs) || 0,
+		etaMs: value.etaMs == null ? null : Number(value.etaMs),
+	}
+}
+
 export function normalizeHistorySyncStatus(raw: Partial<HistorySyncStatus> | null | undefined): HistorySyncStatus {
 	const value = raw ?? {}
 	const states: HistorySyncState[] = ["idle", "running", "cancelling", "completed", "partial", "cancelled", "interrupted", "failed"]
@@ -529,6 +599,25 @@ class ApiClient {	private baseUrl: string
 	async cancelHistorySync(): Promise<HistorySyncStatus> {
 		const raw = await this.request<unknown>("/history-sync/cancel", { method: "POST" })
 		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
+	}
+
+	async getHistoryMediaStatus(): Promise<HistoryMediaStatus> {
+		const raw = await this.request<unknown>("/history-media/status")
+		return normalizeHistoryMediaStatus(raw as Partial<HistoryMediaStatus>)
+	}
+
+	async startHistoryMedia(request: HistoryMediaRequest): Promise<HistoryMediaStatus> {
+		const raw = await this.request<unknown>("/history-media", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(request),
+		})
+		return normalizeHistoryMediaStatus(raw as Partial<HistoryMediaStatus>)
+	}
+
+	async cancelHistoryMedia(): Promise<HistoryMediaStatus> {
+		const raw = await this.request<unknown>("/history-media/cancel", { method: "POST" })
+		return normalizeHistoryMediaStatus(raw as Partial<HistoryMediaStatus>)
 	}
 
 	async getMessages(chatId: string, limit = 100, before?: number, after?: number): Promise<Message[]> {

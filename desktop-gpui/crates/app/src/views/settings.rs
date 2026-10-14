@@ -30,8 +30,11 @@ use gpui_component::{h_flex, Icon, IconName};
 use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_component::switch::Switch;
 use wabot_backend_client::client::HttpClient;
-use wabot_backend_client::dto::{HistorySyncRequest, HistorySyncStart, HistorySyncStatus};
+use wabot_backend_client::dto::{
+    HistoryMediaRequest, HistoryMediaStart, HistoryMediaStatus, HistorySyncRequest, HistorySyncStart, HistorySyncStatus,
+};
 use wabot_backend_client::ClientError;
+use super::history_media;
 use super::history_sync::{self, SyncDepth};
 use wabot_settings::{
     ChatLayout, DesktopSettings, MAX_WINDOW_TRANSPARENCY, ThemeMode as SettingsThemeMode,
@@ -104,6 +107,13 @@ pub struct SettingsView {
     pub history_retry_finished: bool,
     /// A loop is already polling the sync status.
     history_polling: bool,
+    // Download of the media of history messages
+    pub media_status: Option<HistoryMediaStatus>,
+    pub is_downloading_media: bool,
+    /// The kinds of media the next download fetches (backend names).
+    pub media_kinds: Vec<String>,
+    pub media_retry_unavailable: bool,
+    media_polling: bool,
     pub is_restarting_backend: bool,
 
     // Asynchronous action states
@@ -183,6 +193,11 @@ impl SettingsView {
             history_depth: SyncDepth::PerChat50,
             history_retry_finished: false,
             history_polling: false,
+            media_status: None,
+            is_downloading_media: false,
+            media_kinds: history_media::default_kinds(),
+            media_retry_unavailable: false,
+            media_polling: false,
             is_restarting_backend: false,
 
             is_saving_ai: false,
@@ -196,6 +211,7 @@ impl SettingsView {
 
         view.load_backend_settings(cx);
         view.load_history_status(cx);
+        view.load_media_status(cx);
 
         view
     }
@@ -269,6 +285,192 @@ impl SettingsView {
                                 this.history_status = Some(status);
                                 this.watch_history_sync(cx);
                             }
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn backend_base_url(cx: &App) -> String {
+        if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        }
+    }
+
+    /// Load the media download status via GET /api/history-media/status.
+    pub fn load_media_status(&mut self, cx: &mut Context<Self>) {
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).get_history_media_status().await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if let Ok(Ok(status)) = res {
+                                this.is_downloading_media = history_media::is_active(&status.state);
+                                this.media_status = Some(status);
+                                this.watch_history_media(cx);
+                                cx.notify();
+                            }
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Follow a running media download: the status is refetched every second
+    /// until it ends.
+    fn watch_history_media(&mut self, cx: &mut Context<Self>) {
+        if self.media_polling || !self.is_downloading_media {
+            return;
+        }
+        self.media_polling = true;
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                loop {
+                    cx_handle.background_executor().timer(std::time::Duration::from_millis(1000)).await;
+                    let Some(base_url) = cx_handle.update(|cx: &mut App| {
+                        cx.has_global::<AuthState>().then(|| AuthState::global(cx).base_url.clone())
+                    }) else {
+                        break;
+                    };
+                    let res = TOKIO_RT
+                        .spawn(async move { HttpClient::new(&base_url).get_history_media_status().await })
+                        .await;
+                    let Ok(Ok(status)) = res else { continue };
+                    let running = history_media::is_active(&status.state);
+                    let alive = cx_handle.update(|cx: &mut App| {
+                        let Some(view) = this.upgrade() else { return false };
+                        view.update(cx, |this, cx| {
+                            this.is_downloading_media = running;
+                            if !running {
+                                this.media_polling = false;
+                                if cx.has_global::<crate::state::ChatStore>() {
+                                    crate::state::ChatStore::global_mut(cx).chats_stale = true;
+                                }
+                                match status.state.as_str() {
+                                    "failed" => toast::error("Media download failed", cx),
+                                    "cancelled" => toast::info(format!("Media download stopped: {} files downloaded", status.done), cx),
+                                    _ => toast::success(format!("Downloaded {} files", status.done), cx),
+                                }
+                            }
+                            this.media_status = Some(status);
+                            cx.notify();
+                        });
+                        true
+                    });
+                    if !alive || !running {
+                        break;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Start the media download via POST /api/history-media, or with `resume`
+    /// continue the stopped or interrupted one.
+    pub fn start_history_media(&mut self, resume: bool, cx: &mut Context<Self>) {
+        if self.is_downloading_media {
+            return;
+        }
+        let request = if resume {
+            HistoryMediaRequest { resume: true, ..Default::default() }
+        } else {
+            if self.media_kinds.is_empty() {
+                return;
+            }
+            HistoryMediaRequest {
+                types: self.media_kinds.clone(),
+                retry_unavailable: self.media_retry_unavailable,
+                resume: false,
+            }
+        };
+        self.is_downloading_media = true;
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).start_history_media(&request).await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(HistoryMediaStart::Started(status))) => {
+                                    this.is_downloading_media = history_media::is_active(&status.state);
+                                    this.media_status = Some(status);
+                                    this.watch_history_media(cx);
+                                    toast::success(if resume { "Media download resumed" } else { "Media download started" }, cx);
+                                }
+                                Ok(Ok(HistoryMediaStart::AlreadyRunning(status))) => {
+                                    this.is_downloading_media = true;
+                                    this.media_status = Some(status);
+                                    this.watch_history_media(cx);
+                                    toast::info("A media download is already running.", cx);
+                                }
+                                other => {
+                                    this.is_downloading_media = false;
+                                    let reason = match other {
+                                        Ok(Err(ClientError::Api { message, .. })) => message,
+                                        Ok(Err(e)) => e.to_string(),
+                                        Err(e) => e.to_string(),
+                                        Ok(Ok(_)) => String::new(),
+                                    };
+                                    toast::error(
+                                        if reason.is_empty() {
+                                            "Failed to start the media download".to_string()
+                                        } else {
+                                            format!("Failed to start the media download: {reason}")
+                                        },
+                                        cx,
+                                    );
+                                    this.load_media_status(cx);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Stop the running media download via POST /api/history-media/cancel.
+    pub fn cancel_history_media(&mut self, cx: &mut Context<Self>) {
+        if !self.is_downloading_media {
+            return;
+        }
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).cancel_history_media().await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(status)) => {
+                                    this.media_status = Some(status);
+                                    this.watch_history_media(cx);
+                                }
+                                _ => toast::error("Could not stop the media download", cx),
+                            }
+                            cx.notify();
                         });
                     }
                 });
@@ -1102,6 +1304,250 @@ impl SettingsView {
         card = card.child(detail);
         card
     }
+
+    /// The "Chat media" section: kinds to download, start/stop/resume, and progress.
+    fn render_media_section(
+        &mut self,
+        cx: &mut Context<Self>,
+        text_color: Hsla,
+        muted_text: Hsla,
+        primary_color: Hsla,
+        secondary_bg: Hsla,
+        tag_bg: Hsla,
+        border_color: Hsla,
+    ) -> Div {
+        let state = self.media_status.as_ref().map(|st| st.state.clone()).unwrap_or_default();
+        let active = history_media::is_active(&state) || self.is_downloading_media;
+        let stopping = state == "cancelling";
+        let resumable = !active && self.media_status.as_ref().is_some_and(|st| st.resumable);
+        let nothing_chosen = self.media_kinds.is_empty();
+        let retry = self.media_retry_unavailable;
+
+        let chips = history_media::MEDIA_KINDS.into_iter().map(|kind| {
+            let selected = self.media_kinds.iter().any(|k| k == kind.id);
+            let count = self.media_status.as_ref().and_then(|st| st.available.get(kind.id)).copied();
+            let label = match count {
+                Some(n) => format!("{} · {n}", kind.label),
+                None => kind.label.to_string(),
+            };
+            div()
+                .px_2p5()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(if selected { primary_color } else { border_color })
+                .bg(if selected { tag_bg } else { gpui::transparent_black() })
+                .text_xs()
+                .text_color(if selected { primary_color } else { text_color })
+                .when(!active, |d| d.cursor_pointer().hover(|s| s.bg(secondary_bg)))
+                .child(label)
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                    if this.is_downloading_media {
+                        return;
+                    }
+                    if let Some(at) = this.media_kinds.iter().position(|k| k == kind.id) {
+                        this.media_kinds.remove(at);
+                    } else {
+                        this.media_kinds.push(kind.id.to_string());
+                    }
+                    cx.notify();
+                }))
+        });
+
+        let button = |label: &'static str, primary: bool, enabled: bool| {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .bg(if primary { primary_color } else { tag_bg })
+                .border_1()
+                .border_color(if primary { primary_color } else { border_color })
+                .when(enabled, |d| d.cursor_pointer().hover(|s| s.opacity(0.85)))
+                .when(!enabled, |d| d.opacity(0.5))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(if primary { rgb(0xffffff).into() } else { text_color })
+                        .child(label),
+                )
+        };
+        let action = if active {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .border_1()
+                .border_color(rgba(0xef444460))
+                .when(!stopping, |d| d.cursor_pointer().hover(|s| s.bg(rgba(0xef444440))))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0xef4444))
+                        .child(if stopping { "Stopping…" } else { "Stop download" }),
+                )
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                    this.cancel_history_media(cx);
+                }))
+        } else if resumable {
+            div()
+                .flex()
+                .flex_row()
+                .gap_2()
+                .child(button("Start over", false, !nothing_chosen).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.start_history_media(false, cx)),
+                ))
+                .child(button("Resume", true, true).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.start_history_media(true, cx)),
+                ))
+        } else {
+            div().child(button("Download media", false, !nothing_chosen).on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.start_history_media(false, cx)),
+            ))
+        };
+
+        let mut section = div()
+            .px_4()
+            .py_4()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(text_color)
+                                    .child("Chat media"),
+                            )
+                            .child(div().text_xs().text_color(muted_text).child(
+                                "History messages only keep their text. Download their photos, stickers and files \
+                                 into the app so they open instantly.",
+                            )),
+                    )
+                    .child(div().flex_none().child(action)),
+            )
+            .child(div().flex().flex_row().flex_wrap().gap_1p5().children(chips))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted_text)
+                    .child(history_media::chosen_text(self.media_status.as_ref(), &self.media_kinds)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap_2()
+                    .when(!active, |d| d.cursor_pointer())
+                    .child(
+                        div()
+                            .mt_0p5()
+                            .size(px(14.0))
+                            .flex_none()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(if retry { primary_color } else { border_color })
+                            .bg(if retry { primary_color } else { gpui::transparent_black() })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(retry, |d| {
+                                d.child(div().text_color(rgb(0xffffff)).text_size(px(10.0)).child("✓"))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(text_color)
+                                    .child("Also retry media that was no longer available"),
+                            )
+                            .child(div().text_xs().text_color(muted_text).child(
+                                "WhatsApp deletes old media from its servers; files found to be gone are skipped unless this is on.",
+                            )),
+                    )
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        if !this.is_downloading_media {
+                            this.media_retry_unavailable = !this.media_retry_unavailable;
+                            cx.notify();
+                        }
+                    })),
+            );
+
+        let Some(st) = self.media_status.clone() else {
+            return section;
+        };
+        if !active && st.started_at.is_none() {
+            return section;
+        }
+        let (done, gone, failed) = history_media::progress_shares(&st);
+        let mut detail = div().flex().flex_col().gap_1p5().child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(text_color)
+                .child(history_media::headline(&st)),
+        );
+        if active || st.total > 0 {
+            detail = detail.child(
+                div()
+                    .w_full()
+                    .h(px(6.0))
+                    .flex()
+                    .flex_row()
+                    .rounded_full()
+                    .bg(tag_bg)
+                    .overflow_hidden()
+                    .child(div().h_full().w(relative(done)).bg(primary_color))
+                    .child(div().h_full().w(relative(gone)).bg(muted_text.opacity(0.5)))
+                    .child(div().h_full().w(relative(failed)).bg(rgb(0xef4444))),
+            );
+        }
+        if let Some(timing) = history_media::timing_text(&st) {
+            detail = detail.child(div().text_xs().text_color(muted_text).child(timing));
+        }
+        if active && st.current > 0 {
+            detail = detail.child(
+                div()
+                    .text_xs()
+                    .text_color(muted_text)
+                    .child(format!("Now: downloading {} files at once", st.current)),
+            );
+        }
+        if let Some(note) = history_media::paused_text(&st) {
+            detail = detail.child(div().text_xs().text_color(rgb(0xd97706)).child(note));
+        }
+        detail = detail.child(div().text_xs().text_color(muted_text).child(history_media::result_text(&st)));
+        if let Some(error) = history_media::error_text(&st) {
+            detail = detail.child(div().text_xs().text_color(rgb(0xef4444)).child(error));
+        }
+        section = section.child(detail);
+        section
+    }
 }
 
 impl Render for SettingsView {
@@ -1119,6 +1565,11 @@ impl Render for SettingsView {
 
         // Chat history card: depth choice, start/stop, and what the sync is doing.
         let history_card = self.render_history_card(
+            cx, text_color, muted_text, primary_color, secondary_bg, tag_bg, border_color,
+        );
+
+        // Chat media section: kinds, start/stop/resume, and download progress.
+        let media_section = self.render_media_section(
             cx, text_color, muted_text, primary_color, secondary_bg, tag_bg, border_color,
         );
 
@@ -1891,6 +2342,8 @@ impl Render for SettingsView {
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Row 2: Chat History Sync
                                     .child(history_card)
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .child(media_section)
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Row 3: restart the local backend
                                     .child(

@@ -11,6 +11,7 @@ import {
 	pausedText, finishedChatsText, currentText, resultText, stagedText, errorText,
 } from '@/lib/historySync'
 import { useChatStore } from '@/stores/chatStore'
+import { HistoryMediaSection } from './HistoryMediaSection'
 import { isMessageFormattingEnabled, setMessageFormattingEnabled } from '@/pages/chat/renderMd'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -510,6 +511,7 @@ export function SettingsPage() {
 									)
 								})()}
 							</div>
+							<HistoryMediaSection isConnected={isConnected} />
 						</div>
 					</div>
 

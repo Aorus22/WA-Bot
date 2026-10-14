@@ -161,6 +161,9 @@ func InitializeApp() (*App, error) {
 	historySyncService.SetBroadcaster(httpServer)
 	httpServer.SetHistorySync(historySyncService)
 	eventHandler.SetHistorySyncService(historySyncService)
+	historyMediaService := whatsapp.NewHistoryMediaService(waClient, msgStore, storageRepo)
+	historyMediaService.SetBroadcaster(httpServer)
+	httpServer.SetHistoryMedia(historyMediaService)
 
 	appStore, err := repository.NewAppStore("file:database/wa-bot-app.db?_foreign_keys=on")
 	if err != nil {
@@ -256,6 +259,7 @@ func InitializeApp() (*App, error) {
 	}
 	accounts := account.NewManager(accountsRoot, msgStore, mediaDirs, waClient, httpServer, callSvc)
 	accounts.OnSwitch(historySyncService.Reload)
+	accounts.OnSwitch(historyMediaService.Reload)
 	httpServer.SetAccountController(accounts)
 	eventHandler.SetAccountEvents(accounts)
 	if waClient.IsLoggedIn() {
