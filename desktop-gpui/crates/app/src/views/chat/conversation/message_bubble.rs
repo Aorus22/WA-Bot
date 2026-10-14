@@ -120,13 +120,38 @@ impl ChatView {
             let is_highlighted = this.highlighted_message_id.as_deref() == Some(&r_msg.msg.id);
             let base_bubble_bg: Hsla = bubble_bg.into();
             let final_bubble_bg = if is_highlighted { theme.primary.opacity(0.35) } else { base_bubble_bg };
+            // Like WhatsApp: fit the picture inside the bounded frame keeping its
+            // aspect ratio, enlarging small ones to fill it. Only extreme aspect
+            // ratios hit the minimum size and get cover-cropped; everything else
+            // shows in full. The bubble is exactly as wide as the picture, so a
+            // caption wraps to the picture's width instead of widening the bubble.
+            let image_dims: Option<(f32, f32)> = if is_image {
+                r_msg.msg.media_url.as_ref().map(|m_url| {
+                    let full_url = resolve_media_url(m_url, &base_url);
+                    match preview_load_state(&full_url, window, cx) {
+                        PreviewLoad::Ready(nw, nh) if nw > 0.0 && nh > 0.0 => {
+                            let scale = (MESSAGE_IMAGE_MAX_WIDTH / nw)
+                                .min(MESSAGE_IMAGE_MAX_HEIGHT / nh);
+                            (
+                                (nw * scale).clamp(MESSAGE_IMAGE_MIN_WIDTH, MESSAGE_IMAGE_MAX_WIDTH),
+                                (nh * scale).clamp(MESSAGE_IMAGE_MIN_HEIGHT, MESSAGE_IMAGE_MAX_HEIGHT),
+                            )
+                        }
+                        _ => (MESSAGE_IMAGE_MIN_WIDTH, MESSAGE_IMAGE_MIN_HEIGHT),
+                    }
+                })
+            } else {
+                None
+            };
             let mut bubble = if is_image {
                 // Media bubbles sit close to the thumbnail; text bubbles keep the
                 // roomier text padding.
-                v_flex()
-                    .max_w(px(520.0))
-                    .px_1()
-                    .py_1()
+                // `px_1` is 4px a side, hence the 8px added to the picture's width.
+                let media_bubble = v_flex().max_w(px(520.0)).px_1().py_1();
+                match image_dims {
+                    Some((image_w, _)) => media_bubble.w(px(image_w + 8.0)),
+                    None => media_bubble,
+                }
             } else {
                 v_flex()
                     .max_w(px(520.0))
@@ -210,33 +235,10 @@ impl ChatView {
                     if let Some(ref m_url) = r_msg.msg.media_url {
                         let full_url = resolve_media_url(m_url, &base_url);
                         let click_url = full_url.clone();
-                        // WhatsApp gives media a bounded thumbnail frame. Clamp each
-                        // dimension independently, then cover-crop from the center when
-                        // the image's aspect ratio does not match that frame.
-                        let (image_w, image_h) =
-                            match preview_load_state(&full_url, window, cx) {
-                                PreviewLoad::Ready(nw, nh)
-                                    if nw > 0.0 && nh > 0.0 =>
-                                {
-                                    let scale = (MESSAGE_IMAGE_MAX_WIDTH / nw)
-                                        .min(MESSAGE_IMAGE_MAX_HEIGHT / nh)
-                                        .min(1.0);
-                                    (
-                                        (nw * scale).clamp(
-                                            MESSAGE_IMAGE_MIN_WIDTH,
-                                            MESSAGE_IMAGE_MAX_WIDTH,
-                                        ),
-                                        (nh * scale).clamp(
-                                            MESSAGE_IMAGE_MIN_HEIGHT,
-                                            MESSAGE_IMAGE_MAX_HEIGHT,
-                                        ),
-                                    )
-                                }
-                                _ => (
-                                    MESSAGE_IMAGE_MIN_WIDTH,
-                                    MESSAGE_IMAGE_MIN_HEIGHT,
-                                ),
-                            };
+                        let (image_w, image_h) = image_dims.unwrap_or((
+                            MESSAGE_IMAGE_MIN_WIDTH,
+                            MESSAGE_IMAGE_MIN_HEIGHT,
+                        ));
                         let frame = div()
                                 .w(px(image_w))
                                 .h(px(image_h))

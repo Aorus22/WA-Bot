@@ -180,6 +180,8 @@ export const ChatMessageItem = memo(({
 						<div
 							className={cn(
 								"px-3.5 py-2 rounded-2xl text-[14.5px] relative transition-all duration-200 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)]",
+								// As wide as the picture, so a caption wraps to it instead of widening the bubble.
+								isImage && isMedia && "w-[340px] max-w-full",
 								isMe
 									? cn(
 										"bg-[#dcf8c6] dark:bg-[#005c4b] text-[#303030] dark:text-[#e9edef] rounded-tr-none",
@@ -218,11 +220,11 @@ export const ChatMessageItem = memo(({
 									<LinkPreviewCard preview={message.extra.linkPreview} getMediaUrl={getMediaUrl} />
 								)}
 								{isImage && isMedia && (
-							        <div className="mb-2 -mx-[14px] -mt-2 overflow-hidden relative z-10 w-fit max-w-[calc(100%+28px)] max-h-[360px] rounded-none bg-transparent">
+							        <div className="mb-2 -mx-[14px] -mt-2 overflow-hidden relative z-10 w-[340px] max-w-[calc(100%+28px)] max-h-[360px] rounded-none bg-black/10 flex justify-center">
 							                <LazyMedia										src={getMediaUrl(message.mediaUrl)}
 										alt="Image"
-										className="block w-auto h-auto max-w-full max-h-[360px] object-contain object-center hover:scale-[1.02] transition-transform duration-500 cursor-zoom-in"
-										containerClassName="w-fit h-auto min-h-0 bg-transparent"
+										className="block w-full h-auto max-h-[360px] object-contain object-center hover:scale-[1.02] transition-transform duration-500 cursor-zoom-in"
+										containerClassName="w-full h-auto min-h-0 bg-transparent"
 										loading="lazy"
 										onClick={(e) => {
 											e.stopPropagation()
