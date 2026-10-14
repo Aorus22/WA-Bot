@@ -1,6 +1,13 @@
 .env
 docker-compose
 database/
+accounts/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.partial
+*.sqlite.before-restore
+*.sqlite.restoring
 /media/
 wa-bot.exe
 wa-bot

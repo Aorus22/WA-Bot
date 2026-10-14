@@ -6,7 +6,8 @@ services:
     container_name: wa-bot-staging
     restart: always
     volumes:
-      - /root/bimalord-bot/database:/root/database
+      - /root/bimalord-bot/database:/app/database
+      - /root/bimalord-bot/accounts:/app/accounts
     ports:
       - "3247:3090"
     env_file:

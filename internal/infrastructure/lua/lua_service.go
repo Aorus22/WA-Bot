@@ -56,6 +56,24 @@ func NewLuaService(
 	}
 }
 
+// flushWork stores the files programs wrote into the scratch folder, so what a
+// script produced with ffmpeg, yt-dlp and friends is kept in the media storage.
+func (s *LuaService) flushWork() {
+	if err := s.storage.WorkFlush(context.Background()); err != nil {
+		fmt.Printf("[LUA] Failed to store generated files: %v\n", err)
+	}
+}
+
+// readStored loads a stored object (or a scratch file) into memory.
+func (s *LuaService) readStored(ctx context.Context, path string) ([]byte, error) {
+	reader, err := s.storage.Get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
+}
+
 func (s *LuaService) ExecuteTriggers(ctx context.Context, msg *entity.Message) (bool, error) {
 	triggers, err := s.triggerRepo.GetAll(ctx)
 	if err != nil {
@@ -88,6 +106,7 @@ func (s *LuaService) RunCronScript(ctx context.Context, script string) {
 	L := s.newLuaState(ctx)
 	defer L.Close()
 
+	defer s.flushWork()
 	if err := L.DoString(script); err != nil {
 		fmt.Printf("[LUA CRON] Script Error: %v\n", err)
 	}
@@ -160,6 +179,7 @@ func (s *LuaService) ExecuteWebhook(ctx context.Context, webhook *entity.Webhook
 
 	L.SetGlobal("req", reqTable)
 
+	defer s.flushWork()
 	if err := L.DoString(webhook.Script); err != nil {
 		fmt.Printf("[LUA WEBHOOK] Script Error for path '%s': %v\n", webhook.Path, err)
 		return http.StatusInternalServerError, map[string]interface{}{"error": err.Error()}
@@ -286,6 +306,7 @@ func (s *LuaService) runScript(script string, msg *entity.Message, matches []str
 		return 1
 	}))
 
+	defer s.flushWork()
 	if err := L.DoString(script); err != nil {
 		fmt.Printf("[LUA] Script Error: %v\n", err)
 	}
@@ -316,8 +337,7 @@ func (s *LuaService) luaSendSticker(L *lua.LState) int {
 		defer resp.Body.Close()
 		data, err = io.ReadAll(resp.Body)
 	} else {
-		safePath := s.storage.GetPath(urlOrPath)
-		data, err = os.ReadFile(safePath)
+		data, err = s.readStored(context.Background(), urlOrPath)
 	}
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
@@ -435,7 +455,13 @@ func (s *LuaService) luaFetchToFile(L *lua.LState) int {
 	}
 	resTable := L.NewTable()
 	L.RawSet(resTable, lua.LString("status"), lua.LNumber(resp.StatusCode))
-	L.RawSet(resTable, lua.LString("path"), lua.LString(s.storage.GetPath(filename)))
+	workPath, err := s.storage.WorkFile(context.Background(), filename)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+	L.RawSet(resTable, lua.LString("path"), lua.LString(workPath))
 	L.RawSet(resTable, lua.LString("filename"), lua.LString(filename))
 	L.Push(resTable)
 	return 1
@@ -490,7 +516,12 @@ func (s *LuaService) luaStorageExists(L *lua.LState) int {
 
 func (s *LuaService) luaStoragePath(L *lua.LState) int {
 	filename := L.CheckString(1)
-	path := s.storage.GetPath(filename)
+	path, err := s.storage.WorkFile(context.Background(), filename)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
 	L.Push(lua.LString(path))
 	return 1
 }
@@ -501,6 +532,7 @@ func (s *LuaService) luaFFmpeg(L *lua.LState) int {
 	argsTable.ForEach(func(k, v lua.LValue) {
 		args = append(args, v.String())
 	})
+	defer s.flushWork()
 	cmd := exec.Command(util.GetBinaryPath("ffmpeg"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -672,6 +704,7 @@ func (s *LuaService) TestTrigger(ctx context.Context, pattern, script, message s
 	s.RegisterCheerio(L)
 	s.RegisterBrowser(L)
 
+	defer s.flushWork()
 	if err := L.DoString(script); err != nil {
 		result["error"] = err.Error()
 	}
@@ -713,8 +746,7 @@ func (s *LuaService) luaSendMedia(L *lua.LState) int {
 		defer resp.Body.Close()
 		data, err = io.ReadAll(resp.Body)
 	} else {
-		safePath := s.storage.GetPath(urlOrPath)
-		data, err = os.ReadFile(safePath)
+		data, err = s.readStored(context.Background(), urlOrPath)
 	}
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
@@ -841,7 +873,12 @@ func (s *LuaService) luaValueToGo(val lua.LValue) interface{} {
 
 func (s *LuaService) luaGetDuration(L *lua.LState) int {
 	path := L.CheckString(1)
-	safePath := s.storage.GetPath(path)
+	safePath, err := s.storage.WorkFile(context.Background(), path)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
 	duration, err := s.mediaDown.GetDuration(safePath)
 	if err != nil {
 		L.Push(lua.LNil)
@@ -854,7 +891,12 @@ func (s *LuaService) luaGetDuration(L *lua.LState) int {
 
 func (s *LuaService) luaGetMimeType(L *lua.LState) int {
 	path := L.CheckString(1)
-	safePath := s.storage.GetPath(path)
+	safePath, err := s.storage.WorkFile(context.Background(), path)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
 	mime, err := s.mediaDown.GetMimeType(safePath)
 	if err != nil {
 		L.Push(lua.LNil)
@@ -897,9 +939,12 @@ func (s *LuaService) luaYtDlp(L *lua.LState) int {
 	})
 	for i, arg := range args {
 		if (arg == "-o" || arg == "--output" || arg == "--cookies") && i+1 < len(args) {
-			args[i+1] = s.storage.GetPath(args[i+1])
+			if workPath, err := s.storage.WorkFile(context.Background(), args[i+1]); err == nil {
+				args[i+1] = workPath
+			}
 		}
 	}
+	defer s.flushWork()
 	cmd := exec.Command(util.GetBinaryPath("yt-dlp"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -923,17 +968,22 @@ func (s *LuaService) luaGalleryDlp(L *lua.LState) int {
 	for i, arg := range args {
 		if arg == "-D" || arg == "--directory" {
 			if i+1 < len(args) {
-				args[i+1] = s.storage.GetPath(args[i+1])
+				if dir, err := s.storage.WorkDir(context.Background(), args[i+1]); err == nil {
+					args[i+1] = dir
+				}
 				hasDir = true
 			}
 		}
 		if arg == "--cookies" && i+1 < len(args) {
-			args[i+1] = s.storage.GetPath(args[i+1])
+			if workPath, err := s.storage.WorkFile(context.Background(), args[i+1]); err == nil {
+				args[i+1] = workPath
+			}
 		}
 	}
 	if !hasDir {
-		args = append(args, "-D", s.storage.GetPath(""))
+		args = append(args, "-D", s.storage.WorkRoot())
 	}
+	defer s.flushWork()
 	cmd := exec.Command(util.GetBinaryPath("gallery-dl"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -954,12 +1004,13 @@ func (s *LuaService) luaWebpmux(L *lua.LState) int {
 		args = append(args, v.String())
 	})
 	for i, arg := range args {
-		if !strings.HasPrefix(arg, "-") && len(arg) > 0 {
-			if _, err := os.Stat(s.storage.GetPath(arg)); err == nil {
-				args[i] = s.storage.GetPath(arg)
+		if !strings.HasPrefix(arg, "-") && len(arg) > 0 && s.storage.Exists(arg) {
+			if workPath, err := s.storage.WorkFile(context.Background(), arg); err == nil {
+				args[i] = workPath
 			}
 		}
 	}
+	defer s.flushWork()
 	cmd := exec.Command(util.GetBinaryPath("webpmux"), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -1055,8 +1106,7 @@ func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 	var res string
 	var err error
 	if filePath != "" {
-		safePath := s.storage.GetPath(filePath)
-		res, err = s.gemini.GenerateWithFile(ctx, modelName, prompt, safePath)
+		res, err = s.gemini.GenerateWithFile(ctx, modelName, prompt, filePath)
 	} else {
 		res, err = s.gemini.GenerateText(ctx, modelName, prompt)
 	}

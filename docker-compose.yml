@@ -6,7 +6,10 @@ services:
     container_name: wa-bot-api
     restart: always
     volumes:
+      # WhatsApp session + app settings
       - ./database:/app/database
+      # per-account data: message database and objectstorage.sqlite (media)
+      - ./accounts:/app/accounts
     ports:
       - "3090:3090"
     env_file:

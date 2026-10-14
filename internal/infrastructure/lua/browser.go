@@ -188,7 +188,11 @@ func (s *LuaService) browserRun(L *lua.LState) int {
 
 				_, err = s.storage.Save(context.Background(), filename, bytes.NewReader(buf))
 				if err == nil {
-					results[filename] = s.storage.GetPath(filename)
+					if workPath, werr := s.storage.WorkFile(context.Background(), filename); werr == nil {
+						results[filename] = workPath
+					} else {
+						results[filename] = "Screenshot saved but its path is unavailable: " + werr.Error()
+					}
 				}
 				return nil
 			}))

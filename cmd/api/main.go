@@ -125,7 +125,12 @@ func InitializeApp() (*App, error) {
 	_ = os.MkdirAll(accountsRoot, 0755)
 
 	cfg := infrastructureConfig.NewEnvConfig()
-	storageRepo := storage.NewLocalStorage(filepath.Join(accountsRoot, "_pending", "media"))
+	mediaStorage, err := setupObjectStorage()
+	if err != nil {
+		return nil, err
+	}
+	mediaStorage.closeOnSignal()
+	storageRepo := mediaStorage.media
 	stateRepo := storage.NewInMemoryUserState()
 
 	logLevel := cfg.Get("LOG_LEVEL")
@@ -253,11 +258,7 @@ func InitializeApp() (*App, error) {
 	cronScheduler := cron.NewCronScheduler(appStore, luaService)
 	httpServer.SetCronScheduler(cronScheduler)
 
-	mediaDirs, ok := storageRepo.(interface{ SetBasePath(string) error })
-	if !ok {
-		return nil, fmt.Errorf("storage does not support per-account directories")
-	}
-	accounts := account.NewManager(accountsRoot, msgStore, mediaDirs, waClient, httpServer, callSvc)
+	accounts := account.NewManager(accountsRoot, msgStore, storageRepo, waClient, httpServer, callSvc)
 	accounts.OnSwitch(historySyncService.Reload)
 	accounts.OnSwitch(historyMediaService.Reload)
 	httpServer.SetAccountController(accounts)
@@ -331,6 +332,9 @@ func InitializeApp() (*App, error) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "storage" {
+		os.Exit(runStorageCommand(os.Args[2:]))
+	}
 	teeOutputToFile()
 	app, err := InitializeApp()
 	if err != nil {

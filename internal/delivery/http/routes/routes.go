@@ -1,13 +1,11 @@
 package routes
 
 import (
-	"io"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/gorilla/mux"
 
@@ -250,47 +248,9 @@ func (r *Router) handleMediaFile(w http.ResponseWriter, req *http.Request) {
 		decodedFilename = filename
 	}
 
-	if !r.storage.Exists(decodedFilename) {
-		http.NotFound(w, req)
-		return
-	}
-
-	ext := strings.ToLower(filepath.Ext(decodedFilename))
-	switch ext {
-	case ".jpg", ".jpeg":
-		w.Header().Set("Content-Type", "image/jpeg")
-	case ".png":
-		w.Header().Set("Content-Type", "image/png")
-	case ".webp":
-		w.Header().Set("Content-Type", "image/webp")
-	case ".gif":
-		w.Header().Set("Content-Type", "image/gif")
-	case ".mp4":
-		w.Header().Set("Content-Type", "video/mp4")
-	case ".pdf":
-		w.Header().Set("Content-Type", "application/pdf")
-	case ".ogg":
-		w.Header().Set("Content-Type", "audio/ogg")
-	case ".mp3":
-		w.Header().Set("Content-Type", "audio/mpeg")
-	case ".m4a":
-		w.Header().Set("Content-Type", "audio/mp4")
-	case ".opus":
-		w.Header().Set("Content-Type", "audio/ogg")
-	case ".wav":
-		w.Header().Set("Content-Type", "audio/wav")
-	case ".webm":
-		w.Header().Set("Content-Type", "audio/webm")
-	}
-
-	reader, err := r.storage.Get(req.Context(), decodedFilename)
-	if err != nil {
-		http.Error(w, "Failed to get file", http.StatusInternalServerError)
-		return
-	}
-	defer reader.Close()
-
-	io.Copy(w, reader)
+	// Streams from the object storage with Range, HEAD, ETag and conditional
+	// request support; unknown files answer 404.
+	r.storage.ServeMedia(w, req, decodedFilename)
 }
 
 func (r *Router) setupStaticRoutes() {

@@ -1,7 +1,7 @@
 // Package account keeps WhatsApp data separated per linked phone number.
 //
-// Each account owns <root>/<phone>/database/wa-bot-messages.db and
-// <root>/<phone>/media. While nobody is linked (QR phase) a throwaway
+// Each account owns <root>/<phone>/database/wa-bot-messages.db, and its media
+// lives in the object storage under the same phone number. While nobody is linked (QR phase) a throwaway
 // "_pending" directory is used, and wiped on every entry.
 package account
 
@@ -22,8 +22,9 @@ const pendingDir = "_pending"
 
 var phonePattern = regexp.MustCompile(`^[0-9A-Za-z_.-]+$`)
 
+// mediaDir binds media storage to an account namespace.
 type mediaDir interface {
-	SetBasePath(path string) error
+	SetAccount(id string) error
 }
 
 type broadcaster interface {
@@ -107,8 +108,12 @@ func (m *Manager) bind(phone, dir string) error {
 	if err := m.msgStore.Switch(filepath.Join(dir, "database", "wa-bot-messages.db")); err != nil {
 		return err
 	}
-	if err := m.media.SetBasePath(filepath.Join(dir, "media")); err != nil {
-		return fmt.Errorf("failed to switch media directory: %w", err)
+	mediaAccount := phone
+	if mediaAccount == "" {
+		mediaAccount = pendingDir
+	}
+	if err := m.media.SetAccount(mediaAccount); err != nil {
+		return fmt.Errorf("failed to switch media account: %w", err)
 	}
 	m.phone = phone
 	for _, fn := range m.onSwitch {

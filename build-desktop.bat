@@ -22,7 +22,7 @@ mkdir "%BIN_DIR%"
 echo.
 echo [2/5] Building backend (Go)...
 cd /d "%~dp0"
-go build -ldflags="-s -w" -o "wa-bot-backend.exe" ./cmd/api/main.go
+go build -ldflags="-s -w" -o "wa-bot-backend.exe" ./cmd/api
 if errorlevel 1 (
     echo ERROR: Backend build failed!
     exit /b 1

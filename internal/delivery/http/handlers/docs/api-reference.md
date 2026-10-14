@@ -547,11 +547,17 @@ end
 
 ### `storage_path(filename)`
 
-Gets the absolute system path for a file.
+Gets a local **working file** for `filename`, for programs that need a real path
+(`ffmpeg`, `yt_dlp`, `sh`, ...). Media is kept in the object storage, not in a
+folder: if the file exists it is copied out to the working folder first, and a
+file a program writes there is stored back automatically when that program (or the
+script) finishes. The path is temporary: do not remember it across runs, refer
+to the file by `filename` instead.
 
 ```lua
-local path = storage_path("video.mp4")
-print("Full path: " .. path)
+local path = storage_path("video.mp4")   -- a temporary local copy
+ffmpeg({"-i", path, "-vf", "scale=640:480", storage_path("small.mp4")})
+send_media(sender, "small.mp4", "video")   -- stored by now
 ```
 
 ### `sh(command)`
