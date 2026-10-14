@@ -290,7 +290,9 @@ fn main() {
 
             let open_ui = Rc::new(open_ui);
 
-            // Popover: show/hide the panel card.
+            // Popover: show/hide the panel card. Without layer-shell support
+            // (some compositors) the card can never appear, so drop to a
+            // regular window instead of leaving the launch with no effect.
             let toggle_popover = {
                 let open_ui = open_ui.clone();
                 move |cx: &mut App| {
@@ -298,14 +300,18 @@ fn main() {
                         popover::close_all(cx);
                         return;
                     }
-                    let open_ui = open_ui.clone();
-                    popover::open(
+                    let card_ui = open_ui.clone();
+                    let shown = popover::open(
                         cx,
-                        Rc::new(move |cx, placement| match open_ui(cx, Some(placement)) {
+                        Rc::new(move |cx, placement| match card_ui(cx, Some(placement)) {
                             Some(handle) => popover::set_card(cx, handle),
                             None => popover::close_all(cx),
                         }),
                     );
+                    if !shown {
+                        popover::disable(cx);
+                        open_ui(cx, None);
+                    }
                 }
             };
 
@@ -315,7 +321,7 @@ fn main() {
                 let open_ui = open_ui.clone();
                 let toggle_popover = toggle_popover.clone();
                 move |cx: &mut App, toggle: bool| {
-                    if popover_mode {
+                    if popover::is_popover(cx) {
                         if toggle || !popover::is_open(cx) {
                             toggle_popover(cx);
                         }

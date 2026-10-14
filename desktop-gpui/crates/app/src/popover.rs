@@ -320,7 +320,9 @@ fn request_card(cx: &mut App, open_card: &OpenCard, pointer: Option<(f32, f32)>,
 
 /// Start a popover session: open the backdrop and, once the pointer is known
 /// (or after a short timeout), ask `open_card` to create the card window.
-pub fn open(cx: &mut App, open_card: OpenCard) {
+/// `false` when the backdrop could not be created (the compositor has no
+/// layer-shell), so the caller can fall back to a regular window.
+pub fn open(cx: &mut App, open_card: OpenCard) -> bool {
     if !cx.has_global::<PopoverState>() {
         cx.set_global(PopoverState::default());
     }
@@ -360,7 +362,7 @@ pub fn open(cx: &mut App, open_card: OpenCard) {
         }
         Err(e) => {
             log(&format!("backdrop failed: {e:?}"));
-            return;
+            return false;
         }
     }
 
@@ -397,6 +399,16 @@ pub fn open(cx: &mut App, open_card: OpenCard) {
         });
     })
     .detach();
+    true
+}
+
+/// Leave popover mode for good: the compositor cannot show the card, so the
+/// app behaves like a regular windowed one from here on.
+pub fn disable(cx: &mut App) {
+    close_all(cx);
+    if cx.has_global::<PopoverMode>() {
+        cx.remove_global::<PopoverMode>();
+    }
 }
 
 struct Backdrop {
