@@ -8,7 +8,8 @@
 //! - ACCOUNT:
 //!   - WhatsApp connection indicator and status.
 //!   - Logout button with confirmation dialog.
-//!   - Chat history sync ("Sync 50 per chat") with live progress bar and status counters.
+//!   - Chat history sync with a depth choice (per chat / last N days / everything),
+//!     live progress (chats, current chat, ETA), and cancel.
 //! - AI CONFIGURATION:
 //!   - Gemini API Key (masked status + modal editing).
 //!   - AI Server URL with default presets.
@@ -29,7 +30,12 @@ use gpui_component::{h_flex, Icon, IconName};
 use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_component::switch::Switch;
 use wabot_backend_client::client::HttpClient;
-use wabot_backend_client::dto::HistorySyncStatus;
+use wabot_backend_client::dto::{
+    HistoryMediaRequest, HistoryMediaStart, HistoryMediaStatus, HistorySyncRequest, HistorySyncStart, HistorySyncStatus,
+};
+use wabot_backend_client::ClientError;
+use super::history_media;
+use super::history_sync::{self, SyncDepth};
 use wabot_settings::{
     ChatLayout, DesktopSettings, MAX_WINDOW_TRANSPARENCY, ThemeMode as SettingsThemeMode,
 };
@@ -95,8 +101,19 @@ pub struct SettingsView {
     // Account & sync state
     pub history_status: Option<HistorySyncStatus>,
     pub is_syncing_history: bool,
+    /// How far back the next sync goes.
+    pub history_depth: SyncDepth,
+    /// Also ask again for chats already synced to their start.
+    pub history_retry_finished: bool,
     /// A loop is already polling the sync status.
     history_polling: bool,
+    // Download of the media of history messages
+    pub media_status: Option<HistoryMediaStatus>,
+    pub is_downloading_media: bool,
+    /// The kinds of media the next download fetches (backend names).
+    pub media_kinds: Vec<String>,
+    pub media_retry_unavailable: bool,
+    media_polling: bool,
     pub is_restarting_backend: bool,
 
     // Asynchronous action states
@@ -173,7 +190,14 @@ impl SettingsView {
 
             history_status: None,
             is_syncing_history: false,
+            history_depth: SyncDepth::PerChat50,
+            history_retry_finished: false,
             history_polling: false,
+            media_status: None,
+            is_downloading_media: false,
+            media_kinds: history_media::default_kinds(),
+            media_retry_unavailable: false,
+            media_polling: false,
             is_restarting_backend: false,
 
             is_saving_ai: false,
@@ -187,6 +211,7 @@ impl SettingsView {
 
         view.load_backend_settings(cx);
         view.load_history_status(cx);
+        view.load_media_status(cx);
 
         view
     }
@@ -256,10 +281,196 @@ impl SettingsView {
                     if let Some(view) = view_weak.upgrade() {
                         view.update(cx, |this, cx| {
                             if let Ok(Ok(status)) = res {
-                                this.is_syncing_history = status.state == "running";
+                                this.is_syncing_history = history_sync::is_active(&status.state);
                                 this.history_status = Some(status);
                                 this.watch_history_sync(cx);
                             }
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn backend_base_url(cx: &App) -> String {
+        if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        }
+    }
+
+    /// Load the media download status via GET /api/history-media/status.
+    pub fn load_media_status(&mut self, cx: &mut Context<Self>) {
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).get_history_media_status().await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if let Ok(Ok(status)) = res {
+                                this.is_downloading_media = history_media::is_active(&status.state);
+                                this.media_status = Some(status);
+                                this.watch_history_media(cx);
+                                cx.notify();
+                            }
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Follow a running media download: the status is refetched every second
+    /// until it ends.
+    fn watch_history_media(&mut self, cx: &mut Context<Self>) {
+        if self.media_polling || !self.is_downloading_media {
+            return;
+        }
+        self.media_polling = true;
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                loop {
+                    cx_handle.background_executor().timer(std::time::Duration::from_millis(1000)).await;
+                    let Some(base_url) = cx_handle.update(|cx: &mut App| {
+                        cx.has_global::<AuthState>().then(|| AuthState::global(cx).base_url.clone())
+                    }) else {
+                        break;
+                    };
+                    let res = TOKIO_RT
+                        .spawn(async move { HttpClient::new(&base_url).get_history_media_status().await })
+                        .await;
+                    let Ok(Ok(status)) = res else { continue };
+                    let running = history_media::is_active(&status.state);
+                    let alive = cx_handle.update(|cx: &mut App| {
+                        let Some(view) = this.upgrade() else { return false };
+                        view.update(cx, |this, cx| {
+                            this.is_downloading_media = running;
+                            if !running {
+                                this.media_polling = false;
+                                if cx.has_global::<crate::state::ChatStore>() {
+                                    crate::state::ChatStore::global_mut(cx).chats_stale = true;
+                                }
+                                match status.state.as_str() {
+                                    "failed" => toast::error("Media download failed", cx),
+                                    "cancelled" => toast::info(format!("Media download stopped: {} files downloaded", status.done), cx),
+                                    _ => toast::success(format!("Downloaded {} files", status.done), cx),
+                                }
+                            }
+                            this.media_status = Some(status);
+                            cx.notify();
+                        });
+                        true
+                    });
+                    if !alive || !running {
+                        break;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Start the media download via POST /api/history-media, or with `resume`
+    /// continue the stopped or interrupted one.
+    pub fn start_history_media(&mut self, resume: bool, cx: &mut Context<Self>) {
+        if self.is_downloading_media {
+            return;
+        }
+        let request = if resume {
+            HistoryMediaRequest { resume: true, ..Default::default() }
+        } else {
+            if self.media_kinds.is_empty() {
+                return;
+            }
+            HistoryMediaRequest {
+                types: self.media_kinds.clone(),
+                retry_unavailable: self.media_retry_unavailable,
+                resume: false,
+            }
+        };
+        self.is_downloading_media = true;
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).start_history_media(&request).await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(HistoryMediaStart::Started(status))) => {
+                                    this.is_downloading_media = history_media::is_active(&status.state);
+                                    this.media_status = Some(status);
+                                    this.watch_history_media(cx);
+                                    toast::success(if resume { "Media download resumed" } else { "Media download started" }, cx);
+                                }
+                                Ok(Ok(HistoryMediaStart::AlreadyRunning(status))) => {
+                                    this.is_downloading_media = true;
+                                    this.media_status = Some(status);
+                                    this.watch_history_media(cx);
+                                    toast::info("A media download is already running.", cx);
+                                }
+                                other => {
+                                    this.is_downloading_media = false;
+                                    let reason = match other {
+                                        Ok(Err(ClientError::Api { message, .. })) => message,
+                                        Ok(Err(e)) => e.to_string(),
+                                        Err(e) => e.to_string(),
+                                        Ok(Ok(_)) => String::new(),
+                                    };
+                                    toast::error(
+                                        if reason.is_empty() {
+                                            "Failed to start the media download".to_string()
+                                        } else {
+                                            format!("Failed to start the media download: {reason}")
+                                        },
+                                        cx,
+                                    );
+                                    this.load_media_status(cx);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Stop the running media download via POST /api/history-media/cancel.
+    pub fn cancel_history_media(&mut self, cx: &mut Context<Self>) {
+        if !self.is_downloading_media {
+            return;
+        }
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).cancel_history_media().await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(status)) => {
+                                    this.media_status = Some(status);
+                                    this.watch_history_media(cx);
+                                }
+                                _ => toast::error("Could not stop the media download", cx),
+                            }
+                            cx.notify();
                         });
                     }
                 });
@@ -357,7 +568,7 @@ impl SettingsView {
             let cx_handle = cx.clone();
             async move {
                 loop {
-                    cx_handle.background_executor().timer(std::time::Duration::from_secs(2)).await;
+                    cx_handle.background_executor().timer(std::time::Duration::from_millis(1500)).await;
                     let Some(base_url) = cx_handle.update(|cx: &mut App| {
                         cx.has_global::<AuthState>().then(|| AuthState::global(cx).base_url.clone())
                     }) else {
@@ -367,7 +578,7 @@ impl SettingsView {
                         .spawn(async move { HttpClient::new(&base_url).get_history_sync_status().await })
                         .await;
                     let Ok(Ok(status)) = res else { continue };
-                    let running = status.state == "running";
+                    let running = history_sync::is_active(&status.state);
                     let alive = cx_handle
                         .update(|cx: &mut App| {
                             let Some(view) = this.upgrade() else { return false };
@@ -380,7 +591,11 @@ impl SettingsView {
                                         store.chats_stale = true;
                                         store.names_changed = true;
                                     }
-                                    toast::success(format!("History sync added {} messages", status.messages_added), cx);
+                                    match status.state.as_str() {
+                                        "failed" => toast::error("History sync failed", cx),
+                                        "cancelled" => toast::info(format!("History sync stopped: {} messages added", status.messages_added), cx),
+                                        _ => toast::success(format!("History sync added {} messages", status.messages_added), cx),
+                                    }
                                 }
                                 this.history_status = Some(status);
                                 cx.notify();
@@ -396,12 +611,18 @@ impl SettingsView {
         .detach();
     }
 
-    /// Start chat history sync via POST /api/history-sync.
-    pub fn start_history_sync(&mut self, cx: &mut Context<Self>) {
+    /// Start chat history sync via POST /api/history-sync, or with `resume`
+    /// continue the stopped or interrupted one where it left off.
+    pub fn start_history_sync(&mut self, resume: bool, cx: &mut Context<Self>) {
         if self.is_syncing_history {
             return;
         }
         self.is_syncing_history = true;
+        let request = if resume {
+            HistorySyncRequest { resume: true, ..Default::default() }
+        } else {
+            HistorySyncRequest { retry_finished: self.history_retry_finished, ..self.history_depth.request() }
+        };
 
         let base_url = if cx.has_global::<AuthState>() {
             AuthState::global(cx).base_url.clone()
@@ -414,22 +635,82 @@ impl SettingsView {
             let cx_handle = cx.clone();
             async move {
                 let client = HttpClient::new(&base_url);
-                let res = TOKIO_RT.spawn(async move { client.start_history_sync().await }).await;
+                let res = TOKIO_RT.spawn(async move { client.start_history_sync(&request).await }).await;
 
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = view_weak.upgrade() {
                         view.update(cx, |this, cx| {
                             match res {
-                                Ok(Ok(status)) => {
-                                    this.is_syncing_history = status.state == "running";
+                                Ok(Ok(HistorySyncStart::Started(status))) => {
+                                    this.is_syncing_history = history_sync::is_active(&status.state);
                                     this.history_status = Some(status);
                                     this.watch_history_sync(cx);
-                                    toast::success("History sync started", cx);
+                                    toast::success(if resume { "History sync resumed" } else { "History sync started" }, cx);
                                 }
-                                _ => {
+                                Ok(Ok(HistorySyncStart::AlreadyRunning(status))) => {
+                                    // Follow the one that is running instead of failing.
+                                    this.is_syncing_history = true;
+                                    this.history_status = Some(status);
+                                    this.watch_history_sync(cx);
+                                    toast::info("A sync is already running. Stop it first to start a different depth.", cx);
+                                }
+                                other => {
                                     this.is_syncing_history = false;
-                                    toast::error("Failed to start history sync", cx);
+                                    // Say what the backend said, not just that it failed.
+                                    let reason = match other {
+                                        Ok(Err(ClientError::Api { message, .. })) => message,
+                                        Ok(Err(e)) => e.to_string(),
+                                        Err(e) => e.to_string(),
+                                        Ok(Ok(_)) => String::new(),
+                                    };
+                                    let what = if resume { "resume" } else { "start" };
+                                    toast::error(
+                                        if reason.is_empty() {
+                                            format!("Failed to {what} history sync")
+                                        } else {
+                                            format!("Failed to {what} history sync: {reason}")
+                                        },
+                                        cx,
+                                    );
+                                    // Whatever went wrong, show what the backend says it is doing.
+                                    this.load_history_status(cx);
                                 }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Stop the running history sync via POST /api/history-sync/cancel.
+    pub fn cancel_history_sync(&mut self, cx: &mut Context<Self>) {
+        if !self.is_syncing_history {
+            return;
+        }
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).cancel_history_sync().await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(status)) => {
+                                    this.history_status = Some(status);
+                                    this.watch_history_sync(cx);
+                                }
+                                _ => toast::error("Could not stop the history sync", cx),
                             }
                             cx.notify();
                         });
@@ -766,9 +1047,512 @@ impl SettingsView {
     }
 }
 
+impl SettingsView {
+    #[allow(clippy::too_many_arguments)]
+    fn render_history_card(
+        &mut self,
+        cx: &mut Context<Self>,
+        text_color: Hsla,
+        muted_text: Hsla,
+        primary_color: Hsla,
+        secondary_bg: Hsla,
+        tag_bg: Hsla,
+        border_color: Hsla,
+    ) -> Div {
+        let state = self.history_status.as_ref().map(|st| st.state.clone()).unwrap_or_default();
+        let active = history_sync::is_active(&state) || self.is_syncing_history;
+        let stopping = state == "cancelling";
+        let resumable = !active && self.history_status.as_ref().is_some_and(|st| st.resumable);
+        let depth = self.history_depth;
+        let retry_finished = self.history_retry_finished;
+
+        // The depth choices.
+        let chips = SyncDepth::ALL.into_iter().map(|choice| {
+            let selected = choice == depth;
+            div()
+                .px_2p5()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(if selected { primary_color } else { border_color })
+                .bg(if selected { tag_bg } else { gpui::transparent_black() })
+                .text_xs()
+                .text_color(if selected { primary_color } else { text_color })
+                .when(!active, |d| d.cursor_pointer().hover(|s| s.bg(secondary_bg)))
+                .child(choice.label())
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                    if !this.is_syncing_history {
+                        this.history_depth = choice;
+                        cx.notify();
+                    }
+                }))
+        });
+
+        // Start, or stop while one runs; a stopped one can be resumed.
+        let button = |label: &'static str, primary: bool| {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .bg(if primary { primary_color } else { tag_bg })
+                .border_1()
+                .border_color(if primary { primary_color } else { border_color })
+                .cursor_pointer()
+                .hover(|s| s.opacity(0.85))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(if primary { rgb(0xffffff).into() } else { text_color })
+                        .child(label),
+                )
+        };
+        let action = if active {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .border_1()
+                .border_color(rgba(0xef444460))
+                .when(!stopping, |d| d.cursor_pointer().hover(|s| s.bg(rgba(0xef444440))))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0xef4444))
+                        .child(if stopping { "Stopping…" } else { "Stop sync" }),
+                )
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                    this.cancel_history_sync(cx);
+                }))
+        } else if resumable {
+            div()
+                .flex()
+                .flex_row()
+                .gap_2()
+                .child(button("Start over", false).on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                    this.start_history_sync(false, cx);
+                })))
+                .child(button("Resume", true).on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                    this.start_history_sync(true, cx);
+                })))
+        } else {
+            div().child(button("Sync history", false).on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                this.start_history_sync(false, cx);
+            })))
+        };
+
+        let mut card = div()
+            .px_4()
+            .py_4()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(text_color)
+                                    .child("Chat history"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted_text)
+                                    .child("Load older messages from your phone. Existing messages are never removed."),
+                            ),
+                    )
+                    .child(div().flex_none().child(action)),
+            )
+            .child(div().flex().flex_row().flex_wrap().gap_1p5().children(chips))
+            .child(div().text_xs().text_color(muted_text).child(depth.hint()))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap_2()
+                    .when(!active, |d| d.cursor_pointer())
+                    .child(
+                        div()
+                            .mt_0p5()
+                            .size(px(14.0))
+                            .flex_none()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(if retry_finished { primary_color } else { border_color })
+                            .bg(if retry_finished { primary_color } else { gpui::transparent_black() })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(retry_finished, |d| {
+                                d.child(div().text_color(rgb(0xffffff)).text_size(px(10.0)).child("✓"))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(text_color)
+                                    .child("Also retry chats that are already synced"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted_text)
+                                    .child(history_sync::finished_chats_text(self.history_status.as_ref())),
+                            ),
+                    )
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        if !this.is_syncing_history {
+                            this.history_retry_finished = !this.history_retry_finished;
+                            cx.notify();
+                        }
+                    })),
+            );
+
+        let Some(st) = self.history_status.clone() else {
+            return card;
+        };
+        let ran = st.started_at.is_some();
+        if !active && !ran {
+            return card;
+        }
+
+        // Headline: state and chats done; then a bar with the chats being worked
+        // on drawn after the finished ones; then how long it ran and how long is left.
+        let fraction = history_sync::progress_fraction(&st);
+        let working = history_sync::in_progress_fraction(&st);
+        let mut headline = vec![history_sync::state_label(&st.state).to_string()];
+        headline.extend(history_sync::chats_text(&st));
+        let timing: Vec<String> = history_sync::elapsed_text(&st)
+            .into_iter()
+            .chain(history_sync::eta_text(&st))
+            .collect();
+
+        let mut detail = div().flex().flex_col().gap_1p5().child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(text_color)
+                .child(headline.join(" · ")),
+        );
+        if active || st.chats_total > 0 {
+            detail = detail.child(
+                div()
+                    .w_full()
+                    .h(px(6.0))
+                    .flex()
+                    .flex_row()
+                    .rounded_full()
+                    .bg(tag_bg)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(if active && fraction < 0.01 { 0.01 } else { fraction }))
+                            .bg(primary_color),
+                    )
+                    .child(div().h_full().w(relative(working)).bg(primary_color.opacity(0.4))),
+            );
+        }
+        if !timing.is_empty() {
+            detail = detail.child(div().text_xs().text_color(muted_text).child(timing.join(" · ")));
+        }
+        if active {
+            for current in st.current.iter().take(3) {
+                detail = detail.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted_text)
+                        .child(format!("Now: {}", history_sync::current_text(current))),
+                );
+            }
+            if st.current.is_empty() && st.chats_total > 0 {
+                detail = detail.child(div().text_xs().text_color(muted_text).child("Now: picking the next chat…"));
+            }
+        }
+        if let Some(note) = history_sync::paused_text(&st) {
+            detail = detail.child(div().text_xs().text_color(rgb(0xd97706)).child(note));
+        }
+        detail = detail.child(div().text_xs().text_color(muted_text).child(history_sync::result_text(&st)));
+        if let Some(note) = history_sync::staged_text(&st) {
+            detail = detail.child(div().text_xs().text_color(muted_text).child(note));
+        }
+        if let Some(error) = history_sync::error_text(&st) {
+            detail = detail.child(div().text_xs().text_color(rgb(0xef4444)).child(error));
+        }
+        card = card.child(detail);
+        card
+    }
+
+    /// The "Chat media" section: kinds to download, start/stop/resume, and progress.
+    fn render_media_section(
+        &mut self,
+        cx: &mut Context<Self>,
+        text_color: Hsla,
+        muted_text: Hsla,
+        primary_color: Hsla,
+        secondary_bg: Hsla,
+        tag_bg: Hsla,
+        border_color: Hsla,
+    ) -> Div {
+        let state = self.media_status.as_ref().map(|st| st.state.clone()).unwrap_or_default();
+        let active = history_media::is_active(&state) || self.is_downloading_media;
+        let stopping = state == "cancelling";
+        let resumable = !active && self.media_status.as_ref().is_some_and(|st| st.resumable);
+        let nothing_chosen = self.media_kinds.is_empty();
+        let retry = self.media_retry_unavailable;
+
+        let chips = history_media::MEDIA_KINDS.into_iter().map(|kind| {
+            let selected = self.media_kinds.iter().any(|k| k == kind.id);
+            let count = self.media_status.as_ref().and_then(|st| st.available.get(kind.id)).copied();
+            let label = match count {
+                Some(n) => format!("{} · {n}", kind.label),
+                None => kind.label.to_string(),
+            };
+            div()
+                .px_2p5()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(if selected { primary_color } else { border_color })
+                .bg(if selected { tag_bg } else { gpui::transparent_black() })
+                .text_xs()
+                .text_color(if selected { primary_color } else { text_color })
+                .when(!active, |d| d.cursor_pointer().hover(|s| s.bg(secondary_bg)))
+                .child(label)
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                    if this.is_downloading_media {
+                        return;
+                    }
+                    if let Some(at) = this.media_kinds.iter().position(|k| k == kind.id) {
+                        this.media_kinds.remove(at);
+                    } else {
+                        this.media_kinds.push(kind.id.to_string());
+                    }
+                    cx.notify();
+                }))
+        });
+
+        let button = |label: &'static str, primary: bool, enabled: bool| {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .bg(if primary { primary_color } else { tag_bg })
+                .border_1()
+                .border_color(if primary { primary_color } else { border_color })
+                .when(enabled, |d| d.cursor_pointer().hover(|s| s.opacity(0.85)))
+                .when(!enabled, |d| d.opacity(0.5))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(if primary { rgb(0xffffff).into() } else { text_color })
+                        .child(label),
+                )
+        };
+        let action = if active {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .border_1()
+                .border_color(rgba(0xef444460))
+                .when(!stopping, |d| d.cursor_pointer().hover(|s| s.bg(rgba(0xef444440))))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0xef4444))
+                        .child(if stopping { "Stopping…" } else { "Stop download" }),
+                )
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                    this.cancel_history_media(cx);
+                }))
+        } else if resumable {
+            div()
+                .flex()
+                .flex_row()
+                .gap_2()
+                .child(button("Start over", false, !nothing_chosen).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.start_history_media(false, cx)),
+                ))
+                .child(button("Resume", true, true).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.start_history_media(true, cx)),
+                ))
+        } else {
+            div().child(button("Download media", false, !nothing_chosen).on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.start_history_media(false, cx)),
+            ))
+        };
+
+        let mut section = div()
+            .px_4()
+            .py_4()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(text_color)
+                                    .child("Chat media"),
+                            )
+                            .child(div().text_xs().text_color(muted_text).child(
+                                "History messages only keep their text. Download their photos, stickers and files \
+                                 into the app so they open instantly.",
+                            )),
+                    )
+                    .child(div().flex_none().child(action)),
+            )
+            .child(div().flex().flex_row().flex_wrap().gap_1p5().children(chips))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted_text)
+                    .child(history_media::chosen_text(self.media_status.as_ref(), &self.media_kinds)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap_2()
+                    .when(!active, |d| d.cursor_pointer())
+                    .child(
+                        div()
+                            .mt_0p5()
+                            .size(px(14.0))
+                            .flex_none()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(if retry { primary_color } else { border_color })
+                            .bg(if retry { primary_color } else { gpui::transparent_black() })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(retry, |d| {
+                                d.child(div().text_color(rgb(0xffffff)).text_size(px(10.0)).child("✓"))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(text_color)
+                                    .child("Also retry media that was no longer available"),
+                            )
+                            .child(div().text_xs().text_color(muted_text).child(
+                                "WhatsApp deletes old media from its servers; files found to be gone are skipped unless this is on.",
+                            )),
+                    )
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        if !this.is_downloading_media {
+                            this.media_retry_unavailable = !this.media_retry_unavailable;
+                            cx.notify();
+                        }
+                    })),
+            );
+
+        let Some(st) = self.media_status.clone() else {
+            return section;
+        };
+        if !active && st.started_at.is_none() {
+            return section;
+        }
+        let (done, gone, failed) = history_media::progress_shares(&st);
+        let mut detail = div().flex().flex_col().gap_1p5().child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(text_color)
+                .child(history_media::headline(&st)),
+        );
+        if active || st.total > 0 {
+            detail = detail.child(
+                div()
+                    .w_full()
+                    .h(px(6.0))
+                    .flex()
+                    .flex_row()
+                    .rounded_full()
+                    .bg(tag_bg)
+                    .overflow_hidden()
+                    .child(div().h_full().w(relative(done)).bg(primary_color))
+                    .child(div().h_full().w(relative(gone)).bg(muted_text.opacity(0.5)))
+                    .child(div().h_full().w(relative(failed)).bg(rgb(0xef4444))),
+            );
+        }
+        if let Some(timing) = history_media::timing_text(&st) {
+            detail = detail.child(div().text_xs().text_color(muted_text).child(timing));
+        }
+        if active && st.current > 0 {
+            detail = detail.child(
+                div()
+                    .text_xs()
+                    .text_color(muted_text)
+                    .child(format!("Now: downloading {} files at once", st.current)),
+            );
+        }
+        if let Some(note) = history_media::paused_text(&st) {
+            detail = detail.child(div().text_xs().text_color(rgb(0xd97706)).child(note));
+        }
+        detail = detail.child(div().text_xs().text_color(muted_text).child(history_media::result_text(&st)));
+        if let Some(error) = history_media::error_text(&st) {
+            detail = detail.child(div().text_xs().text_color(rgb(0xef4444)).child(error));
+        }
+        section = section.child(detail);
+        section
+    }
+}
+
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.app_theme();
+        let theme = *cx.app_theme();
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
         let card_bg = theme.card;
@@ -778,6 +1562,16 @@ impl Render for SettingsView {
         let primary_color = theme.primary;
         let secondary_bg = theme.secondary;
         let tag_bg = theme.muted;
+
+        // Chat history card: depth choice, start/stop, and what the sync is doing.
+        let history_card = self.render_history_card(
+            cx, text_color, muted_text, primary_color, secondary_bg, tag_bg, border_color,
+        );
+
+        // Chat media section: kinds, start/stop/resume, and download progress.
+        let media_section = self.render_media_section(
+            cx, text_color, muted_text, primary_color, secondary_bg, tag_bg, border_color,
+        );
 
         let layout_pref_now = crate::layout_pref::preference(cx);
         let notifications_now = crate::notifications::enabled(cx);
@@ -1547,101 +2341,9 @@ impl Render for SettingsView {
                                     )
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Row 2: Chat History Sync
-                                    .child(
-                                        div()
-                                            .px_4()
-                                            .py_4()
-                                            .flex()
-                                            .flex_col()
-                                            .gap_3()
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_row()
-                                                    .items_start()
-                                                    .justify_between()
-                                                    .child(
-                                                        div()
-                                                            .flex()
-                                                            .flex_col()
-                                                            .gap_0p5()
-                                                            .child(
-                                                                div()
-                                                                    .text_sm()
-                                                                    .font_weight(FontWeight::MEDIUM)
-                                                                    .text_color(text_color)
-                                                                    .child("Chat history"),
-                                                            )
-                                                            .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(muted_text)
-                                                                    .child("Add up to 50 older messages per chat. Existing messages are never removed."),
-                                                            ),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .px_3()
-                                                            .py_1p5()
-                                                            .rounded_md()
-                                                            .bg(tag_bg)
-                                                            .border_1()
-                                                            .border_color(border_color)
-                                                            .cursor_pointer()
-                                                            .hover(|s| s.bg(secondary_bg))
-                                                            .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .font_weight(FontWeight::MEDIUM)
-                                                                    .text_color(text_color)
-                                                                    .child(if self.is_syncing_history { "Syncing..." } else { "Sync 50 per chat" }),
-                                                            )
-                                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                                this.start_history_sync(cx);
-                                                            })),
-                                                    ),
-                                            )
-                                            .children(self.history_status.as_ref().map(|st| {
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap_1p5()
-                                                    .child(
-                                                        div()
-                                                            .flex()
-                                                            .flex_row()
-                                                            .gap_4()
-                                                            .text_xs()
-                                                            .text_color(muted_text)
-                                                            .child(format!("Status: {}", st.state))
-                                                            .children((st.chats_total > 0).then(|| format!("Chats: {}/{}", st.chats_processed, st.chats_total)))
-                                                            .child(format!("Staged: {} msgs in {} chats", st.pending_messages, st.pending_chats))
-                                                            .child(format!("Added: {}", st.messages_added)),
-                                                    )
-                                                    .children(if st.state == "running" {
-                                                        Some(
-                                                            div()
-                                                                .w_full()
-                                                                .h(px(4.0))
-                                                                .rounded_full()
-                                                                .bg(tag_bg)
-                                                                .overflow_hidden()
-                                                                .child(
-                                                                    div()
-                                                                        .h_full()
-                                                                        .w(relative(if st.chats_total > 0 {
-                                                                            (st.chats_processed as f32 / st.chats_total as f32).clamp(0.02, 1.0)
-                                                                        } else {
-                                                                            0.05
-                                                                        }))
-                                                                        .bg(primary_color),
-                                                                ),
-                                                        )
-                                                    } else {
-                                                        None
-                                                    })
-                                            })),
-                                    )
+                                    .child(history_card)
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .child(media_section)
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Row 3: restart the local backend
                                     .child(

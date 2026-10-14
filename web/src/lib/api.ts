@@ -157,8 +157,31 @@ export type HistorySyncError = {
 	message: string
 }
 
+export type HistorySyncState = "idle" | "running" | "cancelling" | "completed" | "partial" | "cancelled" | "interrupted" | "failed"
+
+/** How far back a history sync goes. Empty = 50 older messages per chat. */
+export type HistorySyncRequest = {
+	/** Cap on older messages added per chat; 0 = no cap. */
+	perChat?: number
+	/** Only go back this many days; 0 = no limit. */
+	sinceDays?: number
+	/** Everything the phone will give, retrying chats found to be at their start. */
+	all?: boolean
+	/** Also ask again for chats an earlier sync found to be at their start (or that never answered). */
+	retryFinished?: boolean
+	/** Continue the stopped or interrupted sync instead of starting one; the rest is ignored. */
+	resume?: boolean
+}
+
+export type HistorySyncCurrent = {
+	chatId: string
+	name: string
+	added: number
+	phase: "importing" | "asking-phone" | string
+}
+
 export type HistorySyncStatus = {
-	state: "idle" | "running" | "completed" | "partial" | "failed"
+	state: HistorySyncState
 	pendingChats: number
 	pendingMessages: number
 	chatsTotal: number
@@ -168,20 +191,105 @@ export type HistorySyncStatus = {
 	startedAt: number | null
 	finishedAt: number | null
 	lastRunAt: number | null
+	chatsWithNew: number
+	chatsExhausted: number
+	chatsSkipped: number
+	timeouts: number
+	current: HistorySyncCurrent[]
+	/** Chats the next sync skips unless asked to retry them. */
+	chatsFinished: number
+	/** Stopped or interrupted with chats left: "resume" continues where it left off. */
+	resumable: boolean
+	/** How long the sync actually ran, not counting the time it was stopped. */
+	elapsedMs: number
+	/** Rough time left; null until there is enough to go on. */
+	etaMs: number | null
+}
+
+export type HistoryMediaKind = "image" | "sticker" | "audio" | "video" | "document"
+
+export type HistoryMediaState = "idle" | "running" | "cancelling" | "completed" | "partial" | "cancelled" | "interrupted" | "failed"
+
+export type HistoryMediaRequest = {
+	/** The kinds of media to download. */
+	types?: HistoryMediaKind[]
+	/** Also try media an earlier download found to be gone. */
+	retryUnavailable?: boolean
+	/** Continue the stopped or interrupted download instead of starting one; the rest is ignored. */
+	resume?: boolean
+}
+
+export type HistoryMediaStatus = {
+	state: HistoryMediaState
+	/** Everything the download has to do: done + unavailable + failed + remaining. */
+	total: number
+	done: number
+	remaining: number
+	/** Gone from WhatsApp's servers. */
+	unavailable: number
+	/** Could not be downloaded (try again with a new download). */
+	failed: number
+	bytes: number
+	errors: HistorySyncError[]
+	startedAt: number | null
+	finishedAt: number | null
+	options: { types: HistoryMediaKind[]; retryUnavailable: boolean }
+	/** Per kind, the media a new download could still fetch. */
+	available: Partial<Record<HistoryMediaKind, number>>
+	/** Files being downloaded right now. */
+	current: number
+	resumable: boolean
+	elapsedMs: number
+	etaMs: number | null
+}
+
+const HISTORY_MEDIA_STATES: HistoryMediaState[] = ["idle", "running", "cancelling", "completed", "partial", "cancelled", "interrupted", "failed"]
+
+export function normalizeHistoryMediaStatus(raw: Partial<HistoryMediaStatus> | null | undefined): HistoryMediaStatus {
+	const value = raw ?? {}
+	const state = HISTORY_MEDIA_STATES.includes(value.state as HistoryMediaState) ? value.state as HistoryMediaState : "idle"
+	const errors = Array.isArray(value.errors)
+		? value.errors.filter((error): error is HistorySyncError => Boolean(error) && typeof error === "object")
+			.map((error) => ({
+				chatId: typeof error.chatId === "string" ? error.chatId : undefined,
+				message: typeof error.message === "string" ? error.message : "Unknown media download error",
+			}))
+		: []
+	const options = value.options ?? { types: [], retryUnavailable: false }
+	return {
+		state,
+		total: Number(value.total) || 0,
+		done: Number(value.done) || 0,
+		remaining: Number(value.remaining) || 0,
+		unavailable: Number(value.unavailable) || 0,
+		failed: Number(value.failed) || 0,
+		bytes: Number(value.bytes) || 0,
+		errors,
+		startedAt: value.startedAt == null ? null : Number(value.startedAt),
+		finishedAt: value.finishedAt == null ? null : Number(value.finishedAt),
+		options: { types: Array.isArray(options.types) ? options.types : [], retryUnavailable: options.retryUnavailable === true },
+		available: value.available && typeof value.available === "object" ? value.available : {},
+		current: Number(value.current) || 0,
+		resumable: value.resumable === true,
+		elapsedMs: Number(value.elapsedMs) || 0,
+		etaMs: value.etaMs == null ? null : Number(value.etaMs),
+	}
 }
 
 export function normalizeHistorySyncStatus(raw: Partial<HistorySyncStatus> | null | undefined): HistorySyncStatus {
 	const value = raw ?? {}
-	const states: HistorySyncStatus["state"][] = ["idle", "running", "completed", "partial", "failed"]
-	const state = states.includes(value.state as HistorySyncStatus["state"])
-		? value.state as HistorySyncStatus["state"]
-		: "idle"
+	const states: HistorySyncState[] = ["idle", "running", "cancelling", "completed", "partial", "cancelled", "interrupted", "failed"]
+	const state = states.includes(value.state as HistorySyncState) ? value.state as HistorySyncState : "idle"
 	const errors = Array.isArray(value.errors)
 		? value.errors.filter((error): error is HistorySyncError => Boolean(error) && typeof error === "object")
 			.map((error) => ({
 				chatId: typeof error.chatId === "string" ? error.chatId : undefined,
 				message: typeof error.message === "string" ? error.message : "Unknown history sync error",
 			}))
+		: []
+	const current = Array.isArray(value.current)
+		? value.current.filter((c): c is HistorySyncCurrent => Boolean(c) && typeof c === "object" && typeof c.chatId === "string")
+			.map((c) => ({ chatId: c.chatId, name: typeof c.name === "string" ? c.name : "", added: Number(c.added) || 0, phase: String(c.phase ?? "") }))
 		: []
 	return {
 		state,
@@ -194,6 +302,15 @@ export function normalizeHistorySyncStatus(raw: Partial<HistorySyncStatus> | nul
 		startedAt: value.startedAt == null ? null : Number(value.startedAt),
 		finishedAt: value.finishedAt == null ? null : Number(value.finishedAt),
 		lastRunAt: value.lastRunAt == null ? null : Number(value.lastRunAt),
+		chatsWithNew: Number(value.chatsWithNew) || 0,
+		chatsExhausted: Number(value.chatsExhausted) || 0,
+		chatsSkipped: Number(value.chatsSkipped) || 0,
+		timeouts: Number(value.timeouts) || 0,
+		current,
+		chatsFinished: Number(value.chatsFinished) || 0,
+		resumable: value.resumable === true,
+		elapsedMs: Number(value.elapsedMs) || 0,
+		etaMs: value.etaMs == null ? null : Number(value.etaMs),
 	}
 }
 
@@ -466,9 +583,41 @@ class ApiClient {	private baseUrl: string
 		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
 	}
 
-	async startHistorySync(): Promise<HistorySyncStatus> {
-		const raw = await this.request<unknown>("/history-sync", { method: "POST" })
+	async startHistorySync(request: HistorySyncRequest = {}): Promise<HistorySyncStatus> {
+		const raw = await this.request<unknown>("/history-sync", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(request),
+		})
 		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
+	}
+
+	async resumeHistorySync(): Promise<HistorySyncStatus> {
+		return this.startHistorySync({ resume: true })
+	}
+
+	async cancelHistorySync(): Promise<HistorySyncStatus> {
+		const raw = await this.request<unknown>("/history-sync/cancel", { method: "POST" })
+		return normalizeHistorySyncStatus(raw as Partial<HistorySyncStatus>)
+	}
+
+	async getHistoryMediaStatus(): Promise<HistoryMediaStatus> {
+		const raw = await this.request<unknown>("/history-media/status")
+		return normalizeHistoryMediaStatus(raw as Partial<HistoryMediaStatus>)
+	}
+
+	async startHistoryMedia(request: HistoryMediaRequest): Promise<HistoryMediaStatus> {
+		const raw = await this.request<unknown>("/history-media", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(request),
+		})
+		return normalizeHistoryMediaStatus(raw as Partial<HistoryMediaStatus>)
+	}
+
+	async cancelHistoryMedia(): Promise<HistoryMediaStatus> {
+		const raw = await this.request<unknown>("/history-media/cancel", { method: "POST" })
+		return normalizeHistoryMediaStatus(raw as Partial<HistoryMediaStatus>)
 	}
 
 	async getMessages(chatId: string, limit = 100, before?: number, after?: number): Promise<Message[]> {

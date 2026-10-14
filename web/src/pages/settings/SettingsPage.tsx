@@ -6,7 +6,12 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { api, type HistorySyncStatus, type SettingsMap } from '@/lib/api'
+import {
+	SYNC_DEPTHS, type SyncDepthId, isActive, stateLabel, progressFraction, inProgressFraction, elapsedText, etaText, chatsText,
+	pausedText, finishedChatsText, currentText, resultText, stagedText, errorText,
+} from '@/lib/historySync'
 import { useChatStore } from '@/stores/chatStore'
+import { HistoryMediaSection } from './HistoryMediaSection'
 import { isMessageFormattingEnabled, setMessageFormattingEnabled } from '@/pages/chat/renderMd'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -74,18 +79,23 @@ export function SettingsPage() {
 	const [historyStatus, setHistoryStatus] = useState<HistorySyncStatus | null>(null)
 	const [historyLoading, setHistoryLoading] = useState(true)
 	const historyWasRunning = useRef(false)
+	const [historyDepth, setHistoryDepth] = useState<SyncDepthId>('per50')
+	const [retryFinished, setRetryFinished] = useState(false)
+	const historyActive = historyStatus ? isActive(historyStatus.state) : false
 
 	const loadHistoryStatus = useCallback(async () => {
 		try {
 			const status = await api.getHistorySyncStatus()
 			setHistoryStatus(status)
-			if (historyWasRunning.current && status.state !== 'running') {
+			if (historyWasRunning.current && !isActive(status.state)) {
 				const chats = await api.getChats()
 				useChatStore.getState().setChats(chats || [])
 				useChatStore.getState().invalidateMessages()
-				toast.success(`History sync added ${status.messagesAdded} messages`)
+				if (status.state === 'failed') toast.error('History sync failed')
+				else if (status.state === 'cancelled') toast(`History sync stopped: ${status.messagesAdded} messages added`)
+				else toast.success(`History sync added ${status.messagesAdded} messages`)
 			}
-			historyWasRunning.current = status.state === 'running'
+			historyWasRunning.current = isActive(status.state)
 		} catch {
 			// The card remains available and will retry when the user clicks it.
 		} finally {
@@ -98,23 +108,42 @@ export function SettingsPage() {
 	}, [loadHistoryStatus])
 
 	useEffect(() => {
-		if (historyStatus?.state !== 'running') return
-		const timer = window.setInterval(() => void loadHistoryStatus(), 1000)
+		if (!historyActive) return
+		const timer = window.setInterval(() => {
+			void loadHistoryStatus()
+		}, 1000)
 		return () => window.clearInterval(timer)
-	}, [historyStatus?.state, loadHistoryStatus])
+	}, [historyActive, loadHistoryStatus])
 
-	const startHistorySync = async () => {
+	const startHistorySync = async (resume = false) => {
 		setHistoryLoading(true)
 		try {
-			const status = await api.startHistorySync()
+			const depth = SYNC_DEPTHS.find((d) => d.id === historyDepth) ?? SYNC_DEPTHS[0]
+			const status = resume ? await api.resumeHistorySync() : await api.startHistorySync({ ...depth.request, retryFinished })
 			historyWasRunning.current = true
 			setHistoryStatus(status)
-			toast.success('History sync started')
+			toast.success(resume ? 'History sync resumed' : 'History sync started')
 		} catch (err) {
-			toast.error(err instanceof Error ? err.message : 'Failed to start history sync')
-			await loadHistoryStatus()
+			// One may already be running (the server answers 409): follow it instead of failing.
+			const current = await api.getHistorySyncStatus().catch(() => null)
+			if (current && isActive(current.state)) {
+				setHistoryStatus(current)
+				historyWasRunning.current = true
+				toast('A sync is already running. Stop it first to start a different depth.')
+			} else {
+				toast.error(err instanceof Error ? err.message : resume ? 'Failed to resume history sync' : 'Failed to start history sync')
+				await loadHistoryStatus()
+			}
 		} finally {
 			setHistoryLoading(false)
+		}
+	}
+
+	const cancelHistorySync = async () => {
+		try {
+			setHistoryStatus(await api.cancelHistorySync())
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Could not stop the history sync')
 		}
 	}
 
@@ -385,42 +414,104 @@ export function SettingsPage() {
 										<div className="flex flex-col gap-0.5">
 											<span className="text-sm font-medium">Chat history</span>
 											<span className="text-xs text-muted-foreground">
-												Add up to 50 older messages per chat. Existing messages are never removed.
+												Load older messages from your phone. Existing messages are never removed.
 											</span>
 										</div>
 									</div>
-									<Button
-										size="sm"
-										onClick={startHistorySync}
-										disabled={!isConnected || historyLoading || historyStatus?.state === 'running'}
-									>
-										{historyStatus?.state === 'running' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-										{historyStatus?.state === 'running' ? 'Syncing…' : 'Sync 50 per chat'}
-									</Button>
-								</div>
-								{historyStatus && (
-									<div className="space-y-2 text-xs text-muted-foreground">
-										<div className="flex flex-wrap gap-x-4 gap-y-1">
-											<span>Status: <b className="text-foreground capitalize">{historyStatus.state}</b></span>
-											<span>Staged: {historyStatus.pendingMessages} messages in {historyStatus.pendingChats} chats</span>
-											<span>Added: {historyStatus.messagesAdded}</span>
+									{historyStatus && isActive(historyStatus.state) ? (
+										<Button
+											size="sm"
+											variant="outline"
+											className="text-destructive"
+											onClick={cancelHistorySync}
+											disabled={historyStatus.state === 'cancelling'}
+										>
+											{historyStatus.state === 'cancelling' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+											{historyStatus.state === 'cancelling' ? 'Stopping…' : 'Stop sync'}
+										</Button>
+									) : historyStatus?.resumable ? (
+										<div className="flex gap-2">
+											<Button size="sm" variant="outline" onClick={() => startHistorySync(false)} disabled={!isConnected || historyLoading}>
+												Start over
+											</Button>
+											<Button size="sm" onClick={() => startHistorySync(true)} disabled={!isConnected || historyLoading}>
+												Resume
+											</Button>
 										</div>
-										{historyStatus.state === 'running' && historyStatus.chatsTotal > 0 && (
-											<div className="h-1.5 rounded-full bg-muted overflow-hidden">
-												<div
-													className="h-full bg-[#00a884] transition-all"
-													style={{ width: `${Math.round(historyStatus.chatsProcessed / historyStatus.chatsTotal * 100)}%` }}
-												/>
-											</div>
-										)}
-						{(historyStatus.errors ?? []).length > 0 && (
-							<p className="text-destructive">
-								{(historyStatus.errors ?? []).length} chat(s) had errors. Last: {historyStatus.errors?.at(-1)?.message}
-											</p>
-										)}
+									) : (
+										<Button size="sm" onClick={() => startHistorySync(false)} disabled={!isConnected || historyLoading}>
+											Sync history
+										</Button>
+									)}
+								</div>
+								<div className="flex flex-wrap gap-1.5">
+									{SYNC_DEPTHS.map((depth) => (
+										<button
+											key={depth.id}
+											type="button"
+											disabled={!!historyStatus && isActive(historyStatus.state)}
+											onClick={() => setHistoryDepth(depth.id)}
+											className={`text-xs px-2.5 py-1 rounded-md border transition-colors disabled:opacity-60 ${
+												historyDepth === depth.id ? 'border-primary text-primary bg-muted' : 'hover:bg-muted'
+											}`}
+										>
+											{depth.label}
+										</button>
+									))}
+								</div>
+								<p className="text-xs text-muted-foreground">{SYNC_DEPTHS.find((d) => d.id === historyDepth)?.hint}</p>
+								<div className="flex items-start gap-3">
+									<Switch
+										id="history_retry_finished"
+										checked={retryFinished}
+										onCheckedChange={setRetryFinished}
+										disabled={!!historyStatus && isActive(historyStatus.state)}
+									/>
+									<div className="flex flex-col gap-0.5">
+										<Label htmlFor="history_retry_finished" className="text-xs font-medium">
+											Also retry chats that are already synced
+										</Label>
+										<span className="text-xs text-muted-foreground">{finishedChatsText(historyStatus)}</span>
 									</div>
-								)}
+								</div>
+								{historyStatus && (historyStatus.startedAt != null || isActive(historyStatus.state)) && (() => {
+									const active = isActive(historyStatus.state)
+									const done = Math.round(progressFraction(historyStatus) * 1000) / 10
+									const working = Math.round(inProgressFraction(historyStatus) * 1000) / 10
+									const headline = [stateLabel(historyStatus.state), chatsText(historyStatus)].filter(Boolean).join(' · ')
+									const timing = [elapsedText(historyStatus), etaText(historyStatus)].filter(Boolean).join(' · ')
+									const paused = pausedText(historyStatus)
+									const staged = stagedText(historyStatus)
+									const error = errorText(historyStatus)
+									return (
+										<div className="space-y-1.5 text-xs text-muted-foreground">
+											<div className="font-medium text-foreground">{headline}</div>
+											{(active || historyStatus.chatsTotal > 0) && (
+												<div
+													role="progressbar"
+													aria-valuemin={0}
+													aria-valuemax={historyStatus.chatsTotal}
+													aria-valuenow={historyStatus.chatsProcessed}
+													className="flex h-2 rounded-full bg-muted overflow-hidden"
+												>
+													<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.max(active && done === 0 ? 1 : 0, done)}%` }} />
+													<div className="h-full bg-[#00a884]/40 animate-pulse transition-all" style={{ width: `${working}%` }} />
+												</div>
+											)}
+											{timing && <div>{timing}</div>}
+											{active && historyStatus.current.slice(0, 3).map((c) => (
+												<div key={c.chatId}>Now: {currentText(c)}</div>
+											))}
+											{active && historyStatus.current.length === 0 && historyStatus.chatsTotal > 0 && <div>Now: picking the next chat…</div>}
+											{paused && <p className="text-amber-600 dark:text-amber-400">{paused}</p>}
+											<div>{resultText(historyStatus)}</div>
+											{staged && <div>{staged}</div>}
+											{error && <p className="text-destructive">{error}</p>}
+										</div>
+									)
+								})()}
 							</div>
+							<HistoryMediaSection isConnected={isConnected} />
 						</div>
 					</div>
 

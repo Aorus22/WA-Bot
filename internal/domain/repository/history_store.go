@@ -36,6 +36,9 @@ type HistoryImportMessage struct {
 type HistoryTarget struct {
 	ChatID  string
 	Pending int
+	// Exhausted: an earlier sync already reached the start of this chat's
+	// history (the phone had nothing older to give).
+	Exhausted bool
 }
 
 type MessageAnchor struct {
@@ -51,6 +54,28 @@ type HistorySyncError struct {
 	Message string `json:"message"`
 }
 
+// HistorySyncOptions says how far back a sync goes.
+type HistorySyncOptions struct {
+	// PerChat caps the older messages added per chat (0 = no cap).
+	PerChat int `json:"perChat"`
+	// SinceMs stops going back once messages are older than this unix-ms time (0 = no limit).
+	SinceMs int64 `json:"sinceMs"`
+	// IncludeExhausted also retries chats an earlier sync found to be at the
+	// start of their history.
+	IncludeExhausted bool `json:"includeExhausted"`
+	// All is "everything the phone will give": no cap, no time limit.
+	All bool `json:"all"`
+}
+
+// HistorySyncCurrent is a chat being synced right now.
+type HistorySyncCurrent struct {
+	ChatID string `json:"chatId"`
+	Name   string `json:"name"`
+	Added  int    `json:"added"`
+	// Phase is "importing" or "asking-phone".
+	Phase string `json:"phase"`
+}
+
 type HistorySyncStatus struct {
 	State           string             `json:"state"`
 	PendingChats    int                `json:"pendingChats"`
@@ -62,6 +87,40 @@ type HistorySyncStatus struct {
 	StartedAt       *int64             `json:"startedAt"`
 	FinishedAt      *int64             `json:"finishedAt"`
 	LastRunAt       *int64             `json:"lastRunAt"`
+
+	Options        HistorySyncOptions `json:"options"`
+	ChatsWithNew   int                `json:"chatsWithNew"`
+	ChatsExhausted int                `json:"chatsExhausted"`
+	ChatsSkipped   int                `json:"chatsSkipped"`
+	Timeouts       int                `json:"timeouts"`
+
+	// Live detail of the running sync; not persisted.
+	Current []HistorySyncCurrent `json:"current"`
+
+	// Resumable: the job stopped (stopped by the user, interrupted by a restart
+	// or a lost connection) with chats still to do, and "resume" continues it.
+	Resumable bool `json:"resumable"`
+	// ElapsedMs is the time the job actually ran, not counting the time it was
+	// stopped. EtaMs is a rough time left, nil until there is enough to go on.
+	ElapsedMs int64  `json:"elapsedMs"`
+	EtaMs     *int64 `json:"etaMs"`
+
+	// ChatsFinished is how many chats the next sync skips unless asked to retry
+	// them (include-finished option).
+	ChatsFinished int `json:"chatsFinished"`
+
+	// ActiveMs is ElapsedMs as of the last save.
+	ActiveMs int64 `json:"-"`
+}
+
+// HistoryJobTotals is the progress of the current job, summed from its chats.
+type HistoryJobTotals struct {
+	Chats     int
+	Done      int
+	Added     int
+	WithNew   int
+	Exhausted int
+	Timeouts  int
 }
 
 type ChatState struct {
@@ -136,7 +195,8 @@ func (s *MessageStore) HistoryTargets() ([]HistoryTarget, error) {
 		SELECT DISTINCT chat_id FROM history_staged_messages WHERE imported = 0
 	)
 	SELECT t.chat_id, COALESCE((SELECT COUNT(*) FROM history_staged_messages h
-		WHERE h.chat_id = t.chat_id AND h.imported = 0), 0) AS pending
+		WHERE h.chat_id = t.chat_id AND h.imported = 0), 0) AS pending,
+		EXISTS(SELECT 1 FROM history_chat_progress p WHERE p.chat_id = t.chat_id AND p.exhausted_at IS NOT NULL) AS exhausted
 	FROM targets t
 	WHERE t.chat_id != 'status@broadcast'
 	ORDER BY pending DESC, chat_id`)
@@ -147,12 +207,65 @@ func (s *MessageStore) HistoryTargets() ([]HistoryTarget, error) {
 	var out []HistoryTarget
 	for rows.Next() {
 		var target HistoryTarget
-		if err := rows.Scan(&target.ChatID, &target.Pending); err != nil {
+		var exhausted int
+		if err := rows.Scan(&target.ChatID, &target.Pending, &exhausted); err != nil {
 			return nil, err
 		}
+		target.Exhausted = exhausted == 1
 		out = append(out, target)
 	}
 	return out, rows.Err()
+}
+
+// FinishedChatCount is how many chats a sync skips unless asked to retry them:
+// the ones already at the start of their history (or that the phone never
+// answered for) with nothing waiting to be imported.
+func (s *MessageStore) FinishedChatCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM history_chat_progress p
+		WHERE p.exhausted_at IS NOT NULL AND p.chat_id != 'status@broadcast'
+		AND (p.chat_id IN (SELECT id FROM chats)
+			OR p.chat_id IN (SELECT DISTINCT chat_id FROM history_staged_messages))
+		AND NOT EXISTS (SELECT 1 FROM history_staged_messages h WHERE h.chat_id = p.chat_id AND h.imported = 0)`).Scan(&n)
+	return n
+}
+
+// MarkHistoryExhausted records that the phone had nothing older for chatID.
+func (s *MessageStore) MarkHistoryExhausted(chatID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO history_chat_progress (chat_id, exhausted_at) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET exhausted_at = excluded.exhausted_at`, chatID, time.Now().UnixMilli())
+	return err
+}
+
+// HistoryChatName is the display name of a chat for progress messages.
+func (s *MessageStore) HistoryChatName(chatID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var name sql.NullString
+	_ = s.db.QueryRow("SELECT name FROM chats WHERE id = ?", chatID).Scan(&name)
+	if name.Valid && strings.TrimSpace(name.String) != "" {
+		return name.String
+	}
+	var staged sql.NullString
+	_ = s.db.QueryRow("SELECT name FROM history_staged_conversations WHERE chat_id = ?", chatID).Scan(&staged)
+	if staged.Valid && strings.TrimSpace(staged.String) != "" {
+		return staged.String
+	}
+	return chatID
+}
+
+// ChatMessageStats is how many messages a chat has and the timestamp of its
+// oldest one (0 when it has none).
+func (s *MessageStore) ChatMessageStats(chatID string) (count int, oldest int64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var min sql.NullInt64
+	_ = s.db.QueryRow("SELECT COUNT(*), MIN(timestamp) FROM messages WHERE chat_id = ?", chatID).Scan(&count, &min)
+	return count, min.Int64
 }
 
 func (s *MessageStore) PendingHistory(chatID string, limit int) ([]StagedHistoryMessage, error) {
@@ -356,10 +469,13 @@ func (s *MessageStore) SetHistorySyncStatus(status HistorySyncStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	errorsJSON, _ := json.Marshal(status.Errors)
+	optionsJSON, _ := json.Marshal(status.Options)
 	_, err := s.db.Exec(`UPDATE history_sync_runs SET state = ?, chats_total = ?, chats_processed = ?,
-		messages_added = ?, errors_json = ?, started_at = ?, finished_at = ?, last_run_at = ? WHERE id = 1`,
+		messages_added = ?, errors_json = ?, started_at = ?, finished_at = ?, last_run_at = ?,
+		options_json = ?, chats_skipped = ?, active_ms = ? WHERE id = 1`,
 		status.State, status.ChatsTotal, status.ChatsProcessed, status.MessagesAdded, string(errorsJSON),
-		status.StartedAt, status.FinishedAt, status.LastRunAt)
+		status.StartedAt, status.FinishedAt, status.LastRunAt,
+		string(optionsJSON), status.ChatsSkipped, status.ActiveMs)
 	return err
 }
 
@@ -368,11 +484,14 @@ func (s *MessageStore) GetHistorySyncStatus() (HistorySyncStatus, error) {
 	defer s.mu.RUnlock()
 	var status HistorySyncStatus
 	var errorsJSON string
+	var optionsJSON sql.NullString
+	var skipped, active sql.NullInt64
 	var started, finished, lastRun sql.NullInt64
 	err := s.db.QueryRow(`SELECT state, chats_total, chats_processed, messages_added,
-		errors_json, started_at, finished_at, last_run_at FROM history_sync_runs WHERE id = 1`).
+		errors_json, started_at, finished_at, last_run_at, options_json, chats_skipped, active_ms
+		FROM history_sync_runs WHERE id = 1`).
 		Scan(&status.State, &status.ChatsTotal, &status.ChatsProcessed, &status.MessagesAdded,
-			&errorsJSON, &started, &finished, &lastRun)
+			&errorsJSON, &started, &finished, &lastRun, &optionsJSON, &skipped, &active)
 	if err != nil {
 		return status, err
 	}
@@ -380,6 +499,11 @@ func (s *MessageStore) GetHistorySyncStatus() (HistorySyncStatus, error) {
 	if status.Errors == nil {
 		status.Errors = []HistorySyncError{}
 	}
+	if optionsJSON.Valid && optionsJSON.String != "" {
+		_ = json.Unmarshal([]byte(optionsJSON.String), &status.Options)
+	}
+	status.ChatsSkipped = int(skipped.Int64)
+	status.ActiveMs = active.Int64
 	if started.Valid {
 		v := started.Int64
 		status.StartedAt = &v
@@ -393,6 +517,74 @@ func (s *MessageStore) GetHistorySyncStatus() (HistorySyncStatus, error) {
 		status.LastRunAt = &v
 	}
 	return status, nil
+}
+
+// BeginHistoryJob replaces the job's chat list with chatIDs, all still to do.
+func (s *MessageStore) BeginHistoryJob(chatIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM history_sync_job_chats"); err != nil {
+		return err
+	}
+	for i, id := range chatIDs {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO history_sync_job_chats (chat_id, position) VALUES (?, ?)", id, i); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// PendingHistoryJobChats are the chats of the job not finished yet, in the order
+// the job visits them.
+func (s *MessageStore) PendingHistoryJobChats() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query("SELECT chat_id FROM history_sync_job_chats WHERE done = 0 ORDER BY position")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// RecordHistoryJobChat adds the messages imported for chatID to the job. A chat
+// that is done is not visited again when the job resumes; outcome says how it
+// ended ("", "exhausted" or "timeout").
+func (s *MessageStore) RecordHistoryJobChat(chatID string, added int, done bool, outcome string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE history_sync_job_chats
+		SET added = added + ?, done = CASE WHEN ? THEN 1 ELSE done END,
+		    outcome = CASE WHEN ? THEN ? ELSE outcome END
+		WHERE chat_id = ?`, added, done, done, outcome, chatID)
+	return err
+}
+
+func (s *MessageStore) HistoryJobTotals() (HistoryJobTotals, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var t HistoryJobTotals
+	err := s.db.QueryRow(`SELECT COUNT(*),
+		COALESCE(SUM(done), 0), COALESCE(SUM(added), 0),
+		COALESCE(SUM(added > 0), 0),
+		COALESCE(SUM(outcome IN ('exhausted', 'timeout')), 0),
+		COALESCE(SUM(outcome = 'timeout'), 0)
+		FROM history_sync_job_chats`).
+		Scan(&t.Chats, &t.Done, &t.Added, &t.WithNew, &t.Exhausted, &t.Timeouts)
+	return t, err
 }
 
 func (s *MessageStore) UpdateChatState(state ChatState) error {

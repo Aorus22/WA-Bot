@@ -13,12 +13,12 @@ import (
 
 	"github.com/gorilla/mux"
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
-	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	waTypes "go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
 	"wa-bot/internal/domain/repository"
+	whatsappInfra "wa-bot/internal/infrastructure/whatsapp"
 )
 
 func (ch *ChatHandler) PinChat(w http.ResponseWriter, r *http.Request) {
@@ -245,20 +245,18 @@ func (ch *ChatHandler) GetHistoricalMedia(w http.ResponseWriter, r *http.Request
 
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	data, mimeType, fileName, err := downloadHistoricalMedia(ctx, ch.handler, evt.Message)
+	media, ok := whatsappInfra.ResolveHistoricalMedia(evt.Message)
+	if !ok {
+		ch.handler.sendError(w, http.StatusGone, "historical media is no longer available")
+		return
+	}
+	data, err := ch.handler.client.CoreClient().Download(ctx, media.Message)
+	mimeType, fileName := media.Mime, media.FileName
 	if err != nil || len(data) == 0 {
 		ch.handler.sendError(w, http.StatusGone, "historical media is no longer available")
 		return
 	}
-	ext := filepath.Ext(fileName)
-	if ext == "" {
-		if extensions, _ := mime.ExtensionsByType(mimeType); len(extensions) > 0 {
-			ext = extensions[0]
-		} else {
-			ext = ".bin"
-		}
-	}
-	cacheName := filepath.ToSlash(filepath.Join("history", safePathPart(chatID), safePathPart(messageID)+ext))
+	cacheName := whatsappInfra.HistoricalMediaKey(chatID, messageID, fileName, mimeType)
 	if _, err := ch.handler.storage.Save(ctx, cacheName, bytes.NewReader(data)); err != nil {
 		ch.handler.sendError(w, http.StatusInternalServerError, "failed to cache historical media")
 		return
@@ -290,44 +288,4 @@ func (ch *ChatHandler) serveStoredMedia(w http.ResponseWriter, r *http.Request, 
 	}
 	_, err = io.Copy(w, reader)
 	return err
-}
-
-func downloadHistoricalMedia(ctx context.Context, h *Handler, msg *waE2E.Message) ([]byte, string, string, error) {
-	client := h.client.CoreClient()
-	if media := msg.GetImageMessage(); media != nil {
-		data, err := client.Download(ctx, media)
-		return data, fallbackMime(media.GetMimetype(), "image/jpeg"), "image.jpg", err
-	}
-	if media := msg.GetVideoMessage(); media != nil {
-		data, err := client.Download(ctx, media)
-		return data, fallbackMime(media.GetMimetype(), "video/mp4"), "video.mp4", err
-	}
-	if media := msg.GetDocumentMessage(); media != nil {
-		data, err := client.Download(ctx, media)
-		return data, fallbackMime(media.GetMimetype(), "application/octet-stream"), media.GetFileName(), err
-	}
-	if media := msg.GetAudioMessage(); media != nil {
-		data, err := client.Download(ctx, media)
-		return data, fallbackMime(media.GetMimetype(), "audio/ogg"), "audio.ogg", err
-	}
-	if media := msg.GetStickerMessage(); media != nil {
-		data, err := client.Download(ctx, media)
-		return data, fallbackMime(media.GetMimetype(), "image/webp"), "sticker.webp", err
-	}
-	return nil, "", "", fmt.Errorf("unsupported historical media")
-}
-
-func fallbackMime(value, fallbackValue string) string {
-	if value == "" {
-		return fallbackValue
-	}
-	return value
-}
-
-func safePathPart(value string) string {
-	value = strings.NewReplacer("@", "_", ".", "_", "/", "_", "\\", "_").Replace(value)
-	if value == "" {
-		return "unknown"
-	}
-	return value
 }

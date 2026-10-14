@@ -119,3 +119,152 @@ func projectTestHistory(staged []StagedHistoryMessage) []HistoryImportMessage {
 	}
 	return out
 }
+
+func TestHistoryJobKeepsItsPlace(t *testing.T) {
+	store := newTestMessageStore(t)
+	if err := store.BeginHistoryJob([]string{"c", "a", "b", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	// Chats are visited in the order they were given, not alphabetically.
+	pending, _ := store.PendingHistoryJobChats()
+	if fmt.Sprint(pending) != "[c a b d]" {
+		t.Fatalf("pending: %v", pending)
+	}
+
+	store.RecordHistoryJobChat("c", 30, true, "")
+	store.RecordHistoryJobChat("a", 20, false, "") // stopped midway: not done, but what it added counts
+	store.RecordHistoryJobChat("a", 5, true, "exhausted")
+	store.RecordHistoryJobChat("b", 0, true, "timeout")
+
+	pending, _ = store.PendingHistoryJobChats()
+	if fmt.Sprint(pending) != "[d]" {
+		t.Fatalf("pending after progress: %v", pending)
+	}
+	totals, err := store.HistoryJobTotals()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := HistoryJobTotals{Chats: 4, Done: 3, Added: 55, WithNew: 2, Exhausted: 2, Timeouts: 1}
+	if totals != want {
+		t.Fatalf("totals %+v, want %+v", totals, want)
+	}
+
+	// A new job replaces the old one.
+	store.BeginHistoryJob(nil)
+	if totals, _ := store.HistoryJobTotals(); totals != (HistoryJobTotals{}) {
+		t.Fatalf("old job survived: %+v", totals)
+	}
+}
+
+func TestHistorySyncStatusRoundTripsItsOptionsAndTime(t *testing.T) {
+	store := newTestMessageStore(t)
+	now := int64(1700000000000)
+	in := HistorySyncStatus{State: "interrupted", StartedAt: &now, ChatsSkipped: 7, ActiveMs: 123456,
+		Options: HistorySyncOptions{All: true, IncludeExhausted: true}, Errors: []HistorySyncError{}}
+	if err := store.SetHistorySyncStatus(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := store.GetHistorySyncStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Options.All || !out.Options.IncludeExhausted || out.ChatsSkipped != 7 || out.ActiveMs != 123456 || out.State != "interrupted" {
+		t.Fatalf("round trip: %+v", out)
+	}
+}
+
+func TestFinishedChatCountIsWhatASyncSkips(t *testing.T) {
+	store := newTestMessageStore(t)
+	chatID := "628123@s.whatsapp.net"
+	if err := store.StageHistoryConversation(HistoryConversation{ChatID: chatID, Name: "A"}, []StagedHistoryMessage{
+		{ChatID: chatID, MessageID: "m1", Timestamp: 1, Raw: []byte{1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n := store.FinishedChatCount(); n != 0 {
+		t.Fatalf("nothing is finished yet: %d", n)
+	}
+	store.MarkHistoryExhausted(chatID)
+	// Finished, but messages are still waiting to be imported: a sync does not skip it.
+	if n := store.FinishedChatCount(); n != 0 {
+		t.Fatalf("a chat with staged messages is not skipped: %d", n)
+	}
+	staged, _ := store.PendingHistory(chatID, 10)
+	if _, err := store.ImportHistoryBatch(chatID, staged, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := store.FinishedChatCount(); n != 1 {
+		t.Fatalf("finished chat not counted: %d", n)
+	}
+}
+
+func TestHistoryMediaSelection(t *testing.T) {
+	store := newTestMessageStore(t)
+	chatID := "628123@s.whatsapp.net"
+	var imports []HistoryImportMessage
+	for i, kind := range []string{"image", "image", "ptt", "audio", "video", "document", "text"} {
+		id := fmt.Sprintf("m%d", i)
+		url := fmt.Sprintf("/chats/%s/messages/%s/media", chatID, id)
+		if kind == "text" {
+			url = ""
+		}
+		imports = append(imports, HistoryImportMessage{
+			Message: Message{ID: id, ChatID: chatID, From: chatID, To: "me", Content: kind, Timestamp: int64(100 + i), Status: "received", Type: kind, MediaURL: url},
+			Raw:     []byte(id),
+		})
+	}
+	// An already downloaded one is not selected.
+	imports = append(imports, HistoryImportMessage{
+		Message: Message{ID: "cached", ChatID: chatID, From: chatID, To: "me", Content: "x", Timestamp: 200, Status: "received", Type: "image", MediaURL: "/media/history/x.jpg"},
+		Raw:     []byte("cached"),
+	})
+	if _, err := store.ImportHistoryBatch(chatID, nil, imports); err != nil {
+		t.Fatal(err)
+	}
+
+	avail := store.AvailableHistoryMedia()
+	if avail["image"] != 2 || avail["audio"] != 2 || avail["video"] != 1 || avail["document"] != 1 || avail["sticker"] != 0 {
+		t.Fatalf("available: %v", avail)
+	}
+	opts := HistoryMediaOptions{Types: []string{"audio", "video"}}
+	if n := store.CountHistoryMedia(opts, 1); n != 3 {
+		t.Fatalf("audio (incl. voice notes) and video: %d", n)
+	}
+	if n := store.CountHistoryMedia(HistoryMediaOptions{}, 1); n != 0 {
+		t.Fatalf("nothing chosen selects nothing: %d", n)
+	}
+
+	// Newest first, in pages that continue after the cursor.
+	ts, id := FirstHistoryMediaCursor()
+	page, err := store.NextHistoryMedia(opts, 1, ts, id, 2)
+	if err != nil || len(page) != 2 || page[0].MessageID != "m4" || page[1].MessageID != "m3" {
+		t.Fatalf("first page: %v %v", page, err)
+	}
+	page, _ = store.NextHistoryMedia(opts, 1, page[1].Timestamp, page[1].MessageID, 2)
+	if len(page) != 1 || page[0].MessageID != "m2" {
+		t.Fatalf("second page: %v", page)
+	}
+
+	// Gone media is left alone; a failure only for the job it happened in.
+	store.MarkHistoryMedia("m4", "unavailable", "gone", 1)
+	store.MarkHistoryMedia("m3", "failed", "net", 1)
+	if n := store.CountHistoryMedia(opts, 1); n != 1 {
+		t.Fatalf("in the job of the failure: %d", n)
+	}
+	if n := store.CountHistoryMedia(opts, 2); n != 2 {
+		t.Fatalf("in the next job (m3 is tried again, m4 is not): %d", n)
+	}
+	if n := store.CountHistoryMedia(HistoryMediaOptions{Types: opts.Types, RetryUnavailable: true}, 2); n != 3 {
+		t.Fatalf("retrying unavailable: %d", n)
+	}
+	if u, f := store.HistoryMediaFailures(1); u != 1 || f != 1 {
+		t.Fatalf("failures: %d %d", u, f)
+	}
+
+	if err := store.HistoryMediaDownloaded("m3", "/media/history/m3.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	if u, f := store.HistoryMediaFailures(1); u != 1 || f != 0 {
+		t.Fatalf("a download clears its failure: %d %d", u, f)
+	}
+}

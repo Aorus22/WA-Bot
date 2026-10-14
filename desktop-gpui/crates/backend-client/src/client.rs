@@ -561,10 +561,63 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
-    pub async fn start_history_sync(&self) -> Result<HistorySyncStatus> {
+    /// Starts a history sync of the given depth. If one is already running the
+    /// server answers 409 with that sync's status, returned as `AlreadyRunning`.
+    pub async fn start_history_sync(&self, request: &HistorySyncRequest) -> Result<HistorySyncStart> {
         let resp = self
             .client
             .post(format!("{}/history-sync", self.base_url))
+            .json(request)
+            .send()
+            .await?;
+        if resp.status() == StatusCode::CONFLICT {
+            return Ok(HistorySyncStart::AlreadyRunning(resp.json::<HistorySyncStatus>().await?));
+        }
+        Ok(HistorySyncStart::Started(Self::handle_response(resp).await?))
+    }
+
+    /// Stops the running history sync after the batch it is importing.
+    pub async fn cancel_history_sync(&self) -> Result<HistorySyncStatus> {
+        let resp = self
+            .client
+            .post(format!("{}/history-sync/cancel", self.base_url))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    // --- History media ---
+
+    pub async fn get_history_media_status(&self) -> Result<HistoryMediaStatus> {
+        let resp = self
+            .client
+            .get(format!("{}/history-media/status", self.base_url))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    /// Starts (or with `resume` continues) the download of history media. If one
+    /// is already running the server answers 409 with its status, returned as
+    /// `AlreadyRunning`.
+    pub async fn start_history_media(&self, request: &HistoryMediaRequest) -> Result<HistoryMediaStart> {
+        let resp = self
+            .client
+            .post(format!("{}/history-media", self.base_url))
+            .json(request)
+            .send()
+            .await?;
+        if resp.status() == StatusCode::CONFLICT {
+            return Ok(HistoryMediaStart::AlreadyRunning(resp.json::<HistoryMediaStatus>().await?));
+        }
+        Ok(HistoryMediaStart::Started(Self::handle_response(resp).await?))
+    }
+
+    /// Stops the running media download after the files being fetched.
+    pub async fn cancel_history_media(&self) -> Result<HistoryMediaStatus> {
+        let resp = self
+            .client
+            .post(format!("{}/history-media/cancel", self.base_url))
             .send()
             .await?;
         Self::handle_response(resp).await

@@ -44,11 +44,9 @@ type Handler struct {
 	apiKeyRepo     repository.APIKeyRepository
 	ttsProvider    call.TTSProvider
 	settingsRepo   repository.SettingsRepository
-	historySync    interface {
-		Start() (repository.HistorySyncStatus, error)
-		Status() repository.HistorySyncStatus
-	}
-	accounts AccountController
+	historySync    HistorySyncService
+	historyMedia   HistoryMediaService
+	accounts       AccountController
 }
 
 // AccountController owns the logout -> new QR flow and per-account data.
@@ -164,11 +162,30 @@ func (h *Handler) SetSettingsRepo(repo repository.SettingsRepository) {
 	h.settingsRepo = repo
 }
 
-func (h *Handler) SetHistorySync(service interface {
-	Start() (repository.HistorySyncStatus, error)
+// HistorySyncService is the manual "load older messages" job.
+type HistorySyncService interface {
+	Start(opts repository.HistorySyncOptions) (repository.HistorySyncStatus, error)
+	// Resume continues a stopped or interrupted sync where it left off.
+	Resume() (repository.HistorySyncStatus, error)
+	Cancel() (repository.HistorySyncStatus, error)
 	Status() repository.HistorySyncStatus
-}) {
+}
+
+func (h *Handler) SetHistorySync(service HistorySyncService) {
 	h.historySync = service
+}
+
+// HistoryMediaService downloads the media of messages imported from history.
+type HistoryMediaService interface {
+	Start(opts repository.HistoryMediaOptions) (repository.HistoryMediaStatus, error)
+	// Resume continues a stopped or interrupted download where it left off.
+	Resume() (repository.HistoryMediaStatus, error)
+	Cancel() (repository.HistoryMediaStatus, error)
+	Status() repository.HistoryMediaStatus
+}
+
+func (h *Handler) SetHistoryMedia(service HistoryMediaService) {
+	h.historyMedia = service
 }
 
 func (h *Handler) GetSettingsRepo() repository.SettingsRepository {
