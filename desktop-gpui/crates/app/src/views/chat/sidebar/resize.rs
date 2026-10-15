@@ -18,6 +18,7 @@ impl ChatView {
             .bottom_0()
             .left(px(self.sidebar_width - SIDEBAR_HANDLE_WIDTH / 2.0))
             .w(px(SIDEBAR_HANDLE_WIDTH))
+            .occlude()
             .cursor_col_resize()
             .hover(|s| s.bg(primary_color.opacity(0.18)))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, cx| {

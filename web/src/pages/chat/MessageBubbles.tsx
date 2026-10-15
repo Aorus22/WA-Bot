@@ -1,7 +1,7 @@
 import { useState } from "react"
-import { MapPin, Phone, User, Download, Eye, ArrowRight } from "lucide-react"
+import { MapPin, Phone, User, Download, Eye, ArrowRight, CircleDashed, Video, Mic } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { LocationMeta, ContactMeta, LinkPreviewMeta, PollMeta, ReactionEntry, ViewOnceMeta } from "@/lib/api"
+import type { LocationMeta, ContactMeta, LinkPreviewMeta, PollMeta, ReactionEntry, StatusReplyMeta, ViewOnceMeta } from "@/lib/api"
 import { LazyMedia } from "@/components/LazyMedia"
 
 /** Row of emoji reaction chips shown under a bubble. */
@@ -236,6 +236,34 @@ export function LinkPreviewCard({ preview, getMediaUrl }: {
 				<span className="text-[10px] opacity-50 truncate mt-0.5">{preview.url}</span>
 			</div>
 		</a>
+	)
+}
+
+/** Quote card for a message that answers a status; stands in for the usual reply quote. */
+export function StatusReplyQuote({ reply, getMediaUrl }: {
+	reply: StatusReplyMeta
+	getMediaUrl: (url: string) => string
+}) {
+	return (
+		<div className="mb-1 flex items-stretch gap-2 overflow-hidden rounded-lg border-l-4 border-primary bg-black/5 dark:bg-white/5 text-[12px] relative z-10 max-w-[65vw] sm:max-w-[320px]">
+			<div className="min-w-0 flex-1 p-2">
+				<p className="flex items-center gap-1 font-bold text-primary">
+					<CircleDashed className="h-3 w-3" />
+					Status
+				</p>
+				{reply.type === "text" ? (
+					<p className="line-clamp-3 opacity-70 break-words">{reply.content || "Status"}</p>
+				) : (
+					<p className="flex items-center gap-1 opacity-70 truncate">
+						{reply.type === "video" ? <Video className="h-3 w-3" /> : reply.type === "audio" ? <Mic className="h-3 w-3" /> : null}
+						{reply.content || (reply.type === "image" ? "Photo" : reply.type === "video" ? "Video" : "Audio")}
+					</p>
+				)}
+			</div>
+			{reply.type === "image" && reply.mediaUrl && (
+				<img src={getMediaUrl(reply.mediaUrl)} alt="" className="h-14 w-14 shrink-0 object-cover" loading="lazy" />
+			)}
+		</div>
 	)
 }
 

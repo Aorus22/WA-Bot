@@ -41,9 +41,13 @@ impl ChatView {
             let time_str = r_msg.time_str.clone();
             let ticks = r_msg.ticks;
             let reply_to_id = r_msg.msg.reply_to_id.clone();
+            // A reply to a status quotes the status (its own card), not a message.
+            let status_reply = r_msg.msg.extra.as_ref().and_then(|extra| extra.status_reply.clone());
             let quoted = r_msg.quoted.clone().or_else(|| reply_to_id.as_ref().map(|_| {
                 ("Message".to_string(), "Open original message".to_string())
-            }));
+            })).filter(|_| status_reply.is_none());
+            let link_preview = r_msg.msg.extra.as_ref().and_then(|extra| extra.link_preview.clone());
+            let is_pinned = this.is_pinned(&r_msg.msg.id);
             // The quoted line is cached as raw text; resolve the original's
             // mentions here so it shows names instead of numeric IDs.
             let quoted = quoted.map(|(sender, line)| {
@@ -118,6 +122,15 @@ impl ChatView {
             let has_rich_card = rich_card.is_some();
             let has_edits = r_msg.msg.extra.as_ref().is_some_and(|extra| !extra.edits.is_empty());
 
+            // Pin / star / disappearing icons that sit beside the time.
+            let footer_marks = (!show_image_timestamp)
+                .then(|| Self::footer_marks(&r_msg.msg, is_pinned, Hsla::from(bubble_text)));
+            let overlay_marks = if show_image_timestamp {
+                Self::footer_marks(&r_msg.msg, is_pinned, rgb(0xffffff).into())
+            } else {
+                Vec::new()
+            };
+
             let is_highlighted = this.highlighted_message_id.as_deref() == Some(&r_msg.msg.id);
             let base_bubble_bg: Hsla = bubble_bg.into();
             let final_bubble_bg = if is_highlighted { theme.primary.opacity(0.35) } else { base_bubble_bg };
@@ -179,6 +192,7 @@ impl ChatView {
                                 is_from_me: me,
                                 position: ev.position,
                                 reaction_picker: false,
+                                pin_picker: false,
                             });
                             cx.notify();
                         }
@@ -231,6 +245,10 @@ impl ChatView {
                 } else {
                     None
                 })
+                // Quote of the status this message replies to
+                .children(status_reply.as_ref().map(|reply| {
+                    Self::render_status_reply_card(reply, &base_url, primary_color, muted_text, theme.muted, chat_scale)
+                }))
                 // Media attachment: Image or Sticker
                 .children(if is_image {
                     if let Some(ref m_url) = r_msg.msg.media_url {
@@ -293,6 +311,7 @@ impl ChatView {
                                     .py(px(2.0))
                                     .rounded_lg()
                                     .bg(rgba(0x00000099))
+                                    .children(overlay_marks)
                                     .child(
                                         div()
                                             .chat_text(0.75, 1.0, chat_scale)
@@ -384,6 +403,10 @@ impl ChatView {
                 })
                 // Poll, location and contact cards (the text is only a placeholder for them)
                 .children(rich_card.map(|card| div().text_color(bubble_text).child(card)))
+                // Preview of the link in the text, the backend's own scrape of it
+                .children(link_preview.as_ref().map(|preview| {
+                    Self::render_link_preview_card(&r_msg.msg.id, preview, &base_url, primary_color, bubble_text, chat_scale, cx)
+                }))
                 // Message Body Text (hide placeholder if it's media without caption)
                 .children({
                     let is_media_placeholder = (is_image && (content == "[Image]" || content.is_empty()))
@@ -463,6 +486,7 @@ impl ChatView {
                         .justify_end()
                         .items_center()
                         .gap_1()
+                        .children(footer_marks.unwrap_or_default())
                         .children(has_edits.then(|| {
                             let msg_id = r_msg.msg.id.clone();
                             div()

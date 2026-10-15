@@ -90,6 +90,7 @@ mod tests {
             pinned_at,
             mute_mode: "off".to_string(),
             muted_until: None,
+            disappearing_secs: 0,
         }
     }
 

@@ -6,7 +6,7 @@ use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::StatusGroup;
 
-use crate::components::{toast, TextArea};
+use crate::components::{toast, TextArea, TextField, TextFieldEvent};
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::theme::manager::{AppThemeExt, ThemeManager};
@@ -109,6 +109,14 @@ pub struct StatusView {
     composer_bg: u32,
     composer_field: Option<TextArea>,
     is_posting: bool,
+    /// Reply to the status on screen (other people's statuses only).
+    reply_field: Option<TextField>,
+    reply_text: String,
+    is_replying: bool,
+}
+
+fn is_own_group(group: &StatusGroup) -> bool {
+    group.name.as_deref() == Some("Status Saya") || group.name.as_deref() == Some("My status")
 }
 
 impl StatusView {
@@ -123,6 +131,9 @@ impl StatusView {
             composer_bg: BACKGROUNDS[0],
             composer_field: None,
             is_posting: false,
+            reply_field: None,
+            reply_text: String::new(),
+            is_replying: false,
         };
         this.load_statuses(cx);
         this
@@ -166,6 +177,7 @@ impl StatusView {
         }
         self.viewing_group = Some(group.clone());
         self.viewing_index = 0;
+        self.reply_text.clear();
         self.mark_current_viewed(cx);
         cx.notify();
     }
@@ -207,6 +219,8 @@ impl StatusView {
         if let Some(group) = &self.viewing_group {
             let total = group.statuses.len() as isize;
             let next_idx = self.viewing_index as isize + delta;
+            // A half-typed reply belongs to the status it was started on.
+            self.reply_text.clear();
             if next_idx < 0 || next_idx >= total {
                 self.viewing_group = None;
                 self.viewing_index = 0;
@@ -217,6 +231,51 @@ impl StatusView {
             }
             cx.notify();
         }
+    }
+
+    /// Send the typed reply to the status on screen; it lands in the 1:1 chat
+    /// with whoever posted it.
+    pub fn send_status_reply(&mut self, cx: &mut Context<Self>) {
+        let text = self.reply_text.trim().to_string();
+        if text.is_empty() || self.is_replying {
+            return;
+        }
+        let Some(group) = self.viewing_group.as_ref().filter(|group| !is_own_group(group)) else { return };
+        let Some(status_id) = group.statuses.get(self.viewing_index).map(|entry| entry.id.clone()) else { return };
+        self.is_replying = true;
+
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let view_weak = this;
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let res = TOKIO_RT.spawn(async move { client.reply_status(&status_id, &text).await }).await;
+
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = view_weak.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_replying = false;
+                            match res {
+                                Ok(Ok(_)) => {
+                                    this.reply_text.clear();
+                                    toast::success("Balasan terkirim", cx);
+                                }
+                                Ok(Err(e)) => toast::error(format!("Failed to reply: {e}"), cx),
+                                _ => toast::error("Failed to reply", cx),
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
     }
 
     pub fn post_status(&mut self, cx: &mut Context<Self>) {
@@ -279,6 +338,20 @@ impl Render for StatusView {
         if let Some(field) = self.composer_field.clone() {
             if field.value(cx) != self.composer_text {
                 field.set_value(self.composer_text.clone(), window, cx);
+            }
+        }
+        if self.reply_field.is_none() {
+            self.reply_field = Some(TextField::new("Reply…", window, cx, |this, event, _, cx| match event {
+                TextFieldEvent::Change(value) => {
+                    this.reply_text = value;
+                    cx.notify();
+                }
+                TextFieldEvent::Enter => this.send_status_reply(cx),
+            }));
+        }
+        if let Some(field) = self.reply_field.clone() {
+            if field.value(cx) != self.reply_text {
+                field.set_value(self.reply_text.clone(), window, cx);
             }
         }
         let theme = cx.app_theme();
@@ -615,6 +688,43 @@ impl Render for StatusView {
                             &base_url,
                         );
 
+                        // Reply box under other people's statuses, on the viewer's dark backdrop.
+                        let reply_bar = (!is_own_group(&group)).then(|| {
+                            let can_send = !self.reply_text.trim().is_empty() && !self.is_replying;
+                            h_flex()
+                                .w_full()
+                                .px_4()
+                                .py_3()
+                                .gap_2()
+                                .items_center()
+                                .children(self.reply_field.as_ref().map(|field| {
+                                    div().flex_1().child(field.element_on(
+                                        rgb(0xffffff).into(),
+                                        rgba(0xffffff99).into(),
+                                        rgba(0xffffff1a).into(),
+                                        rgba(0xffffff26).into(),
+                                        None,
+                                    ))
+                                }))
+                                .child(
+                                    div()
+                                        .id("btn-status-reply-send")
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .flex_shrink_0()
+                                        .w(px(36.0))
+                                        .h(px(36.0))
+                                        .rounded_full()
+                                        .bg(theme.primary.opacity(if can_send { 1.0 } else { 0.4 }))
+                                        .when(can_send, |el| el.cursor_pointer().hover(|h| h.opacity(0.85)))
+                                        .child(svg().data(SEND_SVG).size(px(16.0)).text_color(theme.primary_foreground))
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                            this.send_status_reply(cx);
+                                        })),
+                                )
+                        });
+
                         Some(
                             v_flex()
                                 .size_full()
@@ -720,6 +830,7 @@ impl Render for StatusView {
                                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                     this.viewing_group = None;
                                                     this.viewing_index = 0;
+                                                    this.reply_text.clear();
                                                     this.load_statuses(cx);
                                                     cx.notify();
                                                 })),
@@ -780,6 +891,7 @@ impl Render for StatusView {
                                                 .bottom_0()
                                                 .w(px(120.0))
                                                 .cursor_pointer()
+                                                .occlude()
                                                 .flex()
                                                 .items_center()
                                                 .justify_start()
@@ -802,6 +914,7 @@ impl Render for StatusView {
                                                 .bottom_0()
                                                 .w(px(120.0))
                                                 .cursor_pointer()
+                                                .occlude()
                                                 .flex()
                                                 .items_center()
                                                 .justify_end()
@@ -816,6 +929,7 @@ impl Render for StatusView {
                                                 })),
                                         ),
                                 )
+                                .children(reply_bar)
                                 .with_animation(
                                     SharedString::from(format!("status-viewer-{}", group.sender)),
                                     crate::components::motion::enter(200),

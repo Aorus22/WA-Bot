@@ -81,13 +81,43 @@ export type MessageExtra = {
 	gif?: boolean
 	linkPreview?: LinkPreviewMeta
 	mentions?: string[]
+	/** Sent inside a chat with a disappearing timer. We keep the message either way. */
+	disappearing?: DisappearingMeta
+	/** The message answers a status (story). */
+	statusReply?: StatusReplyMeta
+}
+
+export type DisappearingMeta = {
+	/** Chat timer when the message was sent. */
+	seconds: number
+	/** Unix ms when WhatsApp removes it on phones. */
+	expiresAt: number
+}
+
+export type StatusReplyMeta = {
+	statusId: string
+	/** JID that posted the status. */
+	sender: string
+	type: "text" | "image" | "video" | "audio"
+	content?: string
+	mediaUrl?: string
 }
 
 export type MessageReceipt = {
 	messageId: string
 	chatId: string
 	jid: string
+	/** Unix ms; 0 when the member has not been reported as having the message. */
+	deliveredAt: number
+	/** Unix ms; 0 when the member has not read it. */
 	readAt: number
+}
+
+export type MessageReceipts = {
+	receipts: MessageReceipt[]
+	/** Members besides us the message went to (the contact, in a private chat). */
+	total: number
+	recipients: string[]
 }
 
 export type Message = {
@@ -106,7 +136,30 @@ export type Message = {
 	forwarded?: boolean
 	reactions?: ReactionEntry[]
 	extra?: MessageExtra
+	starred?: boolean
 }
+
+/** A starred message as listed by /starred. */
+export type StarredMessage = Message & {
+	chatName?: string
+	/** Unix ms; the paging cursor. */
+	starredAt?: number
+}
+
+/** An active in-chat pinned message. */
+export type ChatPin = {
+	messageId: string
+	/** JID, or "me". */
+	pinnedBy: string
+	pinnedAt: number
+	/** Unix ms. */
+	expiresAt: number
+	/** Absent when the pinned message is not stored. */
+	message?: Message
+}
+
+export type PinDuration = 86400 | 604800 | 2592000
+export type DisappearingSeconds = 0 | 86400 | 604800 | 7776000
 
 export type Chat = {
 	id: string
@@ -121,6 +174,8 @@ export type Chat = {
 	pinnedAt: number | null
 	muteMode: "off" | "until" | "forever"
 	mutedUntil: number | null
+	/** Disappearing-messages timer of the chat; 0 or absent = off. */
+	disappearingSecs?: number
 }
 
 /**
@@ -145,6 +200,7 @@ export function normalizeChat(raw: Partial<Chat> | null | undefined): Chat {
 		pinnedAt: pinnedAt != null && Number.isFinite(pinnedAt) ? pinnedAt : null,
 		muteMode: value.muteMode === "until" || value.muteMode === "forever" ? value.muteMode : "off",
 		mutedUntil: mutedUntil != null && Number.isFinite(mutedUntil) ? mutedUntil : null,
+		disappearingSecs: Number.isFinite(Number(value.disappearingSecs)) ? Number(value.disappearingSecs) : 0,
 	}
 }
 
@@ -724,8 +780,42 @@ class ApiClient {	private baseUrl: string
 		})
 	}
 
-	async getMessageReceipts(chatId: string, id: string): Promise<MessageReceipt[]> {
-		return this.request<MessageReceipt[]>(`/chats/${chatId}/messages/${id}/receipts`)
+	async starMessage(chatId: string, id: string, starred: boolean): Promise<{ status: string; starred: boolean }> {
+		return this.request<{ status: string; starred: boolean }>(`/chats/${chatId}/messages/${id}/star`, {
+			method: "POST",
+			body: JSON.stringify({ starred }),
+		})
+	}
+
+	/** Starred messages, newest-starred first; pass the last `starredAt` as `before` to page. */
+	async getStarred(options: { chatId?: string; limit?: number; before?: number } = {}): Promise<StarredMessage[]> {
+		const params = new URLSearchParams({ limit: String(options.limit ?? 100) })
+		if (options.chatId) params.set("chatId", options.chatId)
+		if (options.before) params.set("before", String(options.before))
+		return this.request<StarredMessage[]>(`/starred?${params}`)
+	}
+
+	/** Pin a message to its chat for `duration` seconds, or unpin it. */
+	async pinMessage(chatId: string, id: string, pinned: boolean, duration: PinDuration = 604800): Promise<{ status: string; pinned: boolean }> {
+		return this.request<{ status: string; pinned: boolean }>(`/chats/${chatId}/messages/${id}/pin`, {
+			method: "POST",
+			body: JSON.stringify(pinned ? { pinned, duration } : { pinned }),
+		})
+	}
+
+	async getChatPins(chatId: string): Promise<ChatPin[]> {
+		return this.request<ChatPin[]>(`/chats/${chatId}/pins`)
+	}
+
+	async setDisappearing(chatId: string, seconds: DisappearingSeconds): Promise<{ status: string; seconds: number }> {
+		return this.request<{ status: string; seconds: number }>(`/chats/${chatId}/disappearing`, {
+			method: "POST",
+			body: JSON.stringify({ seconds }),
+		})
+	}
+
+	async getMessageReceipts(chatId: string, id: string): Promise<MessageReceipts> {
+		return this.request<MessageReceipts>(`/chats/${chatId}/messages/${id}/receipts`)
 	}
 
 	/** Subscribe to a 1:1 contact's availability updates. */
@@ -891,6 +981,14 @@ class ApiClient {	private baseUrl: string
 	}
 
 	/** Mark a status viewed (sends the read receipt). */
+	/** Reply to a status; the message lands in the 1:1 chat with its poster. */
+	async replyToStatus(id: string, text: string): Promise<{ status: string; id: string; chatId: string }> {
+		return this.request<{ status: string; id: string; chatId: string }>(`/statuses/${id}/reply`, {
+			method: "POST",
+			body: JSON.stringify({ text }),
+		})
+	}
+
 	async markStatusViewed(id: string): Promise<{ status: string }> {
 		return this.request<{ status: string }>(`/statuses/${id}/viewed`, { method: "POST" })
 	}
@@ -1136,7 +1234,7 @@ class ApiClient {	private baseUrl: string
 		})
 	}
 
-	async sendMessage(target: string, message: string, mentions: string[] = []): Promise<{ status: string; id: string }> {
+	async sendMessage(target: string, message: string, mentions: string[] = [], options?: { noLinkPreview?: boolean }): Promise<{ status: string; id: string }> {
 		return this.request<{ status: string; id: string }>("/send-message", {
 			method: "POST",
 			body: JSON.stringify({
@@ -1144,8 +1242,17 @@ class ApiClient {	private baseUrl: string
 				target,
 				message,
 				mentions,
+				...(options?.noLinkPreview ? { noLinkPreview: true } : {}),
 			}),
 		})
+	}
+
+	/** Preview card for a URL; null when nothing could be scraped (404). */
+	async getLinkPreview(url: string): Promise<LinkPreviewMeta | null> {
+		const response = await fetch(`${this.baseUrl}/link-preview?url=${encodeURIComponent(url)}`)
+		if (response.status === 404) return null
+		if (!response.ok) throw new Error("Link preview failed")
+		return response.json()
 	}
 
 	async getChatMedia(chatId: string, limit = 30, before?: number): Promise<Message[]> {

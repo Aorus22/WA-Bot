@@ -84,6 +84,22 @@ impl ChatView {
                         h_flex()
                             .items_center()
                             .gap_1()
+                            // Starred messages
+                            .child(
+                                div()
+                                    .id("btn-starred-messages")
+                                    .cursor_pointer()
+                                    .p_2()
+                                    .rounded_full()
+                                    .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                                    .tooltip(move |window, cx| {
+                                        Tooltip::new("Starred messages").build(window, cx)
+                                    })
+                                    .child(svg().data(STAR_SVG).size(px(18.0)).text_color(muted_text))
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                        this.toggle_starred_sheet(cx);
+                                    })),
+                            )
                             // New Group Button
                             .child(
                                 div()

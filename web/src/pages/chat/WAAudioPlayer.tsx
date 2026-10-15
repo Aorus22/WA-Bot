@@ -9,6 +9,7 @@ interface WAAudioPlayerProps {
 	messageId: string
 	avatarUrl?: string
 	durationHint?: number
+	className?: string
 }
 
 const BAR_COUNT = 30
@@ -38,6 +39,7 @@ export const WAAudioPlayer = ({
 	messageId,
 	avatarUrl,
 	durationHint,
+	className,
 }: WAAudioPlayerProps) => {
 	const audioRef = useRef<HTMLAudioElement>(null)
 	const waveformRef = useRef<HTMLDivElement>(null)
@@ -142,7 +144,8 @@ export const WAAudioPlayer = ({
 		<div
 			className={cn(
 				"relative z-10 flex items-center gap-3 -mx-[14px] -mt-2 px-3.5 pt-3 pb-2",
-				"min-w-[240px] sm:min-w-[300px] max-w-full select-none"
+				"min-w-[240px] sm:min-w-[300px] max-w-full select-none",
+				className
 			)}
 		>
 			<button

@@ -89,6 +89,25 @@ impl TextField {
     /// The field, styled like the rest of the app: rounded, muted fill, an
     /// optional leading icon and a clear button while it has text.
     pub fn element(&self, theme: &ActiveTokens, leading: Option<&'static [u8]>) -> Div {
+        self.element_on(
+            theme.foreground,
+            theme.muted_foreground,
+            theme.muted.opacity(0.5),
+            theme.border.opacity(0.3),
+            leading,
+        )
+    }
+
+    /// The same field in explicit colours, for a surface the theme does not
+    /// describe (the status viewer's always-dark backdrop).
+    pub fn element_on(
+        &self,
+        text: Hsla,
+        icon: Hsla,
+        fill: Hsla,
+        border: Hsla,
+        leading: Option<&'static [u8]>,
+    ) -> Div {
         h_flex()
             .w_full()
             .items_center()
@@ -96,11 +115,11 @@ impl TextField {
             .px_3()
             .rounded_xl()
             .border_1()
-            .border_color(theme.border.opacity(0.3))
-            .bg(theme.muted.opacity(0.5))
+            .border_color(border)
+            .bg(fill)
             .cursor_text()
-            .when_some(leading, |el, icon| {
-                el.child(svg().data(icon).size(px(14.0)).flex_shrink_0().text_color(theme.muted_foreground))
+            .when_some(leading, |el, icon_data| {
+                el.child(svg().data(icon_data).size(px(14.0)).flex_shrink_0().text_color(icon))
             })
             .child(
                 Input::new(&self.state)
@@ -109,7 +128,7 @@ impl TextField {
                     .cleanable(true)
                     .flex_1()
                     .text_sm()
-                    .text_color(theme.foreground),
+                    .text_color(text),
             )
     }
 }

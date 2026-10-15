@@ -25,8 +25,12 @@ impl ChatView {
         }
         self.search_sheet_closing = false;
         self.is_search_sheet_open = true;
+        self.is_starred_sheet_open = false;
+        self.starred_sheet_closing = false;
         self.is_info_sheet_open = false;
         self.info_sheet_closing = false;
+        self.viewed_by_message = None;
+        self.viewed_by_closing = false;
         if let Some(field) = self.sheet_search_field.clone() {
             field.focus(window, cx);
         }

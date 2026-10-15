@@ -312,7 +312,7 @@ fn show(notice: Notice, client: HttpClient, chat_id: String, message_id: String)
             cached_avatar(&client, &proxy).await
         });
         #[cfg(target_os = "linux")]
-        let result = linux::show(&notice, avatar.as_deref()).map(|_| ());
+        let result = linux::show(&notice, avatar.as_deref(), &chat_id).map(|_| ());
         #[cfg(not(target_os = "linux"))]
         let result = {
             let mut notification = notify_rust::Notification::new();
@@ -395,6 +395,7 @@ mod tests {
             forwarded: None,
             reactions: None,
             extra: None,
+            ..Default::default()
         }
     }
 
@@ -413,6 +414,7 @@ mod tests {
             pinned_at: None,
             mute_mode: "off".into(),
             muted_until: None,
+            disappearing_secs: 0,
         }
     }
 

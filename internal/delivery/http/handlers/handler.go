@@ -341,6 +341,47 @@ func (h *Handler) LogSentMessageWithMentions(msgID, chatID, from, to, content, m
 	h.SaveAndBroadcastMessage(msg)
 }
 
+// LogSentMessageWithPreview stores an outgoing text together with the link
+// preview card that went with it.
+func (h *Handler) LogSentMessageWithPreview(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string, preview *whatsappInfra.LinkPreview) {
+	msg := &repository.Message{
+		ID:          msgID,
+		ChatID:      chatID,
+		From:        from,
+		To:          to,
+		Content:     content,
+		Timestamp:   time.Now().UnixMilli(),
+		Status:      "sent",
+		Type:        msgType,
+		MediaURL:    mediaURL,
+		IsAutomatic: isAutomatic,
+		ReplyToID:   replyToID,
+	}
+	extra := &repository.MessageExtra{}
+	if len(mentions) > 0 {
+		extra.Mentions = append([]string(nil), mentions...)
+	}
+	if preview != nil {
+		extra.LinkPreview = &repository.LinkPreviewMeta{
+			URL:          preview.URL,
+			Title:        preview.Title,
+			Description:  preview.Description,
+			ThumbnailURL: h.saveLinkPreviewThumb(context.Background(), preview.URL, preview.JPEGThumbnail),
+		}
+	}
+	msg.Extra = extra
+	h.SaveAndBroadcastMessage(msg)
+}
+
+// ChatDisappearingSecs is the chat's disappearing timer (0 = off); outgoing
+// messages carry it so recipients' phones apply the same timer.
+func (h *Handler) ChatDisappearingSecs(chatID string) uint32 {
+	if h.msgRepo == nil {
+		return 0
+	}
+	return h.msgRepo.GetChatDisappearing(chatID)
+}
+
 type wsHub interface {
 	BroadcastMessage(msgType string, payload interface{})
 	SendMessageToUser(userID string, msgType string, payload interface{})
@@ -357,6 +398,7 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 			return
 		}
 		h.enrichMessageMentions(msg, h.ownMentionJIDs())
+		h.stampDisappearing(msg)
 		if err := h.msgRepo.SaveMessage(msg); err != nil {
 			fmt.Printf("Failed to save message: %v\n", err)
 			return
@@ -410,6 +452,26 @@ func (h *Handler) SaveAndBroadcastMessage(msg *repository.Message) {
 			fmt.Printf("[WS] Broadcasted message via WebSocket (chatId=%s, resolved=%s, id=%s)\n", msg.ChatID, resolvedChatID, msg.ID)
 			hub.BroadcastMessage("new_message", payload)
 		}
+	}
+}
+
+// stampDisappearing records the chat's current timer on an outgoing message
+// (incoming ones are stamped from the sender's own value). The message is kept
+// forever; this only lets clients show when phones drop it.
+func (h *Handler) stampDisappearing(msg *repository.Message) {
+	if msg.From != "me" || (msg.Extra != nil && msg.Extra.Disappearing != nil) {
+		return
+	}
+	secs := h.msgRepo.GetChatDisappearing(msg.ChatID)
+	if secs == 0 {
+		return
+	}
+	if msg.Extra == nil {
+		msg.Extra = &repository.MessageExtra{}
+	}
+	msg.Extra.Disappearing = &repository.DisappearingMeta{
+		Seconds:   secs,
+		ExpiresAt: msg.Timestamp + int64(secs)*1000,
 	}
 }
 

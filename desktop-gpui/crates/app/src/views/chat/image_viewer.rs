@@ -148,6 +148,7 @@ impl ChatView {
                 .items_center()
                 .justify_between()
                 .bg(rgba(0x0b141acc))
+                .occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     div()
@@ -392,6 +393,7 @@ impl ChatView {
                         .rounded_full()
                         .bg(rgba(0x0b141acc))
                         .cursor_pointer()
+                        .occlude()
                         .hover(move |s| s.bg(btn_hover))
                         .child(svg().data(icon_data).size(px(20.0)).text_color(icon));
                     if left_side { b.left(px(12.0)) } else { b.right(px(12.0)) }

@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { Chat, Message } from "@/lib/api"
+import type { Chat, DisappearingSeconds, Message } from "@/lib/api"
 import { api } from "@/lib/api"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FileText, Image as ImageIcon, Link as LinkIcon, Video, File, Loader2 } from "lucide-react"
+import { FileText, Image as ImageIcon, Link as LinkIcon, Video, File, Loader2, Hourglass } from "lucide-react"
+import { toast } from "sonner"
+import { cn } from "@/lib/utils"
+import { useChatStore } from "@/stores/chatStore"
 import { GroupMembersTab } from "./GroupPanels"
+import { DISAPPEARING_OPTIONS, disappearingTimerLabel } from "./disappearing"
 
 interface ChatInfoSheetModalProps {
 	open: boolean
@@ -41,6 +45,21 @@ export function ChatInfoSheetModal({
 	const loadingMediaRef = useRef(false)
 	const loadingDocsRef = useRef(false)
 	const loadingLinksRef = useRef(false)
+
+	const [savingTimer, setSavingTimer] = useState(false)
+
+	const changeDisappearing = async (seconds: DisappearingSeconds) => {
+		if (savingTimer || seconds === (chat.disappearingSecs || 0)) return
+		setSavingTimer(true)
+		try {
+			const res = await api.setDisappearing(chat.id, seconds)
+			useChatStore.getState().patchChat(chat.id, { disappearingSecs: res.seconds ?? seconds })
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Failed to change disappearing messages")
+		} finally {
+			setSavingTimer(false)
+		}
+	}
 
 	const mediaScrollRef = useRef<HTMLDivElement>(null)
 	const docsScrollRef = useRef<HTMLDivElement>(null)
@@ -169,6 +188,34 @@ export function ChatInfoSheetModal({
 					<div className="flex flex-col min-w-0">
 						<h2 className="text-base font-bold leading-tight truncate">{chat.name}</h2>
 						<p className="text-[11px] font-medium text-muted-foreground truncate">{chat.id}</p>
+					</div>
+				</div>
+
+				<div className="px-4 py-3 border-b border-border/40 shrink-0">
+					<div className="flex items-center gap-3">
+						<Hourglass className="h-4 w-4 text-muted-foreground shrink-0" />
+						<div className="min-w-0">
+							<p className="text-sm font-medium">Disappearing messages</p>
+							<p className="text-[11px] text-muted-foreground">
+								{chat.disappearingSecs ? `Disappearing messages: ${disappearingTimerLabel(chat.disappearingSecs)}` : "Off"}. Messages are kept here either way.
+							</p>
+						</div>
+					</div>
+					<div className="mt-2 grid grid-cols-4 gap-1 rounded-lg bg-muted/50 p-1">
+						{DISAPPEARING_OPTIONS.map(option => (
+							<button
+								key={option.seconds}
+								type="button"
+								disabled={savingTimer}
+								onClick={() => changeDisappearing(option.seconds)}
+								className={cn(
+									"rounded-md px-2 py-1.5 text-xs transition-colors disabled:opacity-60",
+									(chat.disappearingSecs || 0) === option.seconds ? "bg-background font-bold shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"
+								)}
+							>
+								{option.label}
+							</button>
+						))}
 					</div>
 				</div>
 

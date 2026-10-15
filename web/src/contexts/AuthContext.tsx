@@ -154,10 +154,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				break
 			case "chat_update":
 				if (message.payload?.chatId) {
-					const { chatId, unread, lastMsg } = message.payload
+					const { chatId, unread, lastMsg, disappearingSecs } = message.payload
 					useChatStore.getState().patchChat(chatId, {
 						...(typeof unread === "number" ? { unread } : {}),
 						...(typeof lastMsg === "string" ? { lastMsg } : {}),
+						...(typeof disappearingSecs === "number" ? { disappearingSecs } : {}),
+					})
+				}
+				break
+			case "message_starred":
+				if (message.payload?.id) {
+					useChatStore.getState().patchMessage(message.payload.chatId, message.payload.id, {
+						starred: Boolean(message.payload.starred),
 					})
 				}
 				break

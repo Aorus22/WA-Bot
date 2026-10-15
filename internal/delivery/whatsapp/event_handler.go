@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -51,6 +52,7 @@ type WhatsAppEventHandler struct {
 	historySync  *HistorySyncService
 	mediaRetries *MediaRetryHub
 	settingsRepo repository.SettingsRepository
+	statusRepair sync.Once
 }
 
 type LuaService interface {
@@ -143,6 +145,10 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 			h.handlePollUpdate(v)
 			return
 		}
+		if pm := v.Message.GetPinInChatMessage(); pm != nil {
+			h.handlePinInChat(v, pm)
+			return
+		}
 
 		// Status (story) updates arrive on the status broadcast chat; own
 		// statuses posted from the phone are IsFromMe and must be kept.
@@ -180,6 +186,10 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 		}
 
 		h.handleMessage(v)
+	case *events.Connected:
+		// Ticks written before per-member receipts existed can be too far
+		// ahead; fix them once per run.
+		h.statusRepair.Do(func() { go h.repairGroupStatuses() })
 	case *events.Receipt:
 		h.handleReceipt(v)
 	case *events.Contact:
@@ -204,6 +214,8 @@ func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
 		h.handleClearChat(v)
 	case *events.DeleteForMe:
 		h.handleDeleteForMe(v)
+	case *events.Star:
+		h.handleStar(v)
 	case *events.AppState:
 		h.handleAppState(v)
 	case *events.PushName:
@@ -263,6 +275,13 @@ func (h *WhatsAppEventHandler) handleGroupInfo(evt *events.GroupInfo) {
 		return
 	}
 	chatID := evt.JID.String()
+	if evt.Ephemeral != nil {
+		secs := evt.Ephemeral.DisappearingTimer
+		if !evt.Ephemeral.IsEphemeral {
+			secs = 0
+		}
+		h.applyDisappearingSetting(chatID, secs)
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -437,6 +456,86 @@ func (h *WhatsAppEventHandler) handleClearChat(evt *events.ClearChat) {
 	}
 }
 
+// handleStar mirrors a star set on another device. Stars are flagged, never removed.
+func (h *WhatsAppEventHandler) handleStar(evt *events.Star) {
+	if h.msgStore == nil || evt.MessageID == "" {
+		return
+	}
+	starred := evt.Action.GetStarred()
+	chatID := evt.ChatJID.ToNonAD().String()
+	if err := h.msgStore.SetStarred(chatID, evt.MessageID, starred, evt.Timestamp.UnixMilli()); err != nil {
+		fmt.Printf("[STAR] Failed to store star for %s: %v\n", evt.MessageID, err)
+		return
+	}
+	if evt.FromFullSync || h.httpServer == nil {
+		return
+	}
+	h.httpServer.BroadcastMessage("message_starred", map[string]interface{}{
+		"chatId":  h.msgStore.ResolveChatID(chatID),
+		"id":      evt.MessageID,
+		"starred": starred,
+	})
+}
+
+// handlePinInChat applies a pin / unpin of a message made by anyone in the chat
+// (including our own echoes). Unpinned and expired pins stay in the database.
+func (h *WhatsAppEventHandler) handlePinInChat(evt *events.Message, pm *waProto.PinInChatMessage) {
+	if h.msgStore == nil {
+		return
+	}
+	targetID := pm.GetKey().GetID()
+	if targetID == "" {
+		return
+	}
+	chatID := evt.Info.Chat.ToNonAD().String()
+	at := pm.GetSenderTimestampMS()
+	if at <= 0 {
+		at = evt.Info.Timestamp.UnixMilli()
+	}
+
+	switch pm.GetType() {
+	case waProto.PinInChatMessage_PIN_FOR_ALL:
+		secs := int64(evt.Message.GetMessageContextInfo().GetMessageAddOnDurationInSecs())
+		secs = repository.NormalizePinDuration(secs)
+		pinnedBy := evt.Info.Sender.ToNonAD().String()
+		if evt.Info.IsFromMe {
+			pinnedBy = "me"
+		}
+		if err := h.msgStore.PinMessage(chatID, targetID, pinnedBy, at, at+secs*1000); err != nil {
+			fmt.Printf("[PIN] Failed to store pin of %s: %v\n", targetID, err)
+			return
+		}
+	case waProto.PinInChatMessage_UNPIN_FOR_ALL:
+		if err := h.msgStore.UnpinMessage(targetID, at); err != nil {
+			fmt.Printf("[PIN] Failed to store unpin of %s: %v\n", targetID, err)
+			return
+		}
+	default:
+		return
+	}
+	if h.httpServer != nil {
+		h.httpServer.BroadcastMessage("chat_pins_changed", map[string]string{
+			"chatId": h.msgStore.ResolveChatID(chatID),
+		})
+	}
+}
+
+// applyDisappearingSetting stores a chat's new disappearing timer and tells
+// clients. Existing messages are untouched: nothing is ever deleted here.
+func (h *WhatsAppEventHandler) applyDisappearingSetting(chatID string, secs uint32) {
+	if h.msgStore == nil {
+		return
+	}
+	changed, err := h.msgStore.SetChatDisappearing(chatID, secs)
+	if err != nil {
+		fmt.Printf("[DISAPPEARING] Failed to store timer for %s: %v\n", chatID, err)
+		return
+	}
+	if changed {
+		h.broadcastChatEvent("chat_update", chatID, map[string]interface{}{"disappearingSecs": secs})
+	}
+}
+
 // handleDeleteForMe hides a message deleted for the user on another device;
 // the row is kept, flagged deleted_at.
 func (h *WhatsAppEventHandler) handleDeleteForMe(evt *events.DeleteForMe) {
@@ -592,22 +691,24 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 		return
 	}
 
-	if evt.Type == events.ReceiptTypeRead && h.msgStore != nil && evt.IsGroup {
-		reader := evt.Sender.ToNonAD()
-		if reader.Server == "lid" {
-			alt := evt.SenderAlt.ToNonAD()
-			if alt.Server == "s.whatsapp.net" {
-				reader = alt
-			} else if resolved := h.msgStore.ResolveChatID(reader.String()); resolved != reader.String() {
-				if parsed, err := waTypes.ParseJID(resolved); err == nil {
-					reader = parsed
-				}
-			}
+	// In a group each member reports on their own, so the tick follows the
+	// whole group: grey double once everyone has the message, blue once
+	// everyone has read it. The per-member times back the message info sheet.
+	if h.msgStore != nil && evt.IsGroup {
+		h.handleGroupReceipt(evt)
+		return
+	}
+	// A private chat has a single recipient: keep when each stage happened for
+	// the message info sheet.
+	if h.msgStore != nil && !evt.IsFromMe {
+		kind := repository.ReceiptDelivered
+		if evt.Type == events.ReceiptTypeRead {
+			kind = repository.ReceiptRead
 		}
+		contact := evt.Chat.ToNonAD().String()
 		for _, msgID := range evt.MessageIDs {
-			_, err := h.msgStore.SaveReadReceipt(evt.Chat.String(), string(msgID), reader.String(), evt.Timestamp.UnixMilli())
-			if err != nil {
-				fmt.Printf("[RECEIPT] Failed to save read receipt for %s: %v\n", msgID, err)
+			if _, err := h.msgStore.SaveReceipt(string(msgID), contact, kind, evt.Timestamp.UnixMilli()); err != nil {
+				fmt.Printf("[RECEIPT] Failed to save receipt for %s: %v\n", msgID, err)
 			}
 		}
 	}
@@ -619,6 +720,165 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 		h.httpServer.UpdateMessageStatus(msgID, status)
 		fmt.Printf("✅ Updated status for %s to %s\n", msgID, status)
 	}
+}
+
+// handleGroupReceipt records one member's delivery or read receipt and moves
+// the message's tick forward when the whole group has caught up.
+func (h *WhatsAppEventHandler) handleGroupReceipt(evt *events.Receipt) {
+	kind := repository.ReceiptDelivered
+	if evt.Type == events.ReceiptTypeRead {
+		kind = repository.ReceiptRead
+	}
+	member := evt.Sender.ToNonAD()
+	if member.Server == "lid" {
+		alt := evt.SenderAlt.ToNonAD()
+		if alt.Server == "s.whatsapp.net" {
+			member = alt
+		} else if resolved := h.msgStore.ResolveChatID(member.String()); resolved != member.String() {
+			if parsed, err := waTypes.ParseJID(resolved); err == nil {
+				member = parsed
+			}
+		}
+	}
+	own := h.ownUsers()
+	if own[member.User] {
+		return
+	}
+
+	chatID := evt.Chat.String()
+	total := h.groupRecipientCount(chatID, own)
+	for _, msgID := range evt.MessageIDs {
+		id := string(msgID)
+		if _, err := h.msgStore.SaveReceipt(id, member.String(), kind, evt.Timestamp.UnixMilli()); err != nil {
+			fmt.Printf("[RECEIPT] Failed to save receipt for %s: %v\n", id, err)
+			continue
+		}
+		if total == 0 {
+			continue
+		}
+		delivered, read, err := h.msgStore.CountReceipts(chatID, id, own)
+		if err != nil {
+			continue
+		}
+		status := groupStatusFor(delivered, read, total)
+		if status == "sent" {
+			continue
+		}
+		if changed, err := h.msgStore.UpgradeMessageStatus(id, status); err == nil && changed && h.httpServer != nil {
+			h.httpServer.BroadcastMessage("message_status", map[string]interface{}{"id": id, "status": status})
+			fmt.Printf("✅ Updated status for %s to %s (%d/%d)\n", id, status, read, total)
+		}
+	}
+}
+
+// groupStatusFor is the tick a group message deserves given who has it: sent
+// until every member has it, delivered until every member has read it.
+func groupStatusFor(delivered, read, total int) string {
+	switch {
+	case total > 0 && read >= total:
+		return "read"
+	case total > 0 && delivered >= total:
+		return "delivered"
+	}
+	return "sent"
+}
+
+// repairGroupStatuses lowers group message ticks that an older build set as
+// soon as a single member reported in. Only messages that have receipts are
+// judged, and only against an already cached member list.
+func (h *WhatsAppEventHandler) repairGroupStatuses() {
+	if h.msgStore == nil {
+		return
+	}
+	rows, err := h.msgStore.GroupMessagesWithReceipts()
+	if err != nil {
+		fmt.Printf("[RECEIPT] Repair skipped: %v\n", err)
+		return
+	}
+	own := h.ownUsers()
+	totals := map[string]int{}
+	fixed := 0
+	for _, row := range rows {
+		if row.Status != "delivered" && row.Status != "read" {
+			continue
+		}
+		total, ok := totals[row.ChatID]
+		if !ok {
+			if group, err := h.msgStore.GetGroupCache(row.ChatID); err == nil && group != nil {
+				total = recipientCount(group, own)
+			}
+			totals[row.ChatID] = total
+		}
+		if total == 0 {
+			continue
+		}
+		delivered, read, err := h.msgStore.CountReceipts(row.ChatID, row.ID, own)
+		if err != nil {
+			continue
+		}
+		want := groupStatusFor(delivered, read, total)
+		if want == row.Status || (want == "read" && row.Status == "delivered") {
+			continue
+		}
+		if err := h.msgStore.UpdateMessageStatus(row.ID, want); err != nil {
+			continue
+		}
+		fixed++
+		if h.httpServer != nil {
+			h.httpServer.BroadcastMessage("message_status", map[string]interface{}{"id": row.ID, "status": want})
+		}
+	}
+	if fixed > 0 {
+		fmt.Printf("[RECEIPT] Corrected %d group message tick(s)\n", fixed)
+	}
+}
+
+// recipientCount is how many members of the group are not us.
+func recipientCount(group *repository.GroupCache, own map[string]bool) int {
+	count := 0
+	for _, p := range group.Participants {
+		user := p.JID
+		if i := strings.IndexByte(user, '@'); i >= 0 {
+			user = user[:i]
+		}
+		if !own[user] {
+			count++
+		}
+	}
+	return count
+}
+
+// ownUsers returns the user parts of our phone-number and LID identities.
+func (h *WhatsAppEventHandler) ownUsers() map[string]bool {
+	users := map[string]bool{}
+	if h.waClient == nil || h.waClient.CoreClient() == nil || h.waClient.CoreClient().Store == nil {
+		return users
+	}
+	store := h.waClient.CoreClient().Store
+	if store.ID != nil {
+		users[store.ID.User] = true
+	}
+	if !store.LID.IsEmpty() {
+		users[store.LID.User] = true
+	}
+	return users
+}
+
+// groupRecipientCount is how many members besides us a group message goes to.
+func (h *WhatsAppEventHandler) groupRecipientCount(chatID string, own map[string]bool) int {
+	group, err := h.msgStore.GetGroupCache(chatID)
+	if err != nil || group == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if h.waClient == nil {
+			return 0
+		}
+		group = h.refreshGroupCache(ctx, chatID)
+		if group == nil {
+			return 0
+		}
+	}
+	return recipientCount(group, own)
 }
 
 func (h *WhatsAppEventHandler) handleContact(evt *events.Contact) {
@@ -721,6 +981,9 @@ func (h *WhatsAppEventHandler) handleProtocolChange(evt *events.Message) bool {
 			return true
 		} else if isEdit(pm) {
 			h.applyEdit(eventChatID, pm.GetKey().GetID(), editedText(pm.GetEditedMessage()), pm.GetTimestampMS())
+			return true
+		} else if pm.GetType() == waProto.ProtocolMessage_EPHEMERAL_SETTING {
+			h.applyDisappearingSetting(chatID, pm.GetEphemeralExpiration())
 			return true
 		}
 	}
@@ -969,6 +1232,27 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 			forwarded = ci.GetIsForwarded()
 			if len(ci.GetMentionedJID()) > 0 {
 				extra.Mentions = append([]string(nil), ci.GetMentionedJID()...)
+			}
+			// A message sent under a disappearing timer is kept; we only note
+			// when phones drop it. It also tells us the chat's current timer.
+			if secs := ci.GetExpiration(); secs > 0 {
+				extra.Disappearing = &repository.DisappearingMeta{
+					Seconds:   secs,
+					ExpiresAt: evt.Info.Timestamp.UnixMilli() + int64(secs)*1000,
+				}
+				// Only fresh messages: a delayed older one must not undo a
+				// timer that was switched off since.
+				if !evt.Info.IsFromMe && time.Since(evt.Info.Timestamp) < 10*time.Minute {
+					h.applyDisappearingSetting(chatID, secs)
+				}
+			}
+			// A reply to a status quotes a message that is not in this chat.
+			if ci.GetRemoteJID() == waTypes.StatusBroadcastJID.String() && ci.GetStanzaID() != "" {
+				if entry, err := h.msgStore.GetStatusByID(ci.GetStanzaID()); err == nil {
+					extra.StatusReply = repository.NewStatusReplyMeta(entry)
+				} else {
+					extra.StatusReply = &repository.StatusReplyMeta{StatusID: ci.GetStanzaID(), Sender: ci.GetParticipant()}
+				}
 			}
 		}
 
@@ -1232,7 +1516,7 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 				return ""
 			}(),
 		}
-		if extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 {
+		if extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || extra.Disappearing != nil || extra.StatusReply != nil {
 			msg.Extra = &extra
 		}
 		// Keep the serialized original proto for lossless forwarding.

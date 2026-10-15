@@ -23,5 +23,6 @@ pub mod text_format;
 pub mod theme;
 pub mod tray;
 pub mod views;
+pub mod voice_recorder;
 pub mod window_material;
 

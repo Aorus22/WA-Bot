@@ -66,6 +66,7 @@ impl ChatAreaState {
             forwarded: None,
             reactions: None,
             extra: None,
+            ..Default::default()
         })
     }
 }
@@ -118,6 +119,7 @@ mod tests {
             pinned_at: None,
             mute_mode: "off".to_string(),
             muted_until: None,
+            disappearing_secs: 0,
         };
         state.set_active_chat(chat);
 

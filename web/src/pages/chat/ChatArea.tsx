@@ -3,8 +3,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video, Mic, Square, Trash2, SendHorizontal, ChevronDown } from "lucide-react"
-import { api, type Chat, type GroupCache, type GroupParticipantInfo, type Message, type MessageReceipt } from "@/lib/api"
+import { Send, ArrowLeft, MessageSquare, X, MoreVertical, Search, FileText, Plus, Smile, Paperclip, Sticker, Phone, Video, Mic, Square, Trash2, SendHorizontal, ChevronDown, Hourglass } from "lucide-react"
+import { api, type Chat, type ChatPin, type GroupCache, type GroupParticipantInfo, type LinkPreviewMeta, type Message, type MessageReceipt, type PinDuration } from "@/lib/api"
 import { useCall } from "@/contexts/CallContext"
 import { cn } from "@/lib/utils"
 import { useTypingStore, typistsOf } from "@/stores/typingStore"
@@ -15,12 +15,17 @@ import { ChatImageViewerModal } from "./ChatImageViewerModal"
 import { ChatEmojiPickerPopover } from "./ChatEmojiPickerPopover"
 import { ChatStickerPickerPopover } from "./ChatStickerPickerPopover"
 import { ChatSearchSheet } from "./ChatSearchSheet"
+import { MessageInfoSheet } from "./MessageInfoSheet"
 import { ChatMessageItem } from "./ChatMessageItem"
+import { PinnedBanner } from "./PinnedBanner"
+import { ComposerLinkPreview } from "./ComposerLinkPreview"
+import { RecordingWaveform } from "./RecordingWaveform"
+import { disappearingTimerLabel } from "./disappearing"
+import { WAAudioPlayer } from "./WAAudioPlayer"
 import { PollDialog, LocationDialog, ContactDialog, ForwardDialog } from "./ChatComposeDialogs"
 import { useChatStore } from "@/stores/chatStore"
 import { subscribeWS } from "@/lib/ws-bus"
 import { MapPin, User, BarChart3, ImagePlay } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 interface ChatAreaProps {
     chat: Chat | null
@@ -97,6 +102,17 @@ const formatRecordingTime = (seconds: number) => {
     return `${m}:${s.toString().padStart(2, "0")}`
 }
 
+const URL_PATTERN = /https?:\/\/[^\s<>"']+/i
+
+// First link of a draft, without the punctuation that ends the sentence around it.
+const firstUrl = (text: string): string | null => {
+    const match = text.match(URL_PATTERN)
+    return match ? match[0].replace(/[.,!?;:)\]]+$/, "") : null
+}
+
+// Previews fetched this session; null = the server had nothing for that URL.
+const linkPreviewCache = new Map<string, LinkPreviewMeta | null>()
+
 const participantLabel = (participant: GroupParticipantInfo) => participant.name?.trim() || participant.jid.split("@")[0]
 
 const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
@@ -149,6 +165,7 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
     useTypingStore(s => s.tick)
     const [viewedByMessage, setViewedByMessage] = useState<Message | null>(null)
     const [viewedByReceipts, setViewedByReceipts] = useState<MessageReceipt[]>([])
+    const [viewedByRecipients, setViewedByRecipients] = useState<string[]>([])
     const [loadingViewedBy, setLoadingViewedBy] = useState(false)
     const [sending, setSending] = useState(false)
     const [showFavoriteBtn, setShowFavoriteBtn] = useState<string | null>(null)
@@ -163,6 +180,11 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
 	const [showScrollBottom, setShowScrollBottom] = useState(false)
 	const gifInputRef = useRef<HTMLInputElement>(null)
 	const [headerStatus, setHeaderStatus] = useState("")
+	const [pins, setPins] = useState<ChatPin[]>([])
+	const [linkPreview, setLinkPreview] = useState<{ url: string; meta: LinkPreviewMeta | null } | null>(null)
+	// Links whose preview the user closed; those go out with noLinkPreview.
+	const [dismissedLinks, setDismissedLinks] = useState<string[]>([])
+	const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null)
 
 	// Typing indicator + availability for the open 1:1 chat. The typing line
 	// auto-clears if no renewal arrives (WhatsApp repeats composing ~every 2.5s).
@@ -224,6 +246,54 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
         return () => { active = false }
     }, [chat?.id, chat?.isGroup])
 
+	// In-chat pins: loaded on open and whenever the server says they changed.
+	const loadPins = useCallback((chatId: string, isCurrent: () => boolean = () => true) =>
+		api.getChatPins(chatId)
+			.then(data => { if (isCurrent()) setPins((data || []).filter(pin => pin.message)) })
+			.catch(error => console.warn("Failed to load pinned messages:", error)), [])
+
+	useEffect(() => {
+		setPins([])
+		if (!chat) return
+		let active = true
+		const chatId = chat.id
+		loadPins(chatId, () => active)
+		const unsub = subscribeWS((msg) => {
+			if (msg.type === "chat_pins_changed" && msg.payload?.chatId === chatId) loadPins(chatId, () => active)
+		})
+		return () => {
+			active = false
+			unsub()
+		}
+	}, [chat?.id, loadPins])
+
+	// Link preview for the first URL of the draft, after a short pause in typing.
+	const draftUrl = editingMessage || replyTo ? null : firstUrl(inputMessage)
+	useEffect(() => {
+		if (!draftUrl) return
+		if (linkPreviewCache.has(draftUrl)) {
+			setLinkPreview({ url: draftUrl, meta: linkPreviewCache.get(draftUrl) ?? null })
+			return
+		}
+		let active = true
+		const timer = setTimeout(() => {
+			api.getLinkPreview(draftUrl)
+				.then(meta => {
+					linkPreviewCache.set(draftUrl, meta)
+					if (active) setLinkPreview({ url: draftUrl, meta })
+				})
+				.catch(() => {})
+		}, 600)
+		return () => {
+			active = false
+			clearTimeout(timer)
+		}
+	}, [draftUrl])
+	const composerPreview = linkPreview && linkPreview.url === draftUrl && !dismissedLinks.includes(draftUrl)
+		&& linkPreview.meta && (linkPreview.meta.title || linkPreview.meta.description || linkPreview.meta.thumbnailUrl)
+		? linkPreview.meta
+		: null
+
 	const [emojiOpen, setEmojiOpen] = useState(false)
 	const [stickerOpen, setStickerOpen] = useState(false)
     const [isMediaSheetOpen, setIsMediaSheetOpen] = useState(false)
@@ -283,6 +353,15 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
         }
     }, [chat?.id, entry?.loaded])
 
+    // A draft voice message or dismissed link preview belongs to the chat it was made in.
+    useEffect(() => {
+        setDismissedLinks([])
+        setPendingAudio(prev => {
+            if (prev) URL.revokeObjectURL(prev.url)
+            return null
+        })
+    }, [chat?.id])
+
     // Stop any in-progress recording when switching chats
     useEffect(() => {
         return () => {
@@ -308,6 +387,19 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
             }
         }
     }, [])
+
+    // When the list shrinks or grows (pinned banner, composer link preview,
+    // reply bar) a reader at the bottom stays at the bottom.
+    const stickToBottomRef = useRef(true)
+    useEffect(() => {
+        const list = scrollRef.current
+        if (!list || typeof ResizeObserver === "undefined") return
+        const observer = new ResizeObserver(() => {
+            if (stickToBottomRef.current) list.scrollTop = list.scrollHeight
+        })
+        observer.observe(list)
+        return () => observer.disconnect()
+    }, [chat?.id])
 
     // Scroll to bottom when a new message arrives at the end of the list
     const lastMessageId = messages[messages.length - 1]?.id
@@ -364,13 +456,15 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
     const handleViewedBy = async (message: Message) => {
         setViewedByMessage(message)
         setViewedByReceipts([])
+        setViewedByRecipients([])
         setLoadingViewedBy(true)
         try {
-            const receipts = await api.getMessageReceipts(message.chatId, message.id)
-            setViewedByReceipts(receipts)
+            const info = await api.getMessageReceipts(message.chatId, message.id)
+            setViewedByReceipts(info.receipts)
+            setViewedByRecipients(info.recipients ?? [])
         } catch (error) {
             console.error("Failed to load read receipts:", error)
-            toast.error("Gagal memuat Viewed by")
+            toast.error("Gagal memuat Message info")
         } finally {
             setLoadingViewedBy(false)
         }
@@ -473,9 +567,56 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
         }
     }
 
+    // Scrolls to a message already on screen, loading its surroundings when it is not.
+    const jumpToMessage = (messageId: string) => {
+        const element = document.getElementById(messageId)
+        if (!element) {
+            teleportToMessage(messageId)
+            return
+        }
+        element.scrollIntoView({ behavior: "smooth", block: "center" })
+        setHighlightedMessageId(messageId)
+        setTimeout(() => setHighlightedMessageId(null), 2500)
+    }
+
+    // The starred list asks the sidebar's chat to open on a message; this chat answers once it is loaded.
+    const jumpTarget = useChatStore(s => s.jumpTarget)
+    useEffect(() => {
+        if (!chat || !jumpTarget || jumpTarget.chatId !== chat.id || !entry?.loaded) return
+        useChatStore.getState().setJumpTarget(null)
+        // Let the chat-open scroll to the bottom settle first.
+        setTimeout(() => jumpToMessage(jumpTarget.messageId), 120)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [jumpTarget, chat?.id, entry?.loaded])
+
+    const handleStar = (message: Message) => {
+        if (!chat || message.id.startsWith("temp-")) return
+        const starred = !message.starred
+        useChatStore.getState().patchMessage(chat.id, message.id, { starred })
+        api.starMessage(chat.id, message.id, starred).catch((err: Error) => {
+            useChatStore.getState().patchMessage(chat.id, message.id, { starred: !starred })
+            toast.error(`Failed to ${starred ? "star" : "unstar"} message: ${err.message}`)
+        })
+    }
+
+    // duration in seconds pins the message; null unpins it.
+    const handlePin = async (message: Message, duration: number | null) => {
+        if (!chat || message.id.startsWith("temp-")) return
+        try {
+            await api.pinMessage(chat.id, message.id, duration !== null, (duration ?? undefined) as PinDuration | undefined)
+            await loadPins(chat.id)
+        } catch (err) {
+            toast.error(`Failed to ${duration !== null ? "pin" : "unpin"} message: ${err instanceof Error ? err.message : err}`)
+        }
+    }
+
+    const activePins = useMemo(() => pins.filter(pin => pin.message && pin.expiresAt > Date.now()), [pins])
+    const pinnedIds = useMemo(() => new Set(activePins.map(pin => pin.messageId)), [activePins])
+
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const target = e.currentTarget
         const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+        stickToBottomRef.current = distanceFromBottom < 100
         const isNearTop = target.scrollTop < 100
         const isNearBottom = distanceFromBottom < 100
 
@@ -533,7 +674,10 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
         const raw = inputMessage.trim()
         const mentionPayload = buildMentionPayload(raw, groupInfo?.participants ?? [])
         const text = isMdMode ? encodeMarkdown(mentionPayload.content) : mentionPayload.content
+        const noLinkPreview = !!draftUrl && dismissedLinks.includes(draftUrl)
+        const sentPreview = noLinkPreview ? null : composerPreview
         setInputMessage("")
+        setDismissedLinks([])
         setMentionTrigger(null)
         setSending(true)
 
@@ -556,12 +700,17 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
                     status: "pending",
                     type: "text"
                 }
-                if (mentionPayload.mentions.length) newMsg.extra = { mentions: mentionPayload.mentions }
+                if (mentionPayload.mentions.length || sentPreview) {
+                    newMsg.extra = {
+                        ...(mentionPayload.mentions.length ? { mentions: mentionPayload.mentions } : {}),
+                        ...(sentPreview ? { linkPreview: sentPreview } : {}),
+                    }
+                }
 
                 useChatStore.getState().upsertMessage(chat.id, newMsg)
                 setTimeout(() => scrollToBottom(), 50)
 
-                const res = await api.sendMessage(chat.id, text, mentionPayload.mentions)
+                const res = await api.sendMessage(chat.id, text, mentionPayload.mentions, { noLinkPreview })
                 const store = useChatStore.getState()
                 const entry = store.messagesByChat[chat.id]
                 if (entry?.messages.some(m => m.id === res.id)) {
@@ -586,6 +735,7 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
             mediaStreamRef.current.getTracks().forEach(track => track.stop())
             mediaStreamRef.current = null
         }
+        setRecordingStream(null)
     }
 
     const startRecording = async () => {
@@ -612,7 +762,8 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
                     stopStream()
                     return
                 }
-                const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/ogg" })
+                // Without the ";codecs=" part, which servers and file pickers treat as noise.
+                const blob = new Blob(recordedChunksRef.current, { type: (recorder.mimeType || "audio/ogg").split(";")[0] })
                 const seconds = Math.max(1, Math.round((Date.now() - recordingStartRef.current) / 1000))
                 const ext = blob.type.includes("webm") ? "webm" : "ogg"
                 const file = new File([blob], `recording_${Date.now()}.${ext}`, { type: blob.type })
@@ -625,6 +776,7 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
             recorder.start()
             mediaRecorderRef.current = recorder
             mediaStreamRef.current = stream
+            setRecordingStream(stream)
             recordingStartRef.current = Date.now()
             setRecordingSeconds(0)
             setIsRecording(true)
@@ -904,7 +1056,14 @@ const handleReplyMessage = (message: Message) => {
                         </Avatar>
                     </div>
                     <div className="flex flex-col">
-                        <h3 className="font-bold text-base leading-tight tracking-tight group-hover:text-primary transition-colors">{chat.name || chat.id}</h3>
+                        <h3 className="font-bold text-base leading-tight tracking-tight group-hover:text-primary transition-colors flex items-center gap-1.5">
+                            {chat.name || chat.id}
+                            {!!chat.disappearingSecs && (
+                                <span title={`Disappearing messages: ${disappearingTimerLabel(chat.disappearingSecs)}`} className="text-muted-foreground flex items-center">
+                                    <Hourglass className="h-3.5 w-3.5" />
+                                </span>
+                            )}
+                        </h3>
                         <p className={cn("text-[11px] font-medium truncate max-w-[180px] md:max-w-[250px]", headerStatus && chat.isGroup === false ? "text-primary" : "text-muted-foreground")}>
                             {headerStatus || chat.id}
                         </p>
@@ -978,6 +1137,12 @@ const handleReplyMessage = (message: Message) => {
             </header>
 
             <div className="flex-1 relative min-h-0 flex flex-col">
+                <PinnedBanner
+                    pins={activePins}
+                    fallbackName={chat.isGroup ? undefined : chat.name}
+                    onJump={jumpToMessage}
+                    onUnpin={(pin) => handlePin(pin.message!, null)}
+                />
                 <div data-messages-list className="flex-1 overflow-y-auto px-2 md:px-6 pt-3 pb-6 z-10" ref={scrollRef} onScroll={handleScroll}>
                     {loadingMore && (
                         <div className="flex justify-center py-4">
@@ -1040,6 +1205,9 @@ const handleReplyMessage = (message: Message) => {
                                                     onReact={(emoji: string) => handleReact(message, emoji)}
                                                     onForward={() => setForwardingMessage(message)}
                                                     onVote={(options: string[]) => handleVote(message, options)}
+                                                    onStar={() => handleStar(message)}
+                                                    onPin={(duration: number | null) => handlePin(message, duration)}
+                                                    isPinned={pinnedIds.has(message.id)}
                                                 />
                                             </div>
                                         )
@@ -1109,6 +1277,14 @@ const handleReplyMessage = (message: Message) => {
                                 <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditingMessage(null); setInputMessage(""); }}><X className="h-4 w-4" /></Button>
                             </div>
                         )}
+                    </div>
+                )}
+{composerPreview && !isRecording && !pendingAudio && (
+                    <div className="max-w-4xl mx-auto mb-2">
+                        <ComposerLinkPreview
+                            preview={composerPreview}
+                            onDismiss={() => draftUrl && setDismissedLinks(prev => [...prev, draftUrl])}
+                        />
                     </div>
                 )}
 <div className="max-w-4xl mx-auto flex items-end gap-3 px-2">
@@ -1183,8 +1359,8 @@ const handleReplyMessage = (message: Message) => {
                                 <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
                             </span>
                             <span className="text-sm font-bold tabular-nums tracking-tight">{formatRecordingTime(recordingSeconds)}</span>
-                            <span className="text-xs text-muted-foreground hidden sm:inline">Recording...</span>
-                            <div className="ml-auto flex items-center gap-1.5">
+                            <RecordingWaveform stream={recordingStream} />
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
                                 <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelRecording} title="Cancel recording">
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
@@ -1195,12 +1371,15 @@ const handleReplyMessage = (message: Message) => {
                         </div>
                     ) : pendingAudio ? (
                         <div className="flex-1 flex items-center gap-3 bg-muted/50 rounded-2xl px-4 min-h-[44px]">
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                                <Mic className="h-4 w-4 text-primary" />
-                            </div>
-                            <span className="text-sm font-bold tabular-nums tracking-tight flex-shrink-0">{formatRecordingTime(pendingAudio.seconds)}</span>
-                            <audio src={pendingAudio.url} controls preload="metadata" className="h-9 flex-1 min-w-0" />
-                            <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                            <WAAudioPlayer
+                                src={pendingAudio.url}
+                                isMe
+                                type="ptt"
+                                messageId={pendingAudio.url}
+                                durationHint={pendingAudio.seconds}
+                                className="mx-0 mt-0 p-0 py-1.5 min-w-0 sm:min-w-0 flex-1"
+                            />
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
                                 <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelPendingAudio} title="Discard recording">
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
@@ -1362,34 +1541,15 @@ const handleReplyMessage = (message: Message) => {
                 onClose={() => setIsSearchOpen(false)}
                 onResultClick={teleportToMessage}
             />
-            <Dialog open={viewedByMessage !== null} onOpenChange={open => { if (!open) setViewedByMessage(null) }}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Viewed by</DialogTitle>
-                    </DialogHeader>
-                    {loadingViewedBy ? (
-                        <p className="py-5 text-center text-sm text-muted-foreground">Loading receipts…</p>
-                    ) : viewedByReceipts.length === 0 ? (
-                        <p className="py-5 text-center text-sm text-muted-foreground">No read receipts reported yet.</p>
-                    ) : (
-                        <div className="max-h-80 space-y-1 overflow-y-auto">
-                            {viewedByReceipts.map(receipt => {
-                                const participant = groupInfo?.participants.find(member => member.jid === receipt.jid || member.jid.split("@")[0] === receipt.jid.split("@")[0])
-                                const name = participant ? participantLabel(participant) : receipt.jid.split("@")[0]
-                                return (
-                                    <div key={receipt.jid} className="flex items-center justify-between gap-4 rounded-lg px-2 py-2">
-                                        <span className="flex min-w-0 items-center gap-3">
-                                            <Avatar className="h-9 w-9"><AvatarImage src={getAvatarUrl(receipt.jid)} /><AvatarFallback>{name.slice(0, 1).toUpperCase()}</AvatarFallback></Avatar>
-                                            <span className="truncate text-sm">{name}</span>
-                                        </span>
-                                        <time className="shrink-0 text-xs text-muted-foreground">{new Date(receipt.readAt).toLocaleString()}</time>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+            <MessageInfoSheet
+                message={viewedByMessage}
+                receipts={viewedByReceipts}
+                recipients={viewedByRecipients}
+                loading={loadingViewedBy}
+                group={groupInfo}
+                getAvatarUrl={getAvatarUrl}
+                onClose={() => setViewedByMessage(null)}
+            />
         </div>
     )
 })

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
+	waTypes "go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
 	"wa-bot/internal/domain/repository"
@@ -291,4 +292,72 @@ func (sh *StatusHandler) Privacy(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	sh.handler.sendJSON(w, out)
+}
+
+// Reply answers a status in the one-to-one chat with its poster. The reply is
+// stored with a snapshot of the status so the quote outlives the 24h status.
+func (sh *StatusHandler) Reply(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	id := mux.Vars(r)["id"]
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := sh.handler.readJSON(r, &body); err != nil || strings.TrimSpace(body.Text) == "" {
+		sh.handler.sendError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	if sh.handler.msgRepo == nil {
+		sh.handler.sendError(w, http.StatusInternalServerError, "Message repository not configured")
+		return
+	}
+	entry, err := sh.handler.msgRepo.GetStatusByID(id)
+	if err != nil {
+		sh.handler.sendError(w, http.StatusNotFound, "status not found")
+		return
+	}
+	if entry.Sender == sh.ownJID() {
+		sh.handler.sendError(w, http.StatusBadRequest, "cannot reply to your own status")
+		return
+	}
+	poster, err := waTypes.ParseJID(entry.Sender)
+	if err != nil {
+		sh.handler.sendError(w, http.StatusBadRequest, "invalid status sender")
+		return
+	}
+
+	var quoted *waProto.Message
+	if raw, rerr := sh.handler.msgRepo.GetStatusRawProto(id); rerr == nil && len(raw) > 0 {
+		var m waProto.Message
+		if proto.Unmarshal(raw, &m) == nil {
+			quoted = &m
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	msgID, err := sh.handler.client.ReplyToStatus(ctx, poster, id, body.Text, quoted)
+	if err != nil {
+		sh.handler.sendError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	chatID := poster.ToNonAD().String()
+	sh.handler.SaveAndBroadcastMessage(&repository.Message{
+		ID:        msgID,
+		ChatID:    chatID,
+		From:      "me",
+		To:        chatID,
+		Content:   body.Text,
+		Timestamp: time.Now().UnixMilli(),
+		Status:    "sent",
+		Type:      "text",
+		Extra:     &repository.MessageExtra{StatusReply: repository.NewStatusReplyMeta(entry)},
+	})
+	sh.handler.sendSuccess(w, map[string]interface{}{
+		"id":     msgID,
+		"chatId": sh.handler.msgRepo.ResolveChatID(chatID),
+	})
 }

@@ -97,12 +97,13 @@ impl ChatView {
                     .right_0()
                     .flex()
                     .justify_center()
-                    .child(Self::day_pill(
+                    // The strip spans the width but only the pill should catch clicks.
+                    .child(div().block_mouse_except_scroll().child(Self::day_pill(
                         label,
                         theme.muted.opacity(0.9),
                         border_color.opacity(0.4),
                         muted_text,
-                    ))
+                    )))
                     .into_any_element()
             }))
             // Floating scroll-to-bottom chevron button when scrolled up
@@ -110,6 +111,8 @@ impl ChatView {
                 let btn = div()
                     .id("btn-scroll-to-bottom")
                     .cursor_pointer()
+                    // Without this the click also reaches the message under the button.
+                    .block_mouse_except_scroll()
                     .absolute()
                     .bottom(px(16.0))
                     .right(px(16.0))

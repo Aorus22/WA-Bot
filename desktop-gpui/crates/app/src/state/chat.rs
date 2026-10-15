@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wabot_backend_client::dto::{Chat, ChatState, Message};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +63,12 @@ pub struct ChatStore {
     /// message) so views can rebuild their render caches even when the chat
     /// id is unchanged.
     pub messages_version: u64,
+    /// Chats whose pinned messages changed (`chat_pins_changed`); the open
+    /// chat's view takes its entry and refetches the pins.
+    pub pins_stale: HashSet<String>,
+    /// Bumped when a message is starred or unstarred elsewhere, so an open
+    /// starred-messages list reloads.
+    pub starred_version: u64,
 }
 
 use gpui::{App, Global};
@@ -113,6 +119,7 @@ impl ChatStore {
                 pinned_at: chat.pinned_at.or(existing.pinned_at),
                 mute_mode: chat.mute_mode,
                 muted_until: chat.muted_until.or(existing.muted_until),
+                disappearing_secs: chat.disappearing_secs,
             };
 
             if last_changed {
@@ -134,6 +141,19 @@ impl ChatStore {
             chat.mute_mode = state.mute_mode.clone();
             chat.muted_until = state.muted_until;
         }
+    }
+
+    /// Set a chat's disappearing-messages timer (0 = off).
+    pub fn set_disappearing(&mut self, chat_id: &str, seconds: u32) {
+        if let Some(chat) = self.chats.iter_mut().find(|c| c.id == chat_id) {
+            chat.disappearing_secs = seconds;
+            self.chats_version = self.chats_version.wrapping_add(1);
+        }
+    }
+
+    /// Chats whose pins changed since the last call (drained).
+    pub fn take_stale_pins(&mut self) -> Vec<String> {
+        self.pins_stale.drain().collect()
     }
 
     pub fn invalidate_messages(&mut self) {
@@ -339,6 +359,15 @@ impl ChatStore {
                 self.patch_message(chat_id, id, |m| m.reactions = Some(reactions.clone()));
                 true
             }
+            WsEvent::MessageStarred { chat_id, id, starred } => {
+                self.patch_message(chat_id, id, |m| m.starred = *starred);
+                self.starred_version = self.starred_version.wrapping_add(1);
+                true
+            }
+            WsEvent::ChatPinsChanged { chat_id } => {
+                self.pins_stale.insert(chat_id.clone());
+                true
+            }
             // A fresh login brings the chats along; the view loads them next render.
             WsEvent::AuthSuccess { .. } => {
                 self.chats_stale = true;
@@ -390,6 +419,7 @@ impl ChatStore {
                         pinned_at: None,
                         mute_mode: "off".to_string(),
                         muted_until: None,
+                        disappearing_secs: 0,
                     };
                     self.chats.insert(0, new_chat);
                 }
@@ -417,7 +447,7 @@ impl ChatStore {
                 self.set_presence(chat_id, presence);
                 true
             }
-            WsEvent::ChatUpdate { chat_id, unread, last_msg } => {
+            WsEvent::ChatUpdate { chat_id, unread, last_msg, disappearing_secs } => {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
                     if let Some(unread) = unread {
                         chat.unread = *unread;
@@ -425,6 +455,9 @@ impl ChatStore {
                     }
                     if let Some(last_msg) = last_msg {
                         chat.last_msg = last_msg.clone();
+                    }
+                    if let Some(secs) = disappearing_secs {
+                        chat.disappearing_secs = *secs;
                     }
                     self.chats_version = self.chats_version.wrapping_add(1);
                     true
@@ -499,6 +532,7 @@ mod tests {
             forwarded: None,
             reactions: None,
             extra: None,
+            ..Default::default()
         }
     }
 
@@ -531,7 +565,7 @@ mod tests {
         let mut chat = Chat {
             id: "chat-1".into(), name: "A".into(), avatar: String::new(), last_msg: String::new(),
             last_time: 0, unread: 0, has_unread_mention: false, is_active: true, is_group: false,
-            archived: false, pinned_at: None, mute_mode: "off".into(), muted_until: None,
+            archived: false, pinned_at: None, mute_mode: "off".into(), muted_until: None, disappearing_secs: 0,
         };
         store.set_chats(vec![chat.clone()]);
 
@@ -642,6 +676,7 @@ mod tests {
             pinned_at: None,
             mute_mode: "off".to_string(),
             muted_until: None,
+            disappearing_secs: 0,
         };
         let c2 = Chat {
             id: "chat-2".to_string(),
@@ -657,6 +692,7 @@ mod tests {
             pinned_at: None,
             mute_mode: "off".to_string(),
             muted_until: None,
+            disappearing_secs: 0,
         };
         store.set_chats(vec![c2, c1]);
         assert_eq!(store.chats[0].id, "chat-2");
@@ -677,6 +713,7 @@ mod tests {
             pinned_at: None,
             mute_mode: "off".to_string(),
             muted_until: None,
+            disappearing_secs: 0,
         };
         store.upsert_chat(c1_updated);
         assert_eq!(store.chats[0].id, "chat-1");
@@ -714,7 +751,7 @@ mod tests {
         store.handle_ws_event(&mention_message("plain-after-read", false));
         assert!(!store.chats[0].has_unread_mention);
         store.handle_ws_event(&mention_message("new-mention", true));
-        store.handle_ws_event(&WsEvent::ChatUpdate { chat_id: "group@g.us".into(), unread: Some(0), last_msg: None });
+        store.handle_ws_event(&WsEvent::ChatUpdate { chat_id: "group@g.us".into(), unread: Some(0), last_msg: None, disappearing_secs: None });
         assert!(!store.chats[0].has_unread_mention);
     }
 
@@ -755,6 +792,7 @@ mod tests {
             chat_id: "a@s.whatsapp.net".into(),
             unread: Some(0),
             last_msg: None,
+            disappearing_secs: None,
         });
         assert_eq!(store.chats[0].unread, 0);
         assert_eq!(store.chats[0].last_msg, "hi");
@@ -763,6 +801,7 @@ mod tests {
             chat_id: "a@s.whatsapp.net".into(),
             unread: None,
             last_msg: Some("bye".into()),
+            disappearing_secs: None,
         });
         assert_eq!(store.chats[0].unread, 0);
         assert_eq!(store.chats[0].last_msg, "bye");
@@ -791,5 +830,52 @@ mod tests {
 
         store.invalidate_messages();
         assert!(!store.messages_by_chat["chat-1"].loaded);
+    }
+
+    #[test]
+    fn starring_patches_the_message_and_signals_open_lists() {
+        let mut store = ChatStore::new();
+        store.upsert_message("chat-1", make_test_msg("m1", 1, "x", "received"));
+        let version = store.messages_version;
+        let event = WsEvent::MessageStarred { chat_id: "chat-1".into(), id: "m1".into(), starred: true };
+        assert!(store.handle_ws_event(&event));
+        assert!(store.messages_by_chat["chat-1"].messages[0].starred);
+        assert_ne!(store.messages_version, version, "bubbles must repaint");
+        assert_eq!(store.starred_version, 1);
+
+        store.handle_ws_event(&WsEvent::MessageStarred { chat_id: "chat-1".into(), id: "m1".into(), starred: false });
+        assert!(!store.messages_by_chat["chat-1"].messages[0].starred);
+    }
+
+    #[test]
+    fn pin_changes_are_queued_once_per_chat() {
+        let mut store = ChatStore::new();
+        store.handle_ws_event(&WsEvent::ChatPinsChanged { chat_id: "g@g.us".into() });
+        store.handle_ws_event(&WsEvent::ChatPinsChanged { chat_id: "g@g.us".into() });
+        assert_eq!(store.take_stale_pins(), vec!["g@g.us".to_string()]);
+        assert!(store.take_stale_pins().is_empty());
+    }
+
+    #[test]
+    fn chat_update_carries_the_disappearing_timer() {
+        let mut store = store_with_chat("a@s.whatsapp.net", 0);
+        assert_eq!(store.chats[0].disappearing_secs, 0);
+        store.handle_ws_event(&WsEvent::ChatUpdate {
+            chat_id: "a@s.whatsapp.net".into(),
+            unread: None,
+            last_msg: None,
+            disappearing_secs: Some(86_400),
+        });
+        assert_eq!(store.chats[0].disappearing_secs, 86_400);
+        // Other updates leave it alone.
+        store.handle_ws_event(&WsEvent::ChatUpdate {
+            chat_id: "a@s.whatsapp.net".into(),
+            unread: Some(2),
+            last_msg: None,
+            disappearing_secs: None,
+        });
+        assert_eq!(store.chats[0].disappearing_secs, 86_400);
+        store.set_disappearing("a@s.whatsapp.net", 0);
+        assert_eq!(store.chats[0].disappearing_secs, 0);
     }
 }

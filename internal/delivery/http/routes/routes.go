@@ -63,6 +63,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	systemHandler := handlers.NewSystemHandler(r.handler)
 	msgMgmtHandler := handlers.NewMessageManagementHandler(r.handler)
 	msgTypeHandler := handlers.NewMessageTypeHandler(r.handler)
+	flagsHandler := handlers.NewMessageFlagsHandler(r.handler)
 	aiHandler := handlers.NewAIHandler(r.handler)
 
 	callHandler := handlers.NewCallHandler(r.handler)
@@ -111,6 +112,12 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/chats/{chatId}/messages/{id}/react", messageHandler.SendReaction).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/forward", msgTypeHandler.ForwardMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/vote", msgTypeHandler.SendPollVote).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/star", flagsHandler.Star).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/pin", flagsHandler.Pin).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{id}/pins", flagsHandler.Pins).Methods("GET")
+	api.HandleFunc("/chats/{chatId}/disappearing", flagsHandler.Disappearing).Methods("POST", "OPTIONS")
+	api.HandleFunc("/starred", flagsHandler.Starred).Methods("GET")
+	api.HandleFunc("/link-preview", flagsHandler.LinkPreview).Methods("GET")
 	api.HandleFunc("/chats/{chatId}/typing", messageHandler.SendTyping).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/chats/{chatId}/poll", msgTypeHandler.SendPoll).Methods("POST", "OPTIONS")
@@ -142,6 +149,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/statuses", statusHandler.List).Methods("GET")
 	api.HandleFunc("/statuses/text", statusHandler.PostText).Methods("POST", "OPTIONS")
 	api.HandleFunc("/statuses/media", statusHandler.PostMedia).Methods("POST", "OPTIONS")
+	api.HandleFunc("/statuses/{id}/reply", statusHandler.Reply).Methods("POST", "OPTIONS")
 	api.HandleFunc("/statuses/{id}/viewed", statusHandler.Viewed).Methods("POST", "OPTIONS")
 	api.HandleFunc("/statuses/{id}/media", statusHandler.Media).Methods("GET")
 	api.HandleFunc("/statuses/privacy", statusHandler.Privacy).Methods("GET")

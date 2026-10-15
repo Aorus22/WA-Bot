@@ -22,6 +22,7 @@ impl ChatView {
         let collapsed = self.sidebar_collapsed;
         let chat_name = active_chat.name.clone();
         let chat_jid = active_chat.id.clone();
+        let disappearing_secs = active_chat.disappearing_secs;
         h_flex()
             .px_5()
             .py_1p5()
@@ -95,11 +96,31 @@ impl ChatView {
                     .child(
                         v_flex()
                             .child(
-                                div()
-                                    .text_base()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(text_color)
-                                    .child(chat_name),
+                                h_flex()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .child(
+                                        div()
+                                            .text_base()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(text_color)
+                                            .child(chat_name),
+                                    )
+                                    // Disappearing messages are on in this chat.
+                                    .when(disappearing_secs > 0, |row| {
+                                        let tip = SharedString::from(format!(
+                                            "Disappearing messages: {}",
+                                            messages::disappearing::disappearing_label(disappearing_secs)
+                                        ));
+                                        row.child(
+                                            div()
+                                                .id("chat-header-disappearing")
+                                                .flex()
+                                                .items_center()
+                                                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                                                .child(svg().data(HOURGLASS_SVG).size(px(14.0)).text_color(muted_text)),
+                                        )
+                                    }),
                             )
                             .child(
                                 div()

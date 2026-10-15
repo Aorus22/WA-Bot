@@ -1,4 +1,5 @@
 use crate::views::chat::*;
+use super::star_pin::{DEFAULT_PIN_SECS, PIN_DURATIONS};
 
 impl ChatView {
     /// Right-click menu on a message bubble.
@@ -16,7 +17,6 @@ impl ChatView {
         if let Some(ref ctx) = self.context_menu {
             let msg_id = ctx.msg.id.clone();
             let chat_id = selected_chat_id.clone().unwrap_or_default();
-            let is_group_chat = chat_id.ends_with("@g.us");
             let is_from_me = ctx.is_from_me;
             let msg_content = MessageBubbleHelper::decode_content(&ctx.msg.content);
             let msg_obj = ctx.msg.clone();
@@ -30,6 +30,11 @@ impl ChatView {
                 );
             let hover_bg: Hsla = theme.muted.opacity(0.6);
             let picker_open = ctx.reaction_picker;
+            let pin_picker_open = ctx.pin_picker;
+            // A message still on its way has no id the backend knows yet.
+            let settled = !msg_id.starts_with("temp-") && ctx.msg.status != "pending";
+            let is_starred = ctx.msg.starred;
+            let is_pinned = self.is_pinned(&msg_id);
 
             macro_rules! react {
                 ($emoji:expr, $cx:expr) => {{
@@ -67,6 +72,27 @@ impl ChatView {
                             }),
                         ),
                 );
+            } else if pin_picker_open {
+                // How long the pin lasts; a week unless told otherwise.
+                card = card.child(
+                    div()
+                        .px_5()
+                        .py_1()
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(muted_text)
+                        .child("Choose how long your pin lasts"),
+                );
+                for (id, (secs, label)) in ["mm-pin-1d", "mm-pin-7d", "mm-pin-30d"].into_iter().zip(PIN_DURATIONS) {
+                    card = card.child(
+                        menu_row(id, CLOCK_SVG, label, muted_text, text_color, hover_bg)
+                            .when(secs == DEFAULT_PIN_SECS, |row| row.bg(theme.primary.opacity(0.12)))
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let m = msg_obj.clone();
+                                move |this, _, _, cx| this.set_message_pinned(m.clone(), true, secs, cx)
+                            })),
+                    );
+                }
             } else {
                 // Quick reactions float above the menu in their own pill.
                 pill = Some(
@@ -136,9 +162,9 @@ impl ChatView {
                         })),
                 );
 
-                if is_from_me && is_group_chat {
+                if is_from_me {
                     card = card.child(
-                        menu_row("mm-viewed-by", EYE_SVG, "Viewed by", muted_text, text_color, hover_bg)
+                        menu_row("mm-viewed-by", EYE_SVG, "Message info", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let message = msg_obj.clone();
                                 move |this, _, _, cx| this.open_viewed_by(message.clone(), cx)
@@ -155,6 +181,39 @@ impl ChatView {
                             move |this, _, _, cx| this.open_forward(cid.clone(), m.clone(), cx)
                         })),
                 );
+
+                // Pin / Star
+                if settled {
+                    card = card.child(if is_pinned {
+                        menu_row("mm-pin", PIN_SVG, "Unpin", muted_text, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let m = msg_obj.clone();
+                                move |this, _, _, cx| this.set_message_pinned(m.clone(), false, 0, cx)
+                            }))
+                    } else {
+                        menu_row("mm-pin", PIN_SVG, "Pin", muted_text, text_color, hover_bg)
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                if let Some(menu) = this.context_menu.as_mut() {
+                                    menu.pin_picker = true;
+                                }
+                                cx.notify();
+                            }))
+                    });
+                    card = card.child(
+                        menu_row(
+                            "mm-star",
+                            STAR_SVG,
+                            if is_starred { "Unstar" } else { "Star" },
+                            muted_text,
+                            text_color,
+                            hover_bg,
+                        )
+                        .on_mouse_down(MouseButton::Left, cx.listener({
+                            let m = msg_obj.clone();
+                            move |this, _, _, cx| this.toggle_star(m.clone(), cx)
+                        })),
+                    );
+                }
 
                 // Copy (text only)
                 if copyable {

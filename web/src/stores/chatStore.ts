@@ -16,6 +16,8 @@ interface ChatStore {
 	chatsLoaded: boolean
 	chatsLoading: boolean
 	messagesByChat: Record<string, ChatMessagesEntry>
+	/** A message the open chat should scroll to (starred list, pinned banner); consumed by ChatArea. */
+	jumpTarget: { chatId: string; messageId: string } | null
 
 	setChats: (chats: Chat[]) => void
 	setChatsLoaded: (v: boolean) => void
@@ -23,7 +25,8 @@ interface ChatStore {
 	upsertChat: (chat: Chat) => void
 	patchChatState: (state: ChatState) => void
 	/** In-place patch of a chat row (unread badge, preview); absent fields are untouched. */
-	patchChat: (chatId: string, patch: Partial<Pick<Chat, "unread" | "lastMsg">>) => void
+	patchChat: (chatId: string, patch: Partial<Pick<Chat, "unread" | "lastMsg" | "disappearingSecs">>) => void
+	setJumpTarget: (target: { chatId: string; messageId: string } | null) => void
 	/** Chat deleted on another device: drop it and its cached messages. */
 	removeChat: (chatId: string) => void
 	/** Chat cleared on another device: keep it listed but empty. */
@@ -65,6 +68,9 @@ export const useChatStore = create<ChatStore>((set) => ({
 	chatsLoaded: false,
 	chatsLoading: false,
 	messagesByChat: {},
+	jumpTarget: null,
+
+	setJumpTarget: (target) => set({ jumpTarget: target }),
 
 	setChats: (chats) => set({ chats: chats.map(normalizeChat) }),
 

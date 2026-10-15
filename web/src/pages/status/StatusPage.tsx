@@ -5,9 +5,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
+import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import { Plus, ChevronLeft, ChevronRight, ImagePlus, Type, CircleDashed } from "lucide-react"
+import { Plus, ChevronLeft, ChevronRight, ImagePlus, Type, CircleDashed, SendHorizontal } from "lucide-react"
 
 const BACKGROUNDS = [0xff075e54, 0xff128c7e, 0xff777a77, 0xff2c3e50, 0xff6a3080, 0xffc43e00, 0xffd4a017, 0xff0e5a8a]
 
@@ -195,11 +197,22 @@ function StatusViewerPane({ state, onClose, onNavigate }: {
 			? api.statusMediaURL(entry.id)
 			: ""
 
+	const navigate = useNavigate()
+	const [replyText, setReplyText] = useState("")
+	const [replyFocused, setReplyFocused] = useState(false)
+	const [replying, setReplying] = useState(false)
+	// Typing a reply holds the story still, like the official clients.
+	const paused = replyFocused || replyText.length > 0 || replying
+
 	useEffect(() => {
 		if (!entry) return
 		if (!entry.viewed && !isOwn) {
 			api.markStatusViewed(entry.id).catch(() => {})
 		}
+	}, [entry, isOwn])
+
+	useEffect(() => {
+		if (!entry || paused) return
 		// Auto-advance still/text statuses like the official clients.
 		if (entry.type !== "video") {
 			advanceTimer.current = setTimeout(() => onNavigate(index + 1), 5000)
@@ -207,7 +220,24 @@ function StatusViewerPane({ state, onClose, onNavigate }: {
 		return () => {
 			if (advanceTimer.current) clearTimeout(advanceTimer.current)
 		}
-	}, [entry, isOwn]) // eslint-disable-line react-hooks/exhaustive-deps
+	}, [entry, paused]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	const sendReply = async () => {
+		const text = replyText.trim()
+		if (!entry || !text || replying) return
+		setReplying(true)
+		try {
+			const res = await api.replyToStatus(entry.id, text)
+			setReplyText("")
+			toast.success(`Reply sent to ${name}`, {
+				action: res.chatId ? { label: "Open chat", onClick: () => navigate(`/chat/${encodeURIComponent(res.chatId)}`) } : undefined,
+			})
+		} catch (err: any) {
+			toast.error("Failed to send reply: " + err.message)
+		} finally {
+			setReplying(false)
+		}
+	}
 
 	if (!entry) return null
 
@@ -276,8 +306,39 @@ function StatusViewerPane({ state, onClose, onNavigate }: {
 				</button>
 			</div>
 
-			<div className="flex justify-end p-3">
-				<Button variant="ghost" size="sm" className="text-white/70 hover:text-white hover:bg-white/10" onClick={onClose}>
+			<div className="flex items-center gap-2 p-3">
+				{!isOwn ? (
+					<form
+						className="flex flex-1 items-center gap-2 min-w-0"
+						onSubmit={(e) => {
+							e.preventDefault()
+							sendReply()
+						}}
+					>
+						<Input
+							value={replyText}
+							onChange={(e) => setReplyText(e.target.value)}
+							onFocus={() => setReplyFocused(true)}
+							onBlur={() => setReplyFocused(false)}
+							placeholder="Reply to status…"
+							aria-label="Reply to status"
+							className="flex-1 min-w-0 rounded-full bg-white/10 border-white/10 text-white placeholder:text-white/50"
+						/>
+						<Button
+							type="submit"
+							size="icon"
+							className="rounded-full shrink-0"
+							disabled={replying || !replyText.trim()}
+							aria-label="Send reply"
+							title="Send reply"
+						>
+							<SendHorizontal className="h-4 w-4" />
+						</Button>
+					</form>
+				) : (
+					<div className="flex-1" />
+				)}
+				<Button variant="ghost" size="sm" className="text-white/70 hover:text-white hover:bg-white/10 shrink-0" onClick={onClose}>
 					Tutup
 				</Button>
 			</div>

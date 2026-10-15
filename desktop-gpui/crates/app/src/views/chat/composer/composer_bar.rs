@@ -193,6 +193,8 @@ impl ChatView {
                             })),
                     )
             }))
+            // Preview card for the link being typed
+            .children(self.render_compose_link_preview(cx))
             // Attach (+) menu, emoji and sticker panels
             .children(self.render_attach_panel(
                 theme,
@@ -259,7 +261,10 @@ impl ChatView {
             })
             // Input row in WhatsApp Web's style: one pill holding the attach and
             // emoji buttons, the field, and mic (empty) or send (has text).
-            .child({
+            .child(if let Some(bar) = self.render_voice_bar(cx) {
+                // Recording a voice note: the bar takes the pill's place.
+                bar
+            } else {
                 let has_text = !self.compose_text.trim().is_empty() || self.pending_attachment.is_some();
                 let emoji_open = matches!(self.attach_panel, AttachPanel::Emoji | AttachPanel::Sticker);
                 let attach_open = self.attach_panel == AttachPanel::Menu;
@@ -366,6 +371,10 @@ impl ChatView {
                             } else {
                                 icon_button("btn-mic", false)
                                     .tooltip(move |window, cx| Tooltip::new("Voice message").build(window, cx))
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.start_voice_recording(cx);
+                                    }))
                                     .child(svg().data(MIC_SVG).size(px(20.0)).text_color(muted_text))
                                     .into_any_element()
                             }),

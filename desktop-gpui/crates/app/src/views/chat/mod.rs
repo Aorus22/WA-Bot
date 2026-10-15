@@ -9,12 +9,12 @@ use std::ops::Range;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState, Textarea, TextareaState};
-use gpui_component::scroll::{Scrollbar, ScrollbarMode, ScrollableElement};
+use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, Icon, IconName};
 use wabot_backend_client::client::HttpClient;
-use wabot_backend_client::dto::{CallType, Chat, GroupCache, Message, MessageReceipt, ReactionEntry};
+use wabot_backend_client::dto::{CallType, Chat, GroupCache, LinkPreview, Message, MessageReceipt, PinnedMessage, ReactionEntry};
 use wabot_backend_client::multipart::SendMediaBuilder;
 
 use crate::components::{

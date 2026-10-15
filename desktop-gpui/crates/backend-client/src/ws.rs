@@ -62,6 +62,18 @@ pub enum WsEvent {
         chat_id: String,
         unread: Option<u32>,
         last_msg: Option<String>,
+        /// New disappearing-messages timer in seconds (0 = off).
+        disappearing_secs: Option<u32>,
+    },
+    /// A message was starred or unstarred (here or on another device).
+    MessageStarred {
+        chat_id: String,
+        id: String,
+        starred: bool,
+    },
+    /// The chat's pinned messages changed: refetch its pins.
+    ChatPinsChanged {
+        chat_id: String,
     },
     /// Chat deleted on another device (the backend keeps the data).
     ChatDeleted {
@@ -280,7 +292,23 @@ impl WsMessage {
                     .get("lastMsg")
                     .and_then(|v| v.as_str())
                     .map(String::from),
+                disappearing_secs: self
+                    .payload
+                    .get("disappearingSecs")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32),
             },
+            "message_starred" => WsEvent::MessageStarred {
+                chat_id: self.chat_id_field(),
+                id: self
+                    .payload
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                starred: self.payload.get("starred").and_then(|v| v.as_bool()).unwrap_or(false),
+            },
+            "chat_pins_changed" => WsEvent::ChatPinsChanged { chat_id: self.chat_id_field() },
             "chat_deleted" => WsEvent::ChatDeleted { chat_id: self.chat_id_field() },
             "chat_cleared" => WsEvent::ChatCleared { chat_id: self.chat_id_field() },
             "chats_changed" => WsEvent::ChatsChanged {
@@ -582,11 +610,11 @@ mod tests {
     fn parses_targeted_chat_events() {
         assert_eq!(
             event("chat_update", serde_json::json!({"chatId": "a@s.whatsapp.net", "unread": 0})),
-            WsEvent::ChatUpdate { chat_id: "a@s.whatsapp.net".into(), unread: Some(0), last_msg: None }
+            WsEvent::ChatUpdate { chat_id: "a@s.whatsapp.net".into(), unread: Some(0), last_msg: None, disappearing_secs: None }
         );
         assert_eq!(
             event("chat_update", serde_json::json!({"chatId": "a@s.whatsapp.net", "lastMsg": ""})),
-            WsEvent::ChatUpdate { chat_id: "a@s.whatsapp.net".into(), unread: None, last_msg: Some(String::new()) }
+            WsEvent::ChatUpdate { chat_id: "a@s.whatsapp.net".into(), unread: None, last_msg: Some(String::new()), disappearing_secs: None }
         );
         assert_eq!(
             event("chat_deleted", serde_json::json!({"chatId": "a@s.whatsapp.net"})),
@@ -595,6 +623,27 @@ mod tests {
         assert_eq!(
             event("chat_cleared", serde_json::json!({"chatId": "a@s.whatsapp.net"})),
             WsEvent::ChatCleared { chat_id: "a@s.whatsapp.net".into() }
+        );
+    }
+
+    #[test]
+    fn parses_star_pin_and_disappearing_events() {
+        assert_eq!(
+            event("message_starred", serde_json::json!({"chatId": "a@s.whatsapp.net", "id": "m1", "starred": true})),
+            WsEvent::MessageStarred { chat_id: "a@s.whatsapp.net".into(), id: "m1".into(), starred: true }
+        );
+        assert_eq!(
+            event("chat_pins_changed", serde_json::json!({"chatId": "g@g.us"})),
+            WsEvent::ChatPinsChanged { chat_id: "g@g.us".into() }
+        );
+        assert_eq!(
+            event("chat_update", serde_json::json!({"chatId": "g@g.us", "disappearingSecs": 604800})),
+            WsEvent::ChatUpdate {
+                chat_id: "g@g.us".into(),
+                unread: None,
+                last_msg: None,
+                disappearing_secs: Some(604_800),
+            }
         );
     }
 }

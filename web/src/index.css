@@ -268,3 +268,8 @@ div[class*="language-"] {
   clip-path: inset(0 round 0.875rem);
   -webkit-clip-path: inset(0 round 0.875rem);
 }
+
+@keyframes status-progress {
+  from { width: 0; }
+  to { width: 100%; }
+}

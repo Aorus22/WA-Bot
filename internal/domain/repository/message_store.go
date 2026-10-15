@@ -133,15 +133,40 @@ type MessageExtra struct {
 	// for it (a LID resolved to its phone number when known).
 	MentionChats map[string]string `json:"mentionChats,omitempty"`
 	MentionsMe   bool              `json:"mentionsMe,omitempty"`
+	// Disappearing is set on messages sent inside a chat with a disappearing
+	// timer. The message is kept here even after WhatsApp removes it on phones.
+	Disappearing *DisappearingMeta `json:"disappearing,omitempty"`
+	// StatusReply is set on messages that reply to a status (story).
+	StatusReply *StatusReplyMeta `json:"statusReply,omitempty"`
 }
 
-// MessageReceipt records a read receipt reported by WhatsApp for an outgoing
-// group message. ReadAt is a Unix timestamp in milliseconds.
+// DisappearingMeta records the disappearing timer a message was sent under.
+// ExpiresAt is Unix milliseconds.
+type DisappearingMeta struct {
+	Seconds   uint32 `json:"seconds"`
+	ExpiresAt int64  `json:"expiresAt"`
+}
+
+// StatusReplyMeta is a snapshot of the status a message replied to, so the
+// quote survives after the status itself expires.
+type StatusReplyMeta struct {
+	StatusID string `json:"statusId"`
+	Sender   string `json:"sender,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Content  string `json:"content,omitempty"`
+	MediaURL string `json:"mediaUrl,omitempty"`
+}
+
+// MessageReceipt records what WhatsApp reported about one recipient (a group
+// member, or the contact in a private chat) and an outgoing message. Timestamps are Unix milliseconds; 0 means the event
+// has not been reported. A read implies a delivery, so DeliveredAt is never 0
+// when ReadAt is set.
 type MessageReceipt struct {
-	MessageID string `json:"messageId"`
-	ChatID    string `json:"chatId"`
-	JID       string `json:"jid"`
-	ReadAt    int64  `json:"readAt"`
+	MessageID   string `json:"messageId"`
+	ChatID      string `json:"chatId"`
+	JID         string `json:"jid"`
+	DeliveredAt int64  `json:"deliveredAt"`
+	ReadAt      int64  `json:"readAt"`
 }
 
 type Message struct {
@@ -161,6 +186,8 @@ type Message struct {
 	Forwarded   bool            `json:"forwarded,omitempty"`
 	Reactions   []ReactionEntry `json:"reactions,omitempty"`
 	Extra       *MessageExtra   `json:"extra,omitempty"`
+	// Starred is derived from message_stars, never written through SaveMessage.
+	Starred bool `json:"starred,omitempty"`
 	// RawProto is the serialized waE2E.Message of incoming messages; kept for
 	// lossless forwarding. Not exposed over JSON.
 	RawProto []byte `json:"-"`
@@ -180,6 +207,8 @@ type Chat struct {
 	MuteMode         string `json:"muteMode"`
 	MutedUntil       *int64 `json:"mutedUntil"`
 	HasUnreadMention bool   `json:"hasUnreadMention"`
+	// DisappearingSecs is the chat's disappearing-messages timer (0 = off).
+	DisappearingSecs uint32 `json:"disappearingSecs,omitempty"`
 }
 
 type Contact struct {
@@ -295,6 +324,25 @@ func (s *MessageStore) initLocked() error {
 			PRIMARY KEY (message_id, participant_jid)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_read_receipts_chat ON message_read_receipts(chat_id, message_id)`,
+		// Starred and pinned messages live outside the messages row: history
+		// sync rewrites that row (INSERT OR REPLACE) and must not drop them.
+		// Rows are flagged, never deleted.
+		`CREATE TABLE IF NOT EXISTS message_stars (
+			message_id TEXT PRIMARY KEY,
+			chat_id TEXT NOT NULL,
+			starred INTEGER NOT NULL DEFAULT 1,
+			starred_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_stars_chat ON message_stars(chat_id, starred, starred_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS chat_pins (
+			message_id TEXT PRIMARY KEY,
+			chat_id TEXT NOT NULL,
+			pinned_by TEXT,
+			pinned_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL DEFAULT 0,
+			unpinned_at INTEGER
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_pins_chat ON chat_pins(chat_id, unpinned_at)`,
 		`CREATE TABLE IF NOT EXISTS favorite_stickers (
                         id TEXT PRIMARY KEY,
                         media_url TEXT,
@@ -396,6 +444,7 @@ func (s *MessageStore) initLocked() error {
 	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN options_json TEXT DEFAULT ''")
 	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN chats_skipped INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE history_sync_runs ADD COLUMN active_ms INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE message_read_receipts ADD COLUMN delivered_at INTEGER NOT NULL DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN is_automatic INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN sender_name TEXT")
 	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN unread INTEGER DEFAULT 0")
@@ -413,6 +462,7 @@ func (s *MessageStore) initLocked() error {
 	_, _ = s.db.Exec("ALTER TABLE messages ADD COLUMN deleted_at INTEGER")
 	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN deleted_at INTEGER")
 	_, _ = s.db.Exec("ALTER TABLE contacts ADD COLUMN about TEXT")
+	_, _ = s.db.Exec("ALTER TABLE chats ADD COLUMN ephemeral_secs INTEGER DEFAULT 0")
 	_, _ = s.db.Exec("UPDATE chats SET unread = 0 WHERE unread IS NULL")
 	_, _ = s.db.Exec("UPDATE chats SET archived = 0 WHERE archived IS NULL")
 	_, _ = s.db.Exec("UPDATE chats SET mute_mode = 'off' WHERE mute_mode IS NULL OR mute_mode = ''")
@@ -508,7 +558,8 @@ const messageColumns = `id, chat_id,
 	CASE WHEN sender_id LIKE '%@lid' THEN COALESCE((SELECT pn_jid FROM lid_mapping WHERE lid = sender_id), sender_id) ELSE sender_id END as sender_id,
 	receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url,
 	is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id,
-	ifnull(forwarded, 0) as forwarded, ifnull(reactions, '') as reactions, ifnull(extra_meta, '') as extra_meta`
+	ifnull(forwarded, 0) as forwarded, ifnull(reactions, '') as reactions, ifnull(extra_meta, '') as extra_meta,
+	EXISTS(SELECT 1 FROM message_stars WHERE message_id = messages.id AND starred = 1) as starred`
 
 func decodeMessageMeta(msg *Message, forwarded int, reactionsJSON, extraJSON string) {
 	msg.Forwarded = forwarded == 1
@@ -520,10 +571,35 @@ func decodeMessageMeta(msg *Message, forwarded int, reactionsJSON, extraJSON str
 	}
 	if extraJSON != "" {
 		var extra MessageExtra
-		if json.Unmarshal([]byte(extraJSON), &extra) == nil && (extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || len(extra.Edits) > 0) {
+		if json.Unmarshal([]byte(extraJSON), &extra) == nil && (extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || len(extra.Edits) > 0 || extra.Disappearing != nil || extra.StatusReply != nil) {
 			msg.Extra = &extra
 		}
 	}
+}
+
+// rowScanner is satisfied by *sql.Row and *sql.Rows.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanMessageRow reads one messageColumns row; extra receives any columns
+// appended after them.
+func scanMessageRow(sc rowScanner, extra ...any) (Message, error) {
+	var msg Message
+	var isAuto, forwarded, starred int
+	var reactionsJSON, extraJSON string
+	dest := []any{
+		&msg.ID, &msg.ChatID, &msg.From, &msg.To, &msg.Content, &msg.Timestamp,
+		&msg.Status, &msg.Type, &msg.MediaURL, &isAuto, &msg.SenderName,
+		&msg.ReplyToID, &forwarded, &reactionsJSON, &extraJSON, &starred,
+	}
+	if err := sc.Scan(append(dest, extra...)...); err != nil {
+		return msg, err
+	}
+	msg.IsAutomatic = isAuto == 1
+	msg.Starred = starred == 1
+	decodeMessageMeta(&msg, forwarded, reactionsJSON, extraJSON)
+	return msg, nil
 }
 
 // scanMessages reads rows produced by a messageColumns query.
@@ -532,31 +608,10 @@ func scanMessages(rows *sql.Rows) ([]Message, error) {
 
 	var messages []Message
 	for rows.Next() {
-		var msg Message
-		var isAuto, forwarded int
-		var reactionsJSON, extraJSON string
-		err := rows.Scan(
-			&msg.ID,
-			&msg.ChatID,
-			&msg.From,
-			&msg.To,
-			&msg.Content,
-			&msg.Timestamp,
-			&msg.Status,
-			&msg.Type,
-			&msg.MediaURL,
-			&isAuto,
-			&msg.SenderName,
-			&msg.ReplyToID,
-			&forwarded,
-			&reactionsJSON,
-			&extraJSON,
-		)
+		msg, err := scanMessageRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		msg.IsAutomatic = isAuto == 1
-		decodeMessageMeta(&msg, forwarded, reactionsJSON, extraJSON)
 		messages = append(messages, msg)
 	}
 	return messages, rows.Err()
@@ -780,34 +835,13 @@ func (s *MessageStore) GetMessageContext(chatID string, messageID string, limit 
 	}
 
 	// Get target message
-	var targetMsg Message
-	var isAuto, fwd int
-	var reactionsJSON, extraJSON string
-	err = s.db.QueryRow(`
+	targetMsg, err := scanMessageRow(s.db.QueryRow(`
 		SELECT `+messageColumns+`
 		FROM messages WHERE id = ?
-	`, messageID).Scan(
-		&targetMsg.ID,
-		&targetMsg.ChatID,
-		&targetMsg.From,
-		&targetMsg.To,
-		&targetMsg.Content,
-		&targetMsg.Timestamp,
-		&targetMsg.Status,
-		&targetMsg.Type,
-		&targetMsg.MediaURL,
-		&isAuto,
-		&targetMsg.SenderName,
-		&targetMsg.ReplyToID,
-		&fwd,
-		&reactionsJSON,
-		&extraJSON,
-	)
+	`, messageID))
 	if err != nil {
 		return nil, err
 	}
-	targetMsg.IsAutomatic = isAuto == 1
-	decodeMessageMeta(&targetMsg, fwd, reactionsJSON, extraJSON)
 
 	// Get messages after
 	after, err := s.GetMessages(chatID, half, 0, targetTimestamp)
@@ -844,6 +878,7 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			c.pinned_at,
 			c.mute_mode,
 			c.muted_until,
+			COALESCE(c.ephemeral_secs, 0) as ephemeral_secs,
                         c.id as original_id
                     FROM chats c
                     WHERE c.deleted_at IS NULL
@@ -860,7 +895,8 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			MAX(archived) as archived,
 			MAX(pinned_at) as pinned_at,
 			COALESCE(MAX(CASE WHEN mute_mode != 'off' THEN mute_mode END), 'off') as mute_mode,
-			MAX(muted_until) as muted_until
+			MAX(muted_until) as muted_until,
+			MAX(ephemeral_secs) as ephemeral_secs
                     FROM normalized_chats
                     GROUP BY target_id
                 )
@@ -876,7 +912,8 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			g.archived,
 			g.pinned_at,
 			g.mute_mode,
-			g.muted_until
+			g.muted_until,
+			g.ephemeral_secs
                 FROM grouped_chats g
                 ORDER BY g.last_time DESC
         `
@@ -905,6 +942,7 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			&pinnedAt,
 			&chat.MuteMode,
 			&mutedUntil,
+			&chat.DisappearingSecs,
 		)
 		if err != nil {
 			return nil, err
@@ -1433,22 +1471,13 @@ func (s *MessageStore) GetMessageByID(msgID string) (*Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var msg Message
-	var isAuto, fwd int
-	var reactionsJSON, extraJSON string
-	err := s.db.QueryRow(`
+	msg, err := scanMessageRow(s.db.QueryRow(`
 		SELECT `+messageColumns+`
 		FROM messages WHERE id = ?
-	`, msgID).Scan(
-		&msg.ID, &msg.ChatID, &msg.From, &msg.To, &msg.Content, &msg.Timestamp,
-		&msg.Status, &msg.Type, &msg.MediaURL, &isAuto, &msg.SenderName,
-		&msg.ReplyToID, &fwd, &reactionsJSON, &extraJSON,
-	)
+	`, msgID))
 	if err != nil {
 		return nil, err
 	}
-	msg.IsAutomatic = isAuto == 1
-	decodeMessageMeta(&msg, fwd, reactionsJSON, extraJSON)
 	return &msg, nil
 }
 
@@ -1572,49 +1601,153 @@ func (s *MessageStore) GetMessageSender(msgID string) (string, error) {
 	return sender, err
 }
 
-// SaveReadReceipt stores a receipt only for an outgoing group message in the
-// stated chat. WhatsApp may replay receipts, so the first timestamp per
-// participant is retained.
-func (s *MessageStore) SaveReadReceipt(chatID, msgID, participantJID string, readAt int64) (bool, error) {
+// ReceiptKind is the stage of a per-participant group receipt.
+type ReceiptKind int
+
+const (
+	ReceiptDelivered ReceiptKind = iota
+	ReceiptRead
+)
+
+// SaveReceipt stores a delivery or read receipt for an outgoing message, one
+// row per recipient (a group member, or the contact in a private chat). The
+// chat is the one the message is stored under. WhatsApp may replay receipts,
+// so the first timestamp per recipient and stage is retained; a read also
+// counts as a delivery.
+func (s *MessageStore) SaveReceipt(msgID, participantJID string, kind ReceiptKind, at int64) (bool, error) {
 	participantJID = strings.TrimSpace(participantJID)
-	if participantJID == "" || !strings.HasSuffix(chatID, "@g.us") {
+	if participantJID == "" {
 		return false, nil
 	}
-	if readAt <= 0 {
-		readAt = time.Now().UnixMilli()
+	if at <= 0 {
+		at = time.Now().UnixMilli()
+	}
+	deliveredAt, readAt := at, int64(0)
+	if kind == ReceiptRead {
+		readAt = at
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var isOutgoingGroup bool
-	err := s.db.QueryRow(`SELECT EXISTS(
-		SELECT 1 FROM messages m JOIN chats c ON c.id = m.chat_id
-		WHERE m.id = ? AND m.chat_id = ? AND m.sender_id = 'me' AND c.is_group = 1
-	)`, msgID, chatID).Scan(&isOutgoingGroup)
-	if err != nil || !isOutgoingGroup {
-		return false, err
+	var chatID string
+	err := s.db.QueryRow(`SELECT chat_id FROM messages WHERE id = ? AND sender_id = 'me' LIMIT 1`, msgID).Scan(&chatID)
+	if err == sql.ErrNoRows {
+		return false, nil
 	}
-	result, err := s.db.Exec(`INSERT OR IGNORE INTO message_read_receipts
-		(message_id, chat_id, participant_jid, read_at) VALUES (?, ?, ?, ?)`, msgID, chatID, participantJID, readAt)
 	if err != nil {
 		return false, err
 	}
-	count, err := result.RowsAffected()
-	return count > 0, err
+	_, err = s.db.Exec(`INSERT INTO message_read_receipts
+		(message_id, chat_id, participant_jid, delivered_at, read_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(message_id, participant_jid) DO UPDATE SET
+			delivered_at = CASE WHEN delivered_at = 0 THEN excluded.delivered_at ELSE delivered_at END,
+			read_at = CASE WHEN read_at = 0 THEN excluded.read_at ELSE read_at END`,
+		msgID, chatID, participantJID, deliveredAt, readAt)
+	return err == nil, err
+}
+
+// GroupMessagesWithReceipts lists outgoing group messages that already carry
+// receipts, with the status they are stored under.
+func (s *MessageStore) GroupMessagesWithReceipts() ([]MessageStatusRow, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT m.id, m.chat_id, ifnull(m.status, '')
+		FROM messages m JOIN chats c ON c.id = m.chat_id
+		WHERE m.sender_id = 'me' AND c.is_group = 1
+		  AND EXISTS (SELECT 1 FROM message_read_receipts r WHERE r.message_id = m.id)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MessageStatusRow
+	for rows.Next() {
+		var r MessageStatusRow
+		if err := rows.Scan(&r.ID, &r.ChatID, &r.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MessageStatusRow is a stored message id with its chat and tick status.
+type MessageStatusRow struct {
+	ID     string
+	ChatID string
+	Status string
+}
+
+// CountReceipts returns how many distinct participants have had the message
+// delivered (a read counts too) and how many have read it.
+func (s *MessageStore) CountReceipts(chatID, msgID string, excludeUsers map[string]bool) (delivered, read int, err error) {
+	rows, err := s.GetMessageReceipts(chatID, msgID)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, r := range rows {
+		if excludeUsers[jidUser(r.JID)] {
+			continue
+		}
+		if r.DeliveredAt > 0 || r.ReadAt > 0 {
+			delivered++
+		}
+		if r.ReadAt > 0 {
+			read++
+		}
+	}
+	return delivered, read, nil
+}
+
+func jidUser(jid string) string {
+	if i := strings.IndexByte(jid, '@'); i >= 0 {
+		jid = jid[:i]
+	}
+	if i := strings.IndexByte(jid, ':'); i >= 0 {
+		jid = jid[:i]
+	}
+	return jid
+}
+
+// UpgradeMessageStatus moves an outgoing message forward (sent -> delivered ->
+// read) and reports whether it changed. It never moves a status backwards, so
+// a late delivery receipt cannot undo a read one.
+func (s *MessageStore) UpgradeMessageStatus(msgID, status string) (bool, error) {
+	rank := func(v string) int {
+		switch v {
+		case "read":
+			return 3
+		case "delivered":
+			return 2
+		case "sent":
+			return 1
+		}
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var current string
+	if err := s.db.QueryRow(`SELECT ifnull(status, '') FROM messages WHERE id = ?`, msgID).Scan(&current); err != nil {
+		return false, err
+	}
+	if rank(current) >= rank(status) {
+		return false, nil
+	}
+	_, err := s.db.Exec(`UPDATE messages SET status = ? WHERE id = ?`, status, msgID)
+	return err == nil, err
 }
 
 // GetMessageReceipts returns only receipts WhatsApp actually reported for an
-// outgoing message in this group.
+// outgoing message.
 func (s *MessageStore) GetMessageReceipts(chatID, msgID string) ([]MessageReceipt, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT r.message_id, r.chat_id, r.participant_jid, r.read_at
+	rows, err := s.db.Query(`SELECT r.message_id, r.chat_id, r.participant_jid,
+			CASE WHEN r.delivered_at > 0 THEN r.delivered_at ELSE r.read_at END, r.read_at
 		FROM message_read_receipts r
 		JOIN messages m ON m.id = r.message_id AND m.chat_id = r.chat_id
-		JOIN chats c ON c.id = r.chat_id
-		WHERE r.chat_id = ? AND r.message_id = ? AND m.sender_id = 'me' AND c.is_group = 1
-		ORDER BY r.read_at ASC`, chatID, msgID)
+		WHERE r.chat_id = ? AND r.message_id = ? AND m.sender_id = 'me'
+		ORDER BY r.read_at ASC, r.delivered_at ASC`, chatID, msgID)
 	if err != nil {
 		return nil, err
 	}
@@ -1623,7 +1756,7 @@ func (s *MessageStore) GetMessageReceipts(chatID, msgID string) ([]MessageReceip
 	receipts := make([]MessageReceipt, 0)
 	for rows.Next() {
 		var receipt MessageReceipt
-		if err := rows.Scan(&receipt.MessageID, &receipt.ChatID, &receipt.JID, &receipt.ReadAt); err != nil {
+		if err := rows.Scan(&receipt.MessageID, &receipt.ChatID, &receipt.JID, &receipt.DeliveredAt, &receipt.ReadAt); err != nil {
 			return nil, err
 		}
 		receipts = append(receipts, receipt)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -28,6 +29,26 @@ var (
 	titleRe   = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 	entityRe  = regexp.MustCompile(`&[a-z#0-9]+;`)
 )
+
+// IsPublicHTTPURL reports whether raw is an http(s) URL whose host resolves
+// only to public addresses, so the preview endpoint cannot be pointed at
+// loopback or LAN services.
+func IsPublicHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return false
+	}
+	ips, err := net.LookupIP(u.Hostname())
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return false
+		}
+	}
+	return true
+}
 
 // FirstURLInText returns the first http(s) URL found in a text, or "".
 func FirstURLInText(text string) string {

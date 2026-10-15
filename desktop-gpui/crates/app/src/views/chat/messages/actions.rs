@@ -329,8 +329,17 @@ impl ChatView {
         };
         self.viewed_by_message = Some(message);
         self.viewed_by_receipts.clear();
+        self.viewed_by_recipients.clear();
+        self.viewed_by_closing = false;
         self.is_loading_viewed_by = true;
         self.context_menu = None;
+        // Message info shares the right-hand slot with the other drawers.
+        self.is_info_sheet_open = false;
+        self.info_sheet_closing = false;
+        self.is_search_sheet_open = false;
+        self.search_sheet_closing = false;
+        self.is_starred_sheet_open = false;
+        self.starred_sheet_closing = false;
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let view_weak = this;
             let cx_handle = cx.clone();
@@ -346,8 +355,9 @@ impl ChatView {
                             if let Ok(group) = group_result {
                                 this.group_info = Some(group);
                             }
-                            if let Ok(receipts) = receipts_result {
-                                this.viewed_by_receipts = receipts;
+                            if let Ok(info) = receipts_result {
+                                this.viewed_by_receipts = info.receipts;
+                                this.viewed_by_recipients = info.recipients;
                             }
                             this.is_loading_viewed_by = false;
                             cx.notify();
@@ -359,10 +369,21 @@ impl ChatView {
         cx.notify();
     }
 
+    /// Slide the message info sheet out, then drop its data.
     pub(crate) fn close_viewed_by(&mut self, cx: &mut Context<Self>) {
-        self.viewed_by_message = None;
-        self.viewed_by_receipts.clear();
-        self.is_loading_viewed_by = false;
+        if self.viewed_by_message.is_none() || self.viewed_by_closing {
+            return;
+        }
+        self.viewed_by_closing = true;
+        Self::after_sheet_exit(cx, |this| {
+            // Opening another message during the exit cancels the unmount.
+            if this.viewed_by_closing {
+                this.viewed_by_message = None;
+                this.viewed_by_receipts.clear();
+                this.viewed_by_closing = false;
+                this.is_loading_viewed_by = false;
+            }
+        });
         cx.notify();
     }
 

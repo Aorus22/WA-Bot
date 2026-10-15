@@ -64,6 +64,13 @@ impl ChatView {
         self.is_search_sheet_open = false;
         self.info_sheet_closing = false;
         self.search_sheet_closing = false;
+        self.viewed_by_message = None;
+        self.viewed_by_closing = false;
+        // Pins, the link card and a recording belong to the conversation they were made in.
+        self.pinned_messages.clear();
+        self.pin_banner_index = 0;
+        self.reset_compose_link();
+        self.voice = None;
         self.search_sheet_query.clear();
         self.search_sheet_results.clear();
         self.is_searching_messages = false;
@@ -98,6 +105,7 @@ impl ChatView {
         .detach();
 
         self.load_messages(&chat_id, cx);
+        self.load_pins(&chat_id, cx);
         if chat_id.ends_with("@g.us") {
             self.load_group_info(&chat_id, cx);
         }
@@ -285,6 +293,12 @@ impl ChatView {
                                 this.rebuild_message_cache(&cid, &msgs);
                                 if cx.has_global::<ChatStore>() {
                                     ChatStore::global_mut(cx).set_messages(&cid, msgs, this.has_more);
+                                }
+                                // Opened from the starred list: now the message can be revealed.
+                                if this.pending_jump.as_ref().is_some_and(|(chat, _)| *chat == cid) {
+                                    if let Some((_, message_id)) = this.pending_jump.take() {
+                                        this.navigate_to_message(&message_id, cx);
+                                    }
                                 }
                             }
                             cx.notify();

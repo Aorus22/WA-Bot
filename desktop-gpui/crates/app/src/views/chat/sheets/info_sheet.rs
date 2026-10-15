@@ -40,8 +40,12 @@ impl ChatView {
         }
         self.info_sheet_closing = false;
         self.is_info_sheet_open = true;
+        self.is_starred_sheet_open = false;
+        self.starred_sheet_closing = false;
         self.is_search_sheet_open = false;
         self.search_sheet_closing = false;
+        self.viewed_by_message = None;
+        self.viewed_by_closing = false;
         self.load_info_media(cx);
         self.load_info_docs(cx);
         self.load_info_links(cx);
@@ -288,6 +292,72 @@ impl ChatView {
                                         .child(chat.id.clone()),
                                 ),
                         )
+                        // Disappearing messages: the chat's timer, changeable from here
+                        .child({
+                            let current = chat.disappearing_secs;
+                            let chat_id = chat.id.clone();
+                            v_flex()
+                                .gap_2p5()
+                                .p_3()
+                                .rounded_xl()
+                                .border_1()
+                                .border_color(border_color.opacity(0.3))
+                                .bg(theme.muted.opacity(0.2))
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .child(svg().data(HOURGLASS_SVG).size(px(18.0)).text_color(primary_color))
+                                        .child(
+                                            v_flex()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .text_color(text_color)
+                                                        .child("Disappearing messages"),
+                                                )
+                                                .child(div().text_xs().text_color(muted_text).child(if current == 0 {
+                                                    "Off".to_string()
+                                                } else {
+                                                    format!("New messages disappear on phones after {}", messages::disappearing::disappearing_label(current))
+                                                })),
+                                        ),
+                                )
+                                .child(
+                                    h_flex()
+                                        .p_1()
+                                        .bg(theme.muted.opacity(0.5))
+                                        .rounded_xl()
+                                        .border_1()
+                                        .border_color(border_color.opacity(0.3))
+                                        .justify_around()
+                                        .children(messages::disappearing::DISAPPEARING_OPTIONS.into_iter().map(|(secs, label)| {
+                                            let selected = current == secs;
+                                            let chat_id = chat_id.clone();
+                                            div()
+                                                .id(SharedString::from(format!("disappearing-{secs}")))
+                                                .cursor_pointer()
+                                                .px_2p5()
+                                                .py_1p5()
+                                                .rounded_lg()
+                                                .text_xs()
+                                                .font_weight(if selected { FontWeight::BOLD } else { FontWeight::NORMAL })
+                                                .bg(if selected { theme.primary.opacity(0.18) } else { rgba(0x00000000).into() })
+                                                .text_color(if selected { primary_color } else { muted_text })
+                                                .child(label)
+                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                    this.set_disappearing_timer(chat_id.clone(), secs, cx);
+                                                }))
+                                        })),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(10.5))
+                                        .text_color(muted_text.opacity(0.8))
+                                        .child("Messages stay in this app either way; only phones remove them."),
+                                )
+                        })
                         // Tabs Row: [Media] [Docs] [Links]
                         .child(
                             h_flex()

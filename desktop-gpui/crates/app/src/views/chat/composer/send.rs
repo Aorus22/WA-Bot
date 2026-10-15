@@ -252,6 +252,7 @@ impl ChatView {
             forwarded: None,
             reactions: None,
             extra: None,
+            ..Default::default()
         };
 
         if cx.has_global::<ChatStore>() {
@@ -490,7 +491,11 @@ impl ChatView {
             None => return,
         };
 
+        // The user may have dismissed the card for this link; read that before the field clears.
+        let no_link_preview = self.editing_message.is_none()
+            && super::link_preview::first_url(&text).is_some_and(|url| self.dismissed_link_previews.contains(&url));
         self.set_compose_text(String::new(), window, cx);
+        self.reset_compose_link();
         self.is_sending = true;
 
         // Markdown mode wraps the outgoing text in the `{{md:…}}` wire format
@@ -602,8 +607,10 @@ impl ChatView {
                     mention_names: Default::default(),
                     mention_chats: Default::default(),
                     mentions_me: false,
+                    ..Default::default()
                 })
             },
+            ..Default::default()
         };
 
         if cx.has_global::<ChatStore>() {
@@ -660,7 +667,9 @@ impl ChatView {
                         .await
                 } else {
                     TOKIO_RT
-                        .spawn(async move { client.send_message(&c_target, &s_text, &sent_mentions).await })
+                        .spawn(async move {
+                            client.send_message_with_preview(&c_target, &s_text, &sent_mentions, no_link_preview).await
+                        })
                         .await
                 };
 

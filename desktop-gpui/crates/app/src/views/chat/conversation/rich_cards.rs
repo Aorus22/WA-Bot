@@ -1,6 +1,6 @@
 use crate::components::rich_bubbles::{ContactHelper, LocationHelper, PollHelper};
 use crate::views::chat::*;
-use wabot_backend_client::dto::{ContactMeta, LocationMeta, PollMeta};
+use wabot_backend_client::dto::{ContactMeta, LinkPreviewMeta, LocationMeta, PollMeta, StatusReplyMeta};
 
 const CARD_WIDTH: f32 = 260.0;
 
@@ -259,6 +259,148 @@ impl ChatView {
                             }))
                     }))
             }))
+            .into_any_element()
+    }
+
+    /// Quote card for a reply to a status (story): the label "Status", then the
+    /// status text or a word for its media, with the picture beside it.
+    pub(crate) fn render_status_reply_card(
+        reply: &StatusReplyMeta,
+        base_url: &str,
+        primary_color: Hsla,
+        muted_text: Hsla,
+        theme_muted: Hsla,
+        chat_scale: u8,
+    ) -> AnyElement {
+        let text = reply.content.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let label = match (text, reply.status_type.as_str()) {
+            (Some(text), _) => text.to_string(),
+            (None, "image") => "Photo".to_string(),
+            (None, "video") => "Video".to_string(),
+            (None, "audio") => "Voice message".to_string(),
+            (None, _) => "Status".to_string(),
+        };
+        // A video's `mediaUrl` is the clip, which `img` cannot draw.
+        let thumbnail = (reply.status_type == "image")
+            .then_some(reply.media_url.as_deref())
+            .flatten()
+            .filter(|url| !url.trim().is_empty())
+            .map(|url| resolve_media_url(url, base_url));
+        h_flex()
+            .mb_1()
+            .bg(theme_muted.opacity(0.35))
+            .border_l_4()
+            .border_color(primary_color)
+            .rounded_r_lg()
+            .overflow_hidden()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .px_2p5()
+                    .py_1p5()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .chat_text(0.75, 1.0, chat_scale)
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(primary_color)
+                            .child("Status"),
+                    )
+                    .child(
+                        div()
+                            .chat_text(0.75, 1.0, chat_scale)
+                            .text_color(muted_text)
+                            .overflow_hidden()
+                            .line_clamp(2)
+                            .child(label),
+                    ),
+            )
+            .children(thumbnail.map(|url| {
+                img(url).w(px(48.0)).h(px(48.0)).flex_shrink_0().object_fit(ObjectFit::Cover)
+            }))
+            .into_any_element()
+    }
+
+    /// Link preview card of a message (`extra.linkPreview`): picture, title,
+    /// description and site. Clicking opens the link.
+    pub(crate) fn render_link_preview_card(
+        msg_id: &str,
+        preview: &LinkPreviewMeta,
+        base_url: &str,
+        primary_color: Hsla,
+        bubble_text: Rgba,
+        chat_scale: u8,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tone: Hsla = bubble_text.into();
+        let url = preview.url.clone();
+        let host = {
+            let rest = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
+            rest.split(['/', '?', '#']).next().unwrap_or(rest).trim_start_matches("www.").to_string()
+        };
+        let title = preview.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let description = preview.description.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let thumbnail = preview
+            .thumbnail_url
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| resolve_media_url(t, base_url));
+        v_flex()
+            .id(format!("link-preview-{msg_id}"))
+            .w(px(CARD_WIDTH))
+            .max_w_full()
+            .rounded_lg()
+            .overflow_hidden()
+            .cursor_pointer()
+            .bg(tone.opacity(0.08))
+            .border_l_4()
+            .border_color(primary_color)
+            .hover(move |s| s.bg(tone.opacity(0.14)))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |_this, _, _, cx| {
+                cx.open_url(&url);
+            }))
+            .children(thumbnail.map(|thumb| {
+                img(thumb)
+                    .id(format!("link-preview-img-{msg_id}"))
+                    .w_full()
+                    .h(px(130.0))
+                    .object_fit(ObjectFit::Cover)
+            }))
+            .child(
+                v_flex()
+                    .px_2p5()
+                    .py_1p5()
+                    .gap_0p5()
+                    .children(title.map(|title| {
+                        div()
+                            .chat_text(0.8125, 1.1, chat_scale)
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(tone)
+                            .overflow_hidden()
+                            .line_clamp(2)
+                            .child(title.to_string())
+                    }))
+                    .children(description.map(|text| {
+                        div()
+                            .chat_text(0.75, 1.0, chat_scale)
+                            .text_color(tone.opacity(0.75))
+                            .overflow_hidden()
+                            .line_clamp(3)
+                            .child(text.to_string())
+                    }))
+                    .child(
+                        div()
+                            .chat_text(0.6875, 1.0, chat_scale)
+                            .text_color(tone.opacity(0.55))
+                            .overflow_hidden()
+                            .line_clamp(1)
+                            .child(host),
+                    ),
+            )
             .into_any_element()
     }
 }

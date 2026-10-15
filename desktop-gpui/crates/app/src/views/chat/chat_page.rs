@@ -89,7 +89,38 @@ pub struct ChatView {
     pub is_loading_info_members: bool,
     pub viewed_by_message: Option<Message>,
     pub viewed_by_receipts: Vec<MessageReceipt>,
+    /// Members besides us the message info sheet's message went to.
+    pub viewed_by_recipients: Vec<String>,
+    pub viewed_by_closing: bool,
     pub is_loading_viewed_by: bool,
+
+    // Starred messages drawer (Right side): every starred message, all chats
+    pub is_starred_sheet_open: bool,
+    pub starred_sheet_closing: bool,
+    pub starred_messages: Vec<Message>,
+    pub starred_has_more: bool,
+    pub is_loading_starred: bool,
+    /// Last `ChatStore::starred_version` seen, to reload the list on a change made elsewhere.
+    pub starred_version_seen: u64,
+    /// `(chat id, message id)` to scroll to once that chat has loaded (opened from the starred list).
+    pub(crate) pending_jump: Option<(String, String)>,
+
+    // Pinned messages of the open chat, newest first, and the banner's cursor
+    pub pinned_messages: Vec<PinnedMessage>,
+    pub pin_banner_index: usize,
+
+    // Link preview card above the composer, and what feeds it
+    pub(crate) compose_link: Option<ComposeLinkPreview>,
+    /// Previews fetched so far by URL; `None` is a URL nothing could be scraped from.
+    pub(crate) link_preview_cache: std::collections::HashMap<String, Option<LinkPreview>>,
+    /// URLs whose card was dismissed: they go out as plain text.
+    pub(crate) dismissed_link_previews: HashSet<String>,
+    /// Bumped on every edit of the text, so a debounced fetch can tell it is stale.
+    pub(crate) link_preview_seq: u64,
+
+    // Voice note being recorded
+    pub(crate) voice: Option<VoiceDraft>,
+    pub(crate) voice_seq: u64,
 
     // Chat Search Sheet drawer (Right side)
     pub is_search_sheet_open: bool,
@@ -227,7 +258,28 @@ impl ChatView {
             is_loading_info_members: false,
             viewed_by_message: None,
             viewed_by_receipts: Vec::new(),
+            viewed_by_recipients: Vec::new(),
+            viewed_by_closing: false,
             is_loading_viewed_by: false,
+
+            is_starred_sheet_open: false,
+            starred_sheet_closing: false,
+            starred_messages: Vec::new(),
+            starred_has_more: false,
+            is_loading_starred: false,
+            starred_version_seen: 0,
+            pending_jump: None,
+
+            pinned_messages: Vec::new(),
+            pin_banner_index: 0,
+
+            compose_link: None,
+            link_preview_cache: std::collections::HashMap::new(),
+            dismissed_link_previews: HashSet::new(),
+            link_preview_seq: 0,
+
+            voice: None,
+            voice_seq: 0,
 
             is_search_sheet_open: false,
             search_sheet_query: String::new(),
@@ -372,6 +424,7 @@ impl Render for ChatView {
             !(self.sidebar_collapsed && has_selection) || self.sidebar_exiting
         };
         let show_right = if pages { has_selection } else { true };
+        let starred_overlay = pages && !has_selection;
 
         // The backend re-resolved names (or the chat list changed): fetch again
         // what is on screen, since nothing else would.
@@ -383,6 +436,24 @@ impl Render for ChatView {
         };
         if reload_chats {
             self.load_chats(cx);
+        }
+        // Pins changed elsewhere, or a message starred on another device.
+        let (stale_pins, starred_version) = if cx.has_global::<ChatStore>() {
+            let store = ChatStore::global_mut(cx);
+            (store.take_stale_pins(), store.starred_version)
+        } else {
+            (Vec::new(), 0)
+        };
+        if let Some(chat) = selected_chat.as_ref() {
+            if stale_pins.contains(&chat.id) {
+                self.load_pins(&chat.id, cx);
+            }
+        }
+        if starred_version != self.starred_version_seen {
+            self.starred_version_seen = starred_version;
+            if self.is_starred_sheet_open {
+                self.load_starred(false, cx);
+            }
         }
         if reload_names {
             if let Some(chat) = selected_chat.as_ref() {
@@ -433,12 +504,28 @@ impl Render for ChatView {
             // ====================================================
             // RIGHT DRAWER: CHAT INFO SHEET
             // ====================================================
-            .children(if (self.is_info_sheet_open || self.info_sheet_closing)
+            .children(if (self.is_starred_sheet_open || self.starred_sheet_closing) && !starred_overlay {
+                Some(Self::animated_sheet(
+                    "starred-sheet-in",
+                    "starred-sheet-out",
+                    self.starred_sheet_closing,
+                    self.render_starred_sheet(false, cx),
+                ))
+            } else if (self.is_info_sheet_open || self.info_sheet_closing)
                 && selected_chat.is_some()
             {
                 let chat = selected_chat.clone().unwrap();
 
                 Some(self.render_info_sheet(window, cx, &chat))
+            } else if (self.viewed_by_message.is_some() || self.viewed_by_closing)
+                && selected_chat.is_some()
+            {
+                Some(Self::animated_sheet(
+                    "message-info-sheet-in",
+                    "message-info-sheet-out",
+                    self.viewed_by_closing,
+                    self.render_message_info_sheet(window, cx),
+                ))
             } else if (self.is_search_sheet_open || self.search_sheet_closing)
                 && selected_chat.is_some()
             {
@@ -452,6 +539,11 @@ impl Render for ChatView {
             } else {
                 None
             })
+            // The chat list page has no column to spare for a drawer, so the
+            // starred messages cover it instead.
+            .children((starred_overlay && (self.is_starred_sheet_open || self.starred_sheet_closing)).then(|| {
+                div().absolute().inset_0().child(self.render_starred_sheet(true, cx))
+            }))
             // ====================================================
             // CONTEXT MENU POPOVER (RIGHT-CLICK ON BUBBLE)
             // ====================================================
@@ -498,6 +590,5 @@ impl Render for ChatView {
             // Full-screen image viewer: fit-to-window, wheel zoom around the
             // cursor, drag to pan, double-click to zoom, Esc / click outside to close.
             .children(self.render_image_viewer(window, cx))
-            .children(self.render_viewed_by_dialog(cx))
     }
 }

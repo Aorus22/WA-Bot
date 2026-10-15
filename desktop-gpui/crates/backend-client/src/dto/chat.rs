@@ -28,6 +28,9 @@ pub struct Chat {
     pub mute_mode: String,
     #[serde(default)]
     pub muted_until: Option<i64>,
+    /// Disappearing-messages timer in seconds; 0 = off.
+    #[serde(default)]
+    pub disappearing_secs: u32,
 }
 
 fn default_mute_mode() -> String {
@@ -229,5 +232,18 @@ mod history_status_tests {
         assert!(!plain.contains("retryFinished"), "{plain}");
         let retry = serde_json::to_string(&HistorySyncRequest { all: true, retry_finished: true, ..Default::default() }).unwrap();
         assert!(retry.contains(r#""retryFinished":true"#), "{retry}");
+    }
+}
+
+#[cfg(test)]
+mod chat_tests {
+    use super::*;
+
+    #[test]
+    fn disappearing_timer_defaults_to_off() {
+        let chat: Chat = serde_json::from_str(r#"{"id":"a@s.whatsapp.net"}"#).unwrap();
+        assert_eq!(chat.disappearing_secs, 0);
+        let chat: Chat = serde_json::from_str(r#"{"id":"a@s.whatsapp.net","disappearingSecs":604800}"#).unwrap();
+        assert_eq!(chat.disappearing_secs, 604_800);
     }
 }

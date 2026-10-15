@@ -610,6 +610,7 @@ impl CallOverlayView {
 
         v_flex()
             .id("call-overlay")
+            .occlude()
             .absolute()
             .inset_0()
             .child(
@@ -677,6 +678,7 @@ impl CallOverlayView {
 
         v_flex()
             .id("incoming-call-overlay")
+            .occlude()
             .absolute()
             .inset_0()
             .items_center()

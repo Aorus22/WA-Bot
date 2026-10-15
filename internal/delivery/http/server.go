@@ -239,6 +239,14 @@ func (s *HTTPServer) LogSentMessageWithMentions(msgID, chatID, from, to, content
 	s.handler.LogSentMessageWithMentions(msgID, chatID, from, to, content, msgType, mediaURL, isAutomatic, replyToID, mentions)
 }
 
+func (s *HTTPServer) LogSentMessageWithPreview(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string, preview *whatsappInfra.LinkPreview) {
+	s.handler.LogSentMessageWithPreview(msgID, chatID, from, to, content, msgType, mediaURL, isAutomatic, replyToID, mentions, preview)
+}
+
+func (s *HTTPServer) ChatDisappearingSecs(chatID string) uint32 {
+	return s.handler.ChatDisappearingSecs(chatID)
+}
+
 func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 	s.handler.SaveAndBroadcastMessage(msg)
 }

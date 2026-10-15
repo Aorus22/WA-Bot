@@ -35,6 +35,8 @@ impl ChatView {
                         .size_full()
                         // Chat Header (Clicking opens Info Sheet)
                         .child(self.render_chat_header(cx, pages, active_chat))
+                        // Messages pinned in this chat
+                        .children(self.render_pinned_banner(cx))
                         // Messages History View (Optimized for 60fps scrolling) with visual scrollbar
                         .child(self.render_message_list(cx))
                         .children(self.render_typing_indicator(cx))

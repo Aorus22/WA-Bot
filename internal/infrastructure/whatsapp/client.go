@@ -32,6 +32,18 @@ type MentionMessageLogger interface {
 	LogSentMessageWithMentions(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string)
 }
 
+// LinkPreviewMessageLogger lets the logger persist the preview card attached
+// to an outgoing text so our own side renders it too.
+type LinkPreviewMessageLogger interface {
+	LogSentMessageWithPreview(msgID, chatID, from, to, content, msgType, mediaURL string, isAutomatic bool, replyToID string, mentions []string, preview *LinkPreview)
+}
+
+// DisappearingLookup reports a chat's disappearing-messages timer in seconds
+// (0 = off) so outgoing messages carry it like the official clients do.
+type DisappearingLookup interface {
+	ChatDisappearingSecs(chatID string) uint32
+}
+
 type QREvent struct {
 	Event string
 	Code  string
@@ -113,7 +125,7 @@ func (w *WhatsAppClient) SendMessage(ctx context.Context, to string, text string
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		Conversation: proto.String(text),
 	})
 	if err == nil {
@@ -133,16 +145,19 @@ func (w *WhatsAppClient) SendMessageWithPreview(ctx context.Context, to string, 
 // SendMessageWithPreviewAndMentions sends text with optional WhatsApp mention
 // metadata while preserving the link-preview behavior of SendMessageWithPreview.
 func (w *WhatsAppClient) SendMessageWithPreviewAndMentions(ctx context.Context, to, text string, isAutomatic bool, mentions []string) (string, error) {
+	return w.SendText(ctx, to, text, isAutomatic, mentions, false)
+}
+
+// SendText sends text with optional mentions. Unless noPreview is set, the
+// first URL in the text is scraped and attached as a link preview card;
+// scraping failures fall back to plain text.
+func (w *WhatsAppClient) SendText(ctx context.Context, to, text string, isAutomatic bool, mentions []string, noPreview bool) (string, error) {
 	mentions = normalizeMentionJIDs(mentions)
-	rawURL := FirstURLInText(text)
-	if rawURL == "" && len(mentions) == 0 {
-		return w.SendMessage(ctx, to, text, isAutomatic)
-	}
 	var preview *LinkPreview
-	if rawURL != "" {
+	if rawURL := FirstURLInText(text); rawURL != "" && !noPreview {
 		preview = ScrapeLinkPreview(ctx, rawURL)
 	}
-	if rawURL != "" && preview == nil && len(mentions) == 0 {
+	if preview == nil && len(mentions) == 0 {
 		return w.SendMessage(ctx, to, text, isAutomatic)
 	}
 
@@ -164,12 +179,73 @@ func (w *WhatsAppClient) SendMessageWithPreviewAndMentions(ctx context.Context, 
 	if preview != nil && len(preview.JPEGThumbnail) > 0 {
 		et.JPEGThumbnail = preview.JPEGThumbnail
 	}
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{ExtendedTextMessage: et})
-	if err == nil {
-		w.logWithMentions(resp.ID, targetJID.String(), text, "text", "", isAutomatic, "", mentions)
-		return resp.ID, nil
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{ExtendedTextMessage: et})
+	if err != nil {
+		return "", err
 	}
-	return "", err
+	if logger, ok := w.logger.(LinkPreviewMessageLogger); ok && preview != nil {
+		logger.LogSentMessageWithPreview(resp.ID, targetJID.String(), "me", targetJID.String(), text, "text", "", isAutomatic, "", mentions, preview)
+	} else {
+		w.logWithMentions(resp.ID, targetJID.String(), text, "text", "", isAutomatic, "", mentions)
+	}
+	return resp.ID, nil
+}
+
+// sendMessage is whatsmeow's SendMessage plus the chat's disappearing timer
+// on every message that can carry one.
+func (w *WhatsAppClient) sendMessage(ctx context.Context, to waTypes.JID, msg *waProto.Message, extra ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
+	if lookup, ok := w.logger.(DisappearingLookup); ok {
+		if secs := lookup.ChatDisappearingSecs(to.ToNonAD().String()); secs > 0 {
+			stampExpiration(msg, secs)
+		}
+	}
+	return w.client.SendMessage(ctx, to, msg, extra...)
+}
+
+// stampExpiration sets ContextInfo.Expiration on the message's payload. A
+// plain conversation is promoted to an extended text message to carry it.
+func stampExpiration(msg *waProto.Message, secs uint32) {
+	if msg == nil {
+		return
+	}
+	set := func(ci **waProto.ContextInfo) {
+		if *ci == nil {
+			*ci = &waProto.ContextInfo{}
+		}
+		(*ci).Expiration = proto.Uint32(secs)
+	}
+	switch {
+	case msg.Conversation != nil:
+		msg.ExtendedTextMessage = &waProto.ExtendedTextMessage{Text: msg.Conversation}
+		msg.Conversation = nil
+		set(&msg.ExtendedTextMessage.ContextInfo)
+	case msg.ExtendedTextMessage != nil:
+		set(&msg.ExtendedTextMessage.ContextInfo)
+	case msg.ImageMessage != nil:
+		set(&msg.ImageMessage.ContextInfo)
+	case msg.VideoMessage != nil:
+		set(&msg.VideoMessage.ContextInfo)
+	case msg.AudioMessage != nil:
+		set(&msg.AudioMessage.ContextInfo)
+	case msg.DocumentMessage != nil:
+		set(&msg.DocumentMessage.ContextInfo)
+	case msg.StickerMessage != nil:
+		set(&msg.StickerMessage.ContextInfo)
+	case msg.LocationMessage != nil:
+		set(&msg.LocationMessage.ContextInfo)
+	case msg.LiveLocationMessage != nil:
+		set(&msg.LiveLocationMessage.ContextInfo)
+	case msg.ContactMessage != nil:
+		set(&msg.ContactMessage.ContextInfo)
+	case msg.ContactsArrayMessage != nil:
+		set(&msg.ContactsArrayMessage.ContextInfo)
+	case msg.PollCreationMessage != nil:
+		set(&msg.PollCreationMessage.ContextInfo)
+	case msg.PollCreationMessageV2 != nil:
+		set(&msg.PollCreationMessageV2.ContextInfo)
+	case msg.PollCreationMessageV3 != nil:
+		set(&msg.PollCreationMessageV3.ContextInfo)
+	}
 }
 
 func normalizeMentionJIDs(values []string) []string {
@@ -194,7 +270,7 @@ func normalizeMentionJIDs(values []string) []string {
 }
 
 func (w *WhatsAppClient) SendMessageToJID(ctx context.Context, to waTypes.JID, text string, isAutomatic bool) (string, error) {
-	resp, sendErr := w.client.SendMessage(ctx, to, &waProto.Message{
+	resp, sendErr := w.sendMessage(ctx, to, &waProto.Message{
 		Conversation: proto.String(text),
 	})
 	if sendErr == nil {
@@ -215,7 +291,7 @@ func (w *WhatsAppClient) SendImage(ctx context.Context, to string, data []byte, 
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		ImageMessage: &waProto.ImageMessage{
 			Caption:       proto.String(caption),
 			Mimetype:      proto.String("image/jpeg"),
@@ -245,7 +321,7 @@ func (w *WhatsAppClient) SendVideo(ctx context.Context, to string, data []byte, 
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		VideoMessage: &waProto.VideoMessage{
 			Caption:       proto.String(caption),
 			Mimetype:      proto.String("video/mp4"),
@@ -277,7 +353,7 @@ func (w *WhatsAppClient) SendDocument(ctx context.Context, to string, data []byt
 
 	mimetype := http.DetectContentType(data)
 
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:         proto.String(title),
 			Mimetype:      proto.String(mimetype),
@@ -308,7 +384,7 @@ func (w *WhatsAppClient) SendSticker(ctx context.Context, to string, data []byte
 		targetJID = waTypes.NewJID(to, waTypes.DefaultUserServer)
 	}
 
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		StickerMessage: &waProto.StickerMessage{
 			Mimetype:      proto.String("image/webp"),
 			URL:           proto.String(uploaded.URL),
@@ -335,7 +411,7 @@ func (w *WhatsAppClient) SendDocumentToJID(ctx context.Context, to waTypes.JID, 
 
 	mimetype := http.DetectContentType(data)
 
-	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
+	resp, err := w.sendMessage(ctx, to, &waProto.Message{
 		DocumentMessage: &waProto.DocumentMessage{
 			Title:         proto.String(title),
 			Mimetype:      proto.String(mimetype),
@@ -370,7 +446,7 @@ func (w *WhatsAppClient) SendAudio(ctx context.Context, to string, data []byte, 
 }
 
 func (w *WhatsAppClient) SendAudioToJID(ctx context.Context, to waTypes.JID, data []byte, uploaded whatsmeow.UploadResponse, mimetype string, ptt bool, seconds uint32, waveform []byte, mediaURL string) (string, error) {
-	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
+	resp, err := w.sendMessage(ctx, to, &waProto.Message{
 		AudioMessage: &waProto.AudioMessage{
 			Mimetype:      proto.String(mimetype),
 			URL:           proto.String(uploaded.URL),
@@ -405,7 +481,7 @@ func (w *WhatsAppClient) SendStickerToJID(ctx context.Context, to waTypes.JID, d
 		return "", err
 	}
 
-	resp, err := w.client.SendMessage(ctx, to, &waProto.Message{
+	resp, err := w.sendMessage(ctx, to, &waProto.Message{
 		StickerMessage: &waProto.StickerMessage{
 			Mimetype:      proto.String("image/webp"),
 			URL:           proto.String(uploaded.URL),
@@ -430,7 +506,7 @@ func (w *WhatsAppClient) DeleteMessage(ctx context.Context, to string, msgID str
 		return err
 	}
 	senderJID := w.client.Store.ID.ToNonAD()
-	_, err = w.client.SendMessage(ctx, targetJID, w.client.BuildRevoke(targetJID, senderJID, msgID))
+	_, err = w.sendMessage(ctx, targetJID, w.client.BuildRevoke(targetJID, senderJID, msgID))
 	return err
 }
 
@@ -439,7 +515,7 @@ func (w *WhatsAppClient) EditMessage(ctx context.Context, to string, msgID strin
 	if err != nil {
 		return err
 	}
-	_, err = w.client.SendMessage(ctx, targetJID, w.client.BuildEdit(targetJID, msgID, &waProto.Message{
+	_, err = w.sendMessage(ctx, targetJID, w.client.BuildEdit(targetJID, msgID, &waProto.Message{
 		Conversation: proto.String(newText),
 	}))
 	return err
@@ -470,7 +546,7 @@ func (w *WhatsAppClient) ReplyMessageWithMentions(ctx context.Context, to, msgID
 			contextInfo.Participant = proto.String(parsed.ToNonAD().String())
 		}
 	}
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		ExtendedTextMessage: &waProto.ExtendedTextMessage{
 			Text:        proto.String(text),
 			ContextInfo: contextInfo,
@@ -601,6 +677,76 @@ func (w *WhatsAppClient) SetChatArchived(ctx context.Context, jid waTypes.JID, a
 
 func (w *WhatsAppClient) SetChatMuted(ctx context.Context, jid waTypes.JID, muted bool, duration time.Duration) error {
 	return w.sendAppStatePatch(ctx, appstate.BuildMute(jid, muted, duration))
+}
+
+// SetMessageStarred syncs a star to the phone. The app-state index carries the
+// sender only for other people's messages in groups; everywhere else it is "0".
+func (w *WhatsAppClient) SetMessageStarred(ctx context.Context, chat waTypes.JID, participant string, msgID string, fromMe, starred bool) error {
+	sender := chat
+	if !fromMe && chat.Server == waTypes.GroupServer {
+		if parsed, err := waTypes.ParseJID(participant); err == nil && !parsed.IsEmpty() {
+			sender = parsed.ToNonAD()
+		}
+	}
+	return w.sendAppStatePatch(ctx, appstate.BuildStar(chat, sender, msgID, fromMe, starred))
+}
+
+// PinInChat pins or unpins a message for everyone in the chat. durationSecs
+// is the pin lifetime (86400, 604800 or 2592000) and is ignored when unpinning.
+func (w *WhatsAppClient) PinInChat(ctx context.Context, chat waTypes.JID, participant string, msgID string, fromMe, pin bool, durationSecs uint32) error {
+	key := &waCommon.MessageKey{
+		RemoteJID: proto.String(chat.String()),
+		FromMe:    proto.Bool(fromMe),
+		ID:        proto.String(msgID),
+	}
+	if !fromMe && chat.Server == waTypes.GroupServer {
+		if parsed, err := waTypes.ParseJID(participant); err == nil && !parsed.IsEmpty() {
+			key.Participant = proto.String(parsed.ToNonAD().String())
+		}
+	}
+	msg := &waProto.Message{
+		PinInChatMessage: &waProto.PinInChatMessage{
+			Key:               key,
+			Type:              waProto.PinInChatMessage_UNPIN_FOR_ALL.Enum(),
+			SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
+		},
+		MessageContextInfo: &waProto.MessageContextInfo{
+			MessageAddOnDurationInSecs: proto.Uint32(0),
+			MessageAddOnExpiryType:     waProto.MessageContextInfo_STATIC.Enum(),
+		},
+	}
+	if pin {
+		msg.PinInChatMessage.Type = waProto.PinInChatMessage_PIN_FOR_ALL.Enum()
+		msg.MessageContextInfo.MessageAddOnDurationInSecs = proto.Uint32(durationSecs)
+	}
+	_, err := w.client.SendMessage(ctx, chat, msg)
+	return err
+}
+
+// SetDisappearingTimer changes the chat's disappearing-messages timer.
+func (w *WhatsAppClient) SetDisappearingTimer(ctx context.Context, chat waTypes.JID, timer time.Duration) error {
+	return w.client.SetDisappearingTimer(ctx, chat, timer, time.Time{})
+}
+
+// ReplyToStatus answers a status (story) in a one-to-one chat with its poster,
+// quoting the status the way the official clients do.
+func (w *WhatsAppClient) ReplyToStatus(ctx context.Context, poster waTypes.JID, statusID, text string, quoted *waProto.Message) (string, error) {
+	poster = poster.ToNonAD()
+	resp, err := w.sendMessage(ctx, poster, &waProto.Message{
+		ExtendedTextMessage: &waProto.ExtendedTextMessage{
+			Text: proto.String(text),
+			ContextInfo: &waProto.ContextInfo{
+				StanzaID:      proto.String(statusID),
+				Participant:   proto.String(poster.String()),
+				RemoteJID:     proto.String(waTypes.StatusBroadcastJID.String()),
+				QuotedMessage: quoted,
+			},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
 }
 
 // sendAppStatePatch retries once after a normal app-state sync. If that sync
@@ -875,7 +1021,7 @@ func (w *WhatsAppClient) SendReaction(ctx context.Context, to, msgID, emoji, aut
 			author = parsed.ToNonAD()
 		}
 	}
-	_, err = w.client.SendMessage(ctx, targetJID, w.client.BuildReaction(targetJID, author, msgID, emoji))
+	_, err = w.sendMessage(ctx, targetJID, w.client.BuildReaction(targetJID, author, msgID, emoji))
 	return err
 }
 
@@ -886,7 +1032,7 @@ func (w *WhatsAppClient) SendPoll(ctx context.Context, to, question string, opti
 		selectableCount = 1
 	}
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, w.client.BuildPollCreation(question, options, selectableCount))
+	resp, err := w.sendMessage(ctx, targetJID, w.client.BuildPollCreation(question, options, selectableCount))
 	if err != nil {
 		return "", err
 	}
@@ -900,14 +1046,14 @@ func (w *WhatsAppClient) SendPollVote(ctx context.Context, pollMsgInfo waTypes.M
 	if err != nil {
 		return err
 	}
-	_, err = w.client.SendMessage(ctx, pollMsgInfo.Chat, vote)
+	_, err = w.sendMessage(ctx, pollMsgInfo.Chat, vote)
 	return err
 }
 
 // SendLocation shares a static location pin.
 func (w *WhatsAppClient) SendLocation(ctx context.Context, to string, latitude, longitude float64, name, address string) (string, error) {
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		LocationMessage: &waProto.LocationMessage{
 			DegreesLatitude:  proto.Float64(latitude),
 			DegreesLongitude: proto.Float64(longitude),
@@ -926,7 +1072,7 @@ func (w *WhatsAppClient) SendLocation(ctx context.Context, to string, latitude, 
 // (sequence -1) ends the share.
 func (w *WhatsAppClient) SendLiveLocation(ctx context.Context, to string, latitude, longitude float64, caption string, sequence int64) (string, error) {
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		LiveLocationMessage: &waProto.LiveLocationMessage{
 			DegreesLatitude:  proto.Float64(latitude),
 			DegreesLongitude: proto.Float64(longitude),
@@ -974,7 +1120,7 @@ func (w *WhatsAppClient) SendContact(ctx context.Context, to, displayName, phone
 		vcard = BuildVCard(displayName, phone)
 	}
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		ContactMessage: &waProto.ContactMessage{
 			DisplayName: proto.String(displayName),
 			Vcard:       proto.String(vcard),
@@ -1000,7 +1146,7 @@ func (w *WhatsAppClient) SendContacts(ctx context.Context, to, displayName strin
 		})
 	}
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		ContactsArrayMessage: &waProto.ContactsArrayMessage{
 			DisplayName: proto.String(displayName),
 			Contacts:    cards,
@@ -1048,7 +1194,7 @@ func (w *WhatsAppClient) SendViewOnceMedia(ctx context.Context, to, kind string,
 	}
 
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		ViewOnceMessageV2: &waProto.FutureProofMessage{Message: inner},
 	})
 	if err != nil {
@@ -1066,7 +1212,7 @@ func (w *WhatsAppClient) SendGIF(ctx context.Context, to string, data []byte, ca
 		return "", err
 	}
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, &waProto.Message{
+	resp, err := w.sendMessage(ctx, targetJID, &waProto.Message{
 		VideoMessage: &waProto.VideoMessage{
 			Mimetype:       proto.String("video/mp4"),
 			URL:            proto.String(uploaded.URL),
@@ -1096,7 +1242,7 @@ func (w *WhatsAppClient) ForwardMessage(ctx context.Context, to string, rawProto
 	clone := proto.Clone(&orig).(*waProto.Message)
 	markForwarded(clone)
 	targetJID := parseTargetJID(to)
-	resp, err := w.client.SendMessage(ctx, targetJID, clone)
+	resp, err := w.sendMessage(ctx, targetJID, clone)
 	if err != nil {
 		return "", err
 	}

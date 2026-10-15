@@ -150,6 +150,7 @@ impl ChatView {
                     pinned_at: None,
                     mute_mode: "off".to_string(),
                     muted_until: None,
+                    disappearing_secs: 0,
                 });
                 store.chats_version = store.chats_version.wrapping_add(1);
             }

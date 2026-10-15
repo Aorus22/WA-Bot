@@ -157,6 +157,9 @@ impl HttpClient {
         let media_type = if ptt { "ptt" } else { "audio" };
         let mut builder = SendMediaBuilder::new(target, media_type, file_bytes, file_name)
             .ptt(ptt);
+        if let Some(mime) = audio_mime(file_name) {
+            builder = builder.mime_type(mime);
+        }
         if let Some(s) = seconds {
             builder = builder.seconds(s);
         }
@@ -212,5 +215,18 @@ impl HttpClient {
         }
         let parsed = resp.json::<IdResult>().await?;
         Ok(parsed)
+    }
+}
+
+/// MIME type for an audio file name, so the backend knows what it is
+/// transcoding; `None` for anything unfamiliar.
+fn audio_mime(file_name: &str) -> Option<&'static str> {
+    match file_name.rsplit_once('.')?.1.to_ascii_lowercase().as_str() {
+        "wav" => Some("audio/wav"),
+        "ogg" | "oga" | "opus" => Some("audio/ogg"),
+        "mp3" => Some("audio/mpeg"),
+        "m4a" => Some("audio/mp4"),
+        "webm" | "weba" => Some("audio/webm"),
+        _ => None,
     }
 }

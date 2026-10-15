@@ -129,3 +129,22 @@ func TestEditWhoseEnvelopeIdIsTheTargetIsStillApplied(t *testing.T) {
 		t.Fatalf("stored = %+v, err = %v", stored, err)
 	}
 }
+
+func TestGroupStatusForWaitsForEveryMember(t *testing.T) {
+	cases := []struct {
+		delivered, read, total int
+		want                   string
+	}{
+		{0, 0, 4, "sent"},
+		{3, 1, 4, "sent"},
+		{4, 1, 4, "delivered"},
+		{4, 3, 4, "delivered"},
+		{4, 4, 4, "read"},
+		{2, 2, 0, "sent"}, // unknown member list: never claim more than sent
+	}
+	for _, c := range cases {
+		if got := groupStatusFor(c.delivered, c.read, c.total); got != c.want {
+			t.Errorf("groupStatusFor(%d,%d,%d) = %s, want %s", c.delivered, c.read, c.total, got, c.want)
+		}
+	}
+}

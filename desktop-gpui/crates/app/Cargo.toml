@@ -44,6 +44,8 @@ flume = { workspace = true }
 parking_lot = { workspace = true }
 notify-rust = { workspace = true }
 tempfile = { workspace = true }
+# Microphone capture for voice notes (ALSA on Linux, which the .deb already depends on).
+cpal = "=0.15.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }

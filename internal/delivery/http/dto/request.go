@@ -7,6 +7,8 @@ type SendMessageRequest struct {
 	Target   string   `json:"target" validate:"required"`
 	Message  string   `json:"message" validate:"required"`
 	Mentions []string `json:"mentions,omitempty"`
+	// NoLinkPreview sends plain text even when the message contains a URL.
+	NoLinkPreview bool `json:"noLinkPreview,omitempty"`
 }
 
 type SendMediaRequest struct {

@@ -50,7 +50,7 @@ func (mh *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("[SEND] Sending message to: %s | Content: %s\n", req.Target, req.Message)
 
-	id, err := mh.handler.client.SendMessageWithPreviewAndMentions(context.Background(), req.Target, req.Message, false, req.Mentions)
+	id, err := mh.handler.client.SendText(context.Background(), req.Target, req.Message, false, req.Mentions, req.NoLinkPreview)
 	if err != nil {
 		fmt.Printf("[ERR] Failed to send WhatsApp message: %v\n", err)
 		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())
@@ -269,6 +269,20 @@ func (mh *MessageHandler) SendMedia(w http.ResponseWriter, r *http.Request) {
 		if wfStr := r.FormValue("waveform"); wfStr != "" {
 			if wf, err := base64.StdEncoding.DecodeString(wfStr); err == nil {
 				waveform = wf
+			}
+		}
+		// Recorded voice notes arrive without either: derive both so recipients
+		// see a real waveform and duration instead of a flat bar.
+		if ptt && (len(waveform) == 0 || seconds == 0) {
+			if wf, secs, werr := audioWaveform(data); werr != nil {
+				fmt.Printf("[WARN] PTT waveform failed: %v\n", werr)
+			} else {
+				if len(waveform) == 0 {
+					waveform = wf
+				}
+				if seconds == 0 {
+					seconds = secs
+				}
 			}
 		}
 		fmt.Printf("[SEND] audio mimetype=%s ptt=%v seconds=%d bytes=%d media=%s\n", audioMimetype, ptt, seconds, len(data), mediaURL)

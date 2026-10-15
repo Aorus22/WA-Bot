@@ -25,3 +25,10 @@ pub enum ClientError {
 }
 
 pub type Result<T> = std::result::Result<T, ClientError>;
+
+impl ClientError {
+    /// The backend answered 404 (for a lookup: nothing there).
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, ClientError::Api { status, .. } if *status == reqwest::StatusCode::NOT_FOUND)
+    }
+}

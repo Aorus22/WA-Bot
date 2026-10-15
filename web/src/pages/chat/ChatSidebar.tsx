@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, memo, useMemo } from "react"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Archive, ChevronLeft, Pin, Search, VolumeX } from "lucide-react"
+import { Archive, ChevronLeft, Pin, Search, Star, VolumeX } from "lucide-react"
 import { api, type Chat } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chatStore"
 import { useTypingStore, typistsOf, typingLabel } from "@/stores/typingStore"
 import { toast } from "sonner"
 import { NewGroupDialog, JoinGroupDialog } from "./GroupPanels"
+import { StarredSheet } from "./StarredSheet"
 import { Users, Link as LinkIcon } from "lucide-react"
 import {
     ContextMenu,
@@ -67,6 +68,7 @@ export const ChatSidebar = memo(({
     const [searchQuery, setSearchQuery] = useState("")
     const [newGroupOpen, setNewGroupOpen] = useState(false)
     const [joinGroupOpen, setJoinGroupOpen] = useState(false)
+    const [starredOpen, setStarredOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [archivedMode, setArchivedMode] = useState(false)
     const typing = useTypingStore(s => s.typing)
@@ -241,6 +243,14 @@ export const ChatSidebar = memo(({
                     {!archivedMode && (
                         <div className="flex items-center gap-1">
                             <button
+                                aria-label="Starred messages"
+                                title="Starred messages"
+                                onClick={() => setStarredOpen(true)}
+                                className="rounded-full p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                            >
+                                <Star className="h-4.5 w-4.5" />
+                            </button>
+                            <button
                                 aria-label="New group"
                                 onClick={() => setNewGroupOpen(true)}
                                 className="rounded-full p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
@@ -410,6 +420,20 @@ export const ChatSidebar = memo(({
             </div>
                     <NewGroupDialog open={newGroupOpen} onOpenChange={setNewGroupOpen} />
             <JoinGroupDialog open={joinGroupOpen} onOpenChange={setJoinGroupOpen} />
+            <StarredSheet
+                open={starredOpen}
+                onClose={() => setStarredOpen(false)}
+                onSelect={(message) => {
+                    const target = chats.find(chat => chat.id === message.chatId)
+                    if (!target) {
+                        toast.error("That chat is no longer in your list")
+                        return
+                    }
+                    setStarredOpen(false)
+                    useChatStore.getState().setJumpTarget({ chatId: message.chatId, messageId: message.id })
+                    onChatSelect(target)
+                }}
+            />
 </div>
     )
 })

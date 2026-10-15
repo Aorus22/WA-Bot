@@ -1,7 +1,9 @@
 mod actions;
 mod context_menu;
+pub(crate) mod disappearing;
 mod documents;
 mod viewed_by;
 mod text_menu;
 mod edit_history;
 pub(crate) mod image_menu;
+pub(crate) mod star_pin;

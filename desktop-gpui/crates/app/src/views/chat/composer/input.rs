@@ -32,6 +32,7 @@ impl ChatView {
                 InputEvent::Change => {
                     this.compose_text = textarea.read(cx).value().to_string();
                     this.refresh_mention_query();
+                    this.on_compose_text_changed(cx);
                     cx.notify();
                 }
                 InputEvent::PressEnter { secondary, shift } => {

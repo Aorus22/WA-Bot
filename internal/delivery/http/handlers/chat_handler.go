@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -160,7 +161,34 @@ func (ch *ChatHandler) GetMessageReceipts(w http.ResponseWriter, r *http.Request
 		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ch.handler.sendJSON(w, receipts)
+	// recipients are the members besides us the message went to, so a client
+	// can say who has not read it yet.
+	recipients := []string{}
+	own := map[string]bool{}
+	if ch.handler.client != nil && ch.handler.client.CoreClient() != nil && ch.handler.client.CoreClient().Store != nil {
+		store := ch.handler.client.CoreClient().Store
+		if store.ID != nil {
+			own[store.ID.User] = true
+		}
+		if !store.LID.IsEmpty() {
+			own[store.LID.User] = true
+		}
+	}
+	if group, err := ch.handler.msgRepo.GetGroupCache(vars["chatId"]); err == nil {
+		for _, p := range group.Participants {
+			user := p.JID
+			if i := strings.IndexByte(user, '@'); i >= 0 {
+				user = user[:i]
+			}
+			if !own[user] {
+				recipients = append(recipients, p.JID)
+			}
+		}
+	} else if !strings.HasSuffix(vars["chatId"], "@g.us") {
+		// A private chat has the contact as its only recipient.
+		recipients = append(recipients, vars["chatId"])
+	}
+	ch.handler.sendJSON(w, map[string]interface{}{"receipts": receipts, "total": len(recipients), "recipients": recipients})
 }
 
 func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {

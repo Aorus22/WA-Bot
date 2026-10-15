@@ -1,113 +1,253 @@
 use crate::views::chat::*;
 
+/// "Today at 22:03", "Yesterday at 22:03" or "7 September 2026 at 22:03".
+fn format_receipt_time(timestamp: i64) -> String {
+    let (hours, mins) = crate::localtime::hour_minute(timestamp);
+    format!("{} at {:02}:{:02}", MessageBubbleHelper::format_date_label(timestamp), hours, mins)
+}
+
 impl ChatView {
-    /// "Viewed by" read receipts modal.
-    pub(crate) fn render_viewed_by_dialog(
+    /// Right-hand "Message info" drawer for an outgoing group message: who has
+    /// read it and who only has it delivered, like WhatsApp's own sheet.
+    pub(crate) fn render_message_info_sheet(
         &mut self,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<impl IntoElement> {
+    ) -> AnyElement {
         let theme = *cx.app_theme();
         let border_color = theme.border;
-        let card_bg = theme.card;
-        let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
-        if self.viewed_by_message.is_some() {
-            let receipts = self.viewed_by_receipts.clone();
-            let group = self.group_info.clone();
-            let base_url = Self::compose_base_url(cx);
-            Some(crate::components::motion::modal_in(
-                div()
-                    .id("viewed-by-backdrop")
-                    .absolute()
-                    .occlude()
-                    .inset_0()
-                    .bg(rgba(0x00000099))
-                    .flex()
+        let primary_color = theme.primary;
+        let framed = !crate::popover::is_popover(cx) && window_material::is_framed_window(window);
+        let base_url = Self::compose_base_url(cx);
+        let group = self.group_info.clone();
+        let message = self.viewed_by_message.clone();
+
+        let is_group = message.as_ref().map(|m| m.chat_id.ends_with("@g.us")).unwrap_or(false);
+        let status = message.as_ref().map(|m| m.status.clone()).unwrap_or_default();
+        let user_of = |jid: &str| jid.split('@').next().unwrap_or(jid).to_string();
+
+        // Members who read it, then members who only have it delivered. A read
+        // implies a delivery, so each member shows up once.
+        let mut read: Vec<MessageReceipt> =
+            self.viewed_by_receipts.iter().filter(|r| r.read_at > 0).cloned().collect();
+        read.sort_by_key(|r| r.read_at);
+        let mut delivered: Vec<MessageReceipt> = self
+            .viewed_by_receipts
+            .iter()
+            .filter(|r| r.read_at == 0 && r.delivered_at > 0)
+            .cloned()
+            .collect();
+        delivered.sort_by_key(|r| r.delivered_at);
+        // Members WhatsApp has not reported on yet.
+        let remaining: Vec<String> = self
+            .viewed_by_recipients
+            .iter()
+            .filter(|jid| {
+                !self.viewed_by_receipts.iter().any(|r| {
+                    user_of(&r.jid) == user_of(jid) && (r.read_at > 0 || r.delivered_at > 0)
+                })
+            })
+            .cloned()
+            .collect();
+        let loading = self.is_loading_viewed_by;
+
+        let name_of = {
+            let group = group.clone();
+            move |jid: &str| -> String {
+                group
+                    .as_ref()
+                    .and_then(|group| {
+                        group.participants.iter().find(|member| {
+                            member.jid == jid || member.jid.split('@').next() == jid.split('@').next()
+                        })
+                    })
+                    .and_then(|member| member.name.as_deref())
+                    .filter(|name| !name.trim().is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| jid.split('@').next().unwrap_or(jid).to_string())
+            }
+        };
+        let member_row = {
+            let name_of = name_of.clone();
+            move |jid: &str, at: Option<i64>| -> AnyElement {
+                let name = name_of(jid);
+                h_flex()
                     .items_center()
-                    .justify_center()
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.close_viewed_by(cx)))
+                    .gap_3()
+                    .px_4()
+                    .py_2()
+                    .child(render_avatar(jid, &name, "", false, 40.0, &base_url, &theme))
                     .child(
                         v_flex()
-                            .w(px(380.0))
-                            .max_h(px(520.0))
-                            .p_4()
-                            .gap_3()
-                            .rounded_2xl()
-                            .bg(card_bg)
-                            .border_1()
-                            .border_color(border_color)
-                            .shadow_xl()
-                            .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| cx.stop_propagation()))
-                            .child(
-                                h_flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_base().font_weight(FontWeight::BOLD).text_color(text_color).child("Viewed by"))
-                                    .child(
-                                        div()
-                                            .cursor_pointer()
-                                            .p_1()
-                                            .rounded_full()
-                                            .hover(|style| style.bg(theme.muted.opacity(0.5)))
-                                            .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
-                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.close_viewed_by(cx))),
-                                    ),
-                            )
-                            .child(if self.is_loading_viewed_by {
-                                v_flex()
-                                    .py_8()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(Spinner::new().color(primary_color))
-                                    .child(div().text_sm().text_color(muted_text).child("Loading receipts…"))
-                                    .into_any_element()
-                            } else if receipts.is_empty() {
-                                div()
-                                    .py_8()
-                                    .text_sm()
-                                    .text_color(muted_text)
-                                    .child("No read receipts reported yet.")
-                                    .into_any_element()
-                            } else {
-                                v_flex()
-                                    .max_h(px(400.0))
-                                    .overflow_y_scrollbar()
-                                    .gap_1()
-                                    .children(receipts.into_iter().map(|receipt| {
-                                        let participant = group.as_ref().and_then(|group| group.participants.iter().find(|member| {
-                                            member.jid == receipt.jid || member.jid.split('@').next() == receipt.jid.split('@').next()
-                                        }));
-                                        let name = participant
-                                            .and_then(|member| member.name.as_deref())
-                                            .filter(|name| !name.trim().is_empty())
-                                            .map(str::to_string)
-                                            .unwrap_or_else(|| receipt.jid.split('@').next().unwrap_or(&receipt.jid).to_string());
-                                        h_flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .gap_3()
-                                            .px_2()
-                                            .py_2()
-                                            .rounded_lg()
-                                            .child(
-                                                h_flex()
-                                                    .min_w_0()
-                                                    .items_center()
-                                                    .gap_3()
-                                                    .child(render_avatar(&receipt.jid, &name, "", false, 36.0, &base_url, &theme))
-                                                    .child(div().text_sm().text_color(text_color).child(name)),
-                                            )
-                                            .child(div().text_xs().text_color(muted_text).child(Self::format_chat_time(receipt.read_at)))
-                                            .into_any_element()
-                                    }))
-                                    .into_any_element()
-                            }),
-                    ),
-                "viewed-by-in",
-            ))
-        } else {
-            None
+                            .min_w_0()
+                            .child(div().text_sm().text_color(text_color).child(name))
+                            .children(at.map(|at| {
+                                div().text_xs().text_color(muted_text).child(format_receipt_time(at))
+                            })),
+                    )
+                    .into_any_element()
+            }
+        };
+
+        let section_header = |label: &'static str, tick: &'static [u8], tick_color: Hsla| {
+            h_flex()
+                .items_center()
+                .gap_3()
+                .px_4()
+                .pt_4()
+                .pb_1()
+                .child(svg().data(tick).size(px(16.0)).text_color(tick_color))
+                .child(div().text_sm().text_color(muted_text).child(label))
+        };
+        // A private chat has one recipient, so each stage is one line with its time.
+        let stage_row = |label: &'static str, tick_color: Hsla, at: i64, known: bool| {
+            v_flex()
+                .px_4()
+                .py_2()
+                .gap_0p5()
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap_3()
+                        .child(svg().data(CHECK_CHECK_SVG).size(px(16.0)).text_color(tick_color))
+                        .child(div().text_sm().text_color(text_color).child(label)),
+                )
+                .child(div().pl(px(28.0)).text_xs().text_color(muted_text).child(if at > 0 {
+                    format_receipt_time(at)
+                } else if known {
+                    "Time not recorded".to_string()
+                } else {
+                    "—".to_string()
+                }))
+        };
+
+        let mut body = v_flex().id("message-info-scroll").flex_1().overflow_y_scroll().pb_4();
+
+        if let Some(message) = message.as_ref() {
+            let text = MessageBubbleHelper::decode_content(&message.content);
+            let text = if text.trim().is_empty() {
+                format!("[{}]", message.message_type)
+            } else {
+                text
+            };
+            body = body.child(
+                h_flex().w_full().justify_end().px_4().py_4().child(
+                    div()
+                        .max_w(px(260.0))
+                        .px_3()
+                        .py_2()
+                        .rounded_lg()
+                        .bg(primary_color.opacity(0.22))
+                        .text_sm()
+                        .text_color(text_color)
+                        .child(text),
+                ),
+            );
         }
+
+        if loading {
+            body = body.child(
+                v_flex()
+                    .py_8()
+                    .items_center()
+                    .gap_2()
+                    .child(Spinner::new().color(primary_color))
+                    .child(div().text_sm().text_color(muted_text).child("Loading…")),
+            );
+        } else if !is_group {
+            // The stored tick covers messages that predate per-stage times.
+            let read_at = read.first().map(|r| r.read_at).unwrap_or(0);
+            let delivered_at = self
+                .viewed_by_receipts
+                .iter()
+                .map(|r| if r.delivered_at > 0 { r.delivered_at } else { r.read_at })
+                .find(|at| *at > 0)
+                .unwrap_or(0);
+            let is_read = read_at > 0 || status == "read";
+            let is_delivered = is_read || delivered_at > 0 || status == "delivered";
+            if is_read {
+                body = body.child(stage_row("Read", rgb(0x53bdeb).into(), read_at, true));
+            }
+            if is_delivered {
+                body = body.child(stage_row("Delivered", muted_text, delivered_at, true));
+            }
+            if !is_delivered {
+                body = body.child(
+                    div().px_4().py_8().text_sm().text_color(muted_text).child("Not delivered yet."),
+                );
+            }
+        } else if read.is_empty() && delivered.is_empty() && remaining.is_empty() {
+            body = body.child(
+                div()
+                    .px_4()
+                    .py_8()
+                    .text_sm()
+                    .text_color(muted_text)
+                    .child("No receipts reported yet."),
+            );
+        } else {
+            if !read.is_empty() {
+                body = body.child(section_header("Read by", CHECK_CHECK_SVG, rgb(0x53bdeb).into()));
+                for receipt in &read {
+                    body = body.child(member_row(&receipt.jid, Some(receipt.read_at)));
+                }
+            }
+            if !delivered.is_empty() {
+                body = body.child(section_header("Delivered to", CHECK_CHECK_SVG, muted_text));
+                for receipt in &delivered {
+                    body = body.child(member_row(&receipt.jid, Some(receipt.delivered_at)));
+                }
+            }
+            if !remaining.is_empty() {
+                body = body.child(section_header("Remaining", CHECK_SVG, muted_text));
+                for jid in &remaining {
+                    body = body.child(member_row(jid, None));
+                }
+            }
+        }
+
+        v_flex()
+            .w(px(SHEET_WIDTH))
+            .min_w(px(SHEET_WIDTH))
+            .max_w(px(SHEET_WIDTH))
+            .h_full()
+            .overflow_hidden()
+            .border_l_1()
+            .border_color(border_color.opacity(0.4))
+            .bg(theme.background)
+            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
+            .flex_shrink_0()
+            .child(
+                h_flex()
+                    .px_4()
+                    .py_3()
+                    .gap_3()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(border_color.opacity(0.4))
+                    .bg(theme.muted.opacity(0.2))
+                    .child(
+                        div()
+                            .id("btn-close-message-info")
+                            .cursor_pointer()
+                            .p_1()
+                            .rounded_full()
+                            .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                            .tooltip(move |window, cx| Tooltip::new("Close").build(window, cx))
+                            .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.close_viewed_by(cx))),
+                    )
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(text_color)
+                            .child("Message info"),
+                    ),
+            )
+            .child(body)
+            .into_any_element()
     }
 }

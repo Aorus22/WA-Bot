@@ -28,6 +28,8 @@ pub struct MessageContextMenu {
     pub position: Point<Pixels>,
     /// Showing the full emoji list instead of the actions (the "+" / React rows).
     pub reaction_picker: bool,
+    /// Showing the pin-length choices instead of the actions (the Pin row).
+    pub pin_picker: bool,
 }
 
 /// Right-click menu for a picture (copy it, save it).
@@ -70,6 +72,22 @@ pub struct RenderMessage {
     pub time_str: String,
     pub ticks: MessageTicks,
     pub quoted: Option<(String, String)>, // (sender_name, first_line)
+}
+
+/// The link-preview card shown above the composer for the URL being typed.
+#[derive(Clone, Debug)]
+pub struct ComposeLinkPreview {
+    pub url: String,
+    pub preview: LinkPreview,
+}
+
+/// A voice note being recorded. The microphone opens in the background, so
+/// `recorder` is empty until it answers (or forever, if it fails).
+pub struct VoiceDraft {
+    /// Tells this recording's callbacks apart from an earlier, cancelled one.
+    pub seq: u64,
+    pub chat_id: String,
+    pub recorder: Option<crate::voice_recorder::VoiceRecorder>,
 }
 
 /// An image pasted into the composer, waiting to be sent (with the typed text

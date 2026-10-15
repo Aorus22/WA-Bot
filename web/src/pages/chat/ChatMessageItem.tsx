@@ -1,15 +1,27 @@
-import { useRef, memo } from "react"
+import { useRef, useState, memo } from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot, Mic, Forward, SmilePlus } from "lucide-react"
+import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot, Mic, Forward, SmilePlus, Star, Pin, PinOff, Hourglass } from "lucide-react"
 import { LazyMedia } from "@/components/LazyMedia"
 import { isMarkdownContent } from "./renderMd"
 import { WAAudioPlayer } from "./WAAudioPlayer"
-import { PollBubble, LocationBubble, ContactBubble, ReactionChips, ForwardedLabel, LinkPreviewCard, ViewOnceStrip } from "./MessageBubbles"
+import { PollBubble, LocationBubble, ContactBubble, ReactionChips, ForwardedLabel, LinkPreviewCard, ViewOnceStrip, StatusReplyQuote } from "./MessageBubbles"
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "👎"]
+
+const PIN_DURATIONS = [
+	{ label: "24 hours", seconds: 86400 },
+	{ label: "7 days", seconds: 604800 },
+	{ label: "30 days", seconds: 2592000 },
+]
+
+// What the hourglass in a bubble says. The message stays here either way.
+const disappearingLabel = (expiresAt: number) =>
+	Date.now() < expiresAt
+		? `Disappears ${new Date(expiresAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+		: "Disappeared on phone · kept here"
 
 export const ChatMessageItem = memo(({
 	message,
@@ -34,7 +46,13 @@ export const ChatMessageItem = memo(({
 	onReact,
 	onForward,
 	onVote,
+	onStar,
+	onPin,
+	isPinned,
 }: any) => {
+	const [menuOpen, setMenuOpen] = useState(false)
+	// Second step of the Pin item: pick how long it stays pinned.
+	const [pinStep, setPinStep] = useState(false)
 	const swipeRef = useRef(0)
 	const rowRef = useRef<HTMLDivElement>(null)
 	const iconRef = useRef<HTMLDivElement>(null)
@@ -147,7 +165,11 @@ export const ChatMessageItem = memo(({
 
 						<ReactionChips reactions={message.reactions} isMe={isMe} onReact={onReact} />
 
-						{repliedMsg && (
+						{message.extra?.statusReply && (
+							<StatusReplyQuote reply={message.extra.statusReply} getMediaUrl={getMediaUrl} />
+						)}
+
+						{repliedMsg && !message.extra?.statusReply && (
 						<div
 						        className="mb-0 p-2 bg-black/5 dark:bg-white/5 border-l-4 border-primary text-[12px] opacity-80 cursor-pointer hover:opacity-100 transition-opacity relative z-10 max-w-[65vw] sm:max-w-[320px] overflow-hidden"
 						        onClick={() => onNavigateToReply?.(repliedMsg.id)}
@@ -301,7 +323,7 @@ export const ChatMessageItem = memo(({
 							{message.content && !["[Image]", "[Video]", "[Sticker]", "[Document]", "[Audio]", "[Voice Message]", "[GIF]", "[Lokasi]", "[Lokasi Langsung]", "[Kontak]", "[Sekali Lihat]"].includes(message.content) && !isDocument && !isAudio && !isPoll && !isLocation && !isContact && (
 								        <div className={cn("break-words [word-break:break-word] leading-relaxed relative z-10", !isMarkdownContent(displayContent) && "whitespace-pre-wrap")}>{renderFormattedContent(displayContent)}</div>
 							)}
-							{!(isAudio && isMedia) && (
+							<>
 								<div className={cn("flex items-center gap-1.5 mt-1 justify-end", "text-[10px] font-medium opacity-50 uppercase tracking-tight")}>
 								{message.isAutomatic && (
 									<div className={cn(
@@ -339,6 +361,13 @@ export const ChatMessageItem = memo(({
 											))}
 										</PopoverContent>
 									</Popover>
+								)}
+								{isPinned && <Pin className="h-3 w-3" aria-label="Pinned" />}
+								{message.starred && <Star className="h-3 w-3 fill-current" aria-label="Starred" />}
+								{message.extra?.disappearing && (
+									<span title={disappearingLabel(message.extra.disappearing.expiresAt)} className="flex items-center">
+										<Hourglass className="h-3 w-3" />
+									</span>
 								)}
 								<span>{formatTime(message.timestamp)}</span>
 								{isMe && (
@@ -400,7 +429,7 @@ export const ChatMessageItem = memo(({
 									</div>
 								)}
 
-								<Popover>
+								<Popover open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); if (!open) setPinStep(false) }}>
 									<PopoverTrigger asChild>
 										<div className="absolute inset-0 z-0 cursor-context-menu" onContextMenu={(e) => { if (isSticker) return; e.preventDefault(); e.currentTarget.click(); }} />
 									</PopoverTrigger>
@@ -421,6 +450,19 @@ export const ChatMessageItem = memo(({
 												})}
 											</div>
 											<button onClick={onReply} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Reply className="h-4 w-4 text-primary" /><span className="font-medium">Reply</span></button>
+											<button onClick={() => { setMenuOpen(false); onStar?.() }} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Star className={cn("h-4 w-4 text-primary", message.starred && "fill-current")} /><span className="font-medium">{message.starred ? "Unstar" : "Star"}</span></button>
+											{pinStep ? (
+												<div className="flex flex-col border-y border-border/40 my-1 py-1">
+													<p className="px-2.5 py-1 text-xs text-muted-foreground">Pin for how long?</p>
+													{PIN_DURATIONS.map((option) => (
+														<button key={option.seconds} onClick={() => { setMenuOpen(false); onPin?.(option.seconds) }} className="flex items-center gap-3 w-full px-2.5 py-2 hover:bg-muted rounded-lg text-sm transition-colors"><span className="font-medium">{option.label}</span>{option.seconds === 604800 && <span className="ml-auto text-[10px] text-muted-foreground">default</span>}</button>
+													))}
+												</div>
+											) : isPinned ? (
+												<button onClick={() => { setMenuOpen(false); onPin?.(null) }} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><PinOff className="h-4 w-4 text-primary" /><span className="font-medium">Unpin</span></button>
+											) : (
+												<button onClick={() => setPinStep(true)} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Pin className="h-4 w-4 text-primary" /><span className="font-medium">Pin</span></button>
+											)}
 											<button onClick={() => onForward?.()} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Forward className="h-4 w-4 text-primary" /><span className="font-medium">Forward</span></button>
 											<button onClick={() => {
 												const picker = document.createElement("input")
@@ -435,8 +477,8 @@ export const ChatMessageItem = memo(({
 													<button onClick={onDelete} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors text-destructive"><Trash2 className="h-4 w-4" /><span className="font-medium">Delete for everyone</span></button>
 												</>
 											)}
-											{isMe && chat?.isGroup && (
-												<button onClick={onViewedBy} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><span className="w-4 text-center text-primary">✓✓</span><span className="font-medium">Viewed by</span></button>
+											{isMe && (
+												<button onClick={onViewedBy} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><span className="w-4 text-center text-primary">✓✓</span><span className="font-medium">Message info</span></button>
 											)}
 										</div>
 									</PopoverContent>
@@ -447,7 +489,7 @@ export const ChatMessageItem = memo(({
 									</div>
 								)}
 								</div>
-							)}
+							</>
 						</div>
 					)}
 				</div>

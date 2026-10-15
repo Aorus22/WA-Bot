@@ -210,6 +210,7 @@ mod tests {
             forwarded: None,
             reactions: None,
             extra: None,
+            ..Default::default()
         }
     }
 

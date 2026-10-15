@@ -321,15 +321,42 @@ impl HttpClient {
     }
 
     pub async fn send_message(&self, target: &str, message: &str, mentions: &[String]) -> Result<IdResult> {
+        self.send_message_with_preview(target, message, mentions, false).await
+    }
+
+    /// `no_link_preview` sends plain text even when it holds a link; otherwise
+    /// the backend attaches the link's preview card by itself.
+    pub async fn send_message_with_preview(
+        &self,
+        target: &str,
+        message: &str,
+        mentions: &[String],
+        no_link_preview: bool,
+    ) -> Result<IdResult> {
+        let mut body = json!({
+            "secret": "default-secret",
+            "target": target,
+            "message": message,
+            "mentions": mentions,
+        });
+        if no_link_preview {
+            body["noLinkPreview"] = json!(true);
+        }
         let resp = self
             .client
             .post(format!("{}/send-message", self.base_url))
-            .json(&json!({
-                "secret": "default-secret",
-                "target": target,
-                "message": message,
-                "mentions": mentions,
-            }))
+            .json(&body)
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    /// Scrape `url` for a preview card. 404 (an `Api` error) means nothing
+    /// could be scraped.
+    pub async fn get_link_preview(&self, url: &str) -> Result<LinkPreview> {
+        let resp = self
+            .client
+            .get(format!("{}/link-preview?url={}", self.base_url, urlencoding(url)))
             .send()
             .await?;
         Self::handle_response(resp).await
@@ -390,7 +417,85 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
-    pub async fn get_message_receipts(&self, chat_id: &str, id: &str) -> Result<Vec<MessageReceipt>> {
+    pub async fn star_message(&self, chat_id: &str, id: &str, starred: bool) -> Result<StarResult> {
+        let resp = self
+            .client
+            .post(format!(
+                "{}/chats/{}/messages/{}/star",
+                self.base_url,
+                urlencoding(chat_id),
+                urlencoding(id)
+            ))
+            .json(&json!({ "starred": starred }))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    /// Starred messages, newest-starred first. `before` is a `starred_at` (ms)
+    /// to page past; `chat_id` narrows it to one chat.
+    pub async fn get_starred(
+        &self,
+        chat_id: Option<&str>,
+        limit: Option<usize>,
+        before: Option<i64>,
+    ) -> Result<Vec<Message>> {
+        let mut url = format!("{}/starred?limit={}", self.base_url, limit.unwrap_or(100));
+        if let Some(c) = chat_id {
+            url.push_str(&format!("&chatId={}", urlencoding(c)));
+        }
+        if let Some(b) = before {
+            url.push_str(&format!("&before={}", b));
+        }
+        let resp = self.client.get(url).send().await?;
+        Self::handle_response(resp).await
+    }
+
+    /// Pin or unpin a message inside its chat. `duration` is in seconds
+    /// (86400, 604800 or 2592000) and only matters when pinning.
+    pub async fn pin_message(
+        &self,
+        chat_id: &str,
+        id: &str,
+        pinned: bool,
+        duration: u32,
+    ) -> Result<PinResult> {
+        let resp = self
+            .client
+            .post(format!(
+                "{}/chats/{}/messages/{}/pin",
+                self.base_url,
+                urlencoding(chat_id),
+                urlencoding(id)
+            ))
+            .json(&json!({ "pinned": pinned, "duration": duration }))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    /// The chat's active pins, newest first.
+    pub async fn get_chat_pins(&self, chat_id: &str) -> Result<Vec<PinnedMessage>> {
+        let resp = self
+            .client
+            .get(format!("{}/chats/{}/pins", self.base_url, urlencoding(chat_id)))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    /// Set the chat's disappearing timer: 0 (off), 86400, 604800 or 7776000.
+    pub async fn set_disappearing(&self, chat_id: &str, seconds: u32) -> Result<DisappearingResult> {
+        let resp = self
+            .client
+            .post(format!("{}/chats/{}/disappearing", self.base_url, urlencoding(chat_id)))
+            .json(&json!({ "seconds": seconds }))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    pub async fn get_message_receipts(&self, chat_id: &str, id: &str) -> Result<MessageReceipts> {
         let resp = self
             .client
             .get(format!(
@@ -845,6 +950,17 @@ impl HttpClient {
         let resp = self
             .client
             .post(format!("{}/statuses/{}/viewed", self.base_url, urlencoding(id)))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    /// Reply to someone's status; the reply lands in the 1:1 chat with them.
+    pub async fn reply_status(&self, id: &str, text: &str) -> Result<StatusReplyResult> {
+        let resp = self
+            .client
+            .post(format!("{}/statuses/{}/reply", self.base_url, urlencoding(id)))
+            .json(&json!({ "text": text }))
             .send()
             .await?;
         Self::handle_response(resp).await
