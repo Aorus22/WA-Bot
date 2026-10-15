@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from urllib.parse import quote
 
+from typing import Any, Callable
+
 from PySide6.QtCore import QByteArray, QObject, QUrl, Signal, Slot
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
@@ -19,6 +21,7 @@ class Api(QObject):
         super().__init__(parent)
         self._backend = backend
         self._nam = QNetworkAccessManager(self)
+        self._py: dict[str, Callable[[int, Any], None]] = {}
 
     @Slot(str, result=str)
     def enc(self, value: str) -> str:
@@ -35,6 +38,16 @@ class Api(QObject):
         if value == "/api" or value.startswith("/api/"):
             return api.removesuffix("/api") + value
         return f"{api}{'' if value.startswith('/') else '/'}{value}"
+
+    def fetch(self, method: str, path: str, body: Any = None,
+              cb: Callable[[int, Any], None] | None = None) -> None:
+        """Python-side call: `cb(status, parsed_json_or_text)`; status 0 = transport failure.
+        `body` is a JSON-serialisable object or None."""
+        self._seq = getattr(self, "_seq", 0) + 1
+        token = f"py:{self._seq}"
+        if cb:
+            self._py[token] = cb
+        self.request(method, path, json.dumps(body) if body is not None else "", token)
 
     @Slot(str, str, str, str)
     def request(self, method: str, path: str, body: str, token: str) -> None:
@@ -57,4 +70,12 @@ class Api(QObject):
         if reply.error() != QNetworkReply.NetworkError.NoError and not status:
             payload = json.dumps({"error": reply.errorString()})
         reply.deleteLater()
+        cb = self._py.pop(token, None)
+        if cb:
+            try:
+                parsed: Any = json.loads(payload) if payload else None
+            except ValueError:
+                parsed = payload
+            cb(int(status), parsed)
+            return
         self.finished.emit(token, int(status), payload)
