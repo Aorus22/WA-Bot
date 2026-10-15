@@ -11,6 +11,9 @@ impl ChatView {
         let theme = *cx.app_theme();
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
+        if self.chat_select_mode {
+            return self.render_chat_selection_bar(cx);
+        }
         if self.archived_mode {
             return v_flex()
                 .px_4()
@@ -84,22 +87,6 @@ impl ChatView {
                         h_flex()
                             .items_center()
                             .gap_1()
-                            // Starred messages
-                            .child(
-                                div()
-                                    .id("btn-starred-messages")
-                                    .cursor_pointer()
-                                    .p_2()
-                                    .rounded_full()
-                                    .hover(|s| s.bg(theme.muted.opacity(0.65)))
-                                    .tooltip(move |window, cx| {
-                                        Tooltip::new("Starred messages").build(window, cx)
-                                    })
-                                    .child(svg().data(STAR_SVG).size(px(18.0)).text_color(muted_text))
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                        this.toggle_starred_sheet(cx);
-                                    })),
-                            )
                             // New Group Button
                             .child(
                                 div()
@@ -120,26 +107,21 @@ impl ChatView {
                                         cx.notify();
                                     })),
                             )
-                            // Join Group via Link Button
+                            // Three-dot menu: starred, join via link, mark all read, log out
                             .child(
                                 div()
-                                    .id("btn-join-group")
+                                    .id("btn-sidebar-menu")
                                     .cursor_pointer()
                                     .p_2()
                                     .rounded_full()
                                     .hover(|s| s.bg(theme.muted.opacity(0.65)))
-                                    .tooltip(move |window, cx| {
-                                        Tooltip::new("Join Group via Link").build(window, cx)
-                                    })
-                                    .child(svg().data(LINK_SVG).size(px(18.0)).text_color(muted_text))
-                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                        this.is_join_group_open = true;
-                                        if let Some(field) = this.join_link_field.clone() {
-                                            field.focus(window, cx);
-                                        }
-                                        cx.notify();
+                                    .tooltip(move |window, cx| Tooltip::new("Menu").build(window, cx))
+                                    .child(svg().data(MORE_VERTICAL_SVG).size(px(18.0)).text_color(muted_text))
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                                        cx.stop_propagation();
+                                        this.open_header_menu(HeaderMenuKind::Sidebar, ev.position, cx);
                                     })),
-                            ),
+                            )
                     ),
             )
             // Search Box

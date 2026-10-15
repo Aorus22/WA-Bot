@@ -50,16 +50,28 @@ impl ChatView {
             let is_pinned = this.is_pinned(&r_msg.msg.id);
             // The quoted line is cached as raw text; resolve the original's
             // mentions here so it shows names instead of numeric IDs.
+            let quoted_original = reply_to_id
+                .as_deref()
+                .and_then(|rid| this.cached_render_messages.iter().find(|m| m.msg.id == rid))
+                .map(|m| m.msg.clone());
             let quoted = quoted.map(|(sender, line)| {
-                let original = reply_to_id.as_deref().and_then(|rid| {
-                    this.cached_render_messages.iter().find(|m| m.msg.id == rid)
-                });
-                let (line, spans) = match original {
-                    Some(original) => render_message_mentions_with_spans(&line, &original.msg, this.group_info.as_ref()),
+                let (line, spans) = match quoted_original.as_ref() {
+                    Some(original) => render_message_mentions_with_spans(&line, original, this.group_info.as_ref()),
                     None => (line, Vec::new()),
                 };
-                (sender, line, spans)
+                // A picture, voice note or file has no text to quote: say what it is.
+                let is_placeholder = line.trim().is_empty() || (line.starts_with('[') && line.ends_with(']'));
+                match quoted_original.as_ref() {
+                    Some(original) if is_placeholder => (sender, quote_media_label(original), Vec::new()),
+                    _ => (sender, line, spans),
+                }
             });
+            // Pictures and stickers show a small thumbnail at the end of the quote.
+            let quoted_thumb = quoted_original
+                .as_ref()
+                .filter(|m| matches!(m.message_type.as_str(), "image" | "sticker" | "gif"))
+                .and_then(|m| m.media_url.as_deref())
+                .map(|url| resolve_media_url(url, &base_url));
             let msg_clone = r_msg.msg.clone();
 
             let msg_type = r_msg.msg.message_type.as_str();
@@ -200,13 +212,18 @@ impl ChatView {
                 )
                 // Quoted reply box matching Web
                 .children(if let Some((q_sender, q_line, q_spans)) = quoted {
+                    let quote_hover_bg = theme.muted.opacity(0.6);
                     Some(
-                        v_flex()
+                        h_flex()
+                            .id(format!("quote-{}", r_msg.msg.id))
                             .cursor_pointer()
                             .mb_1()
+                            .items_center()
+                            .gap_2()
                             .px_2p5()
                             .py_1p5()
                             .bg(theme.muted.opacity(0.35))
+                            .hover(move |s| s.bg(quote_hover_bg))
                             .border_l_4()
                             .border_color(primary_color)
                             .rounded_r_lg()
@@ -214,33 +231,48 @@ impl ChatView {
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let target = reply_to_id.clone();
                                 move |this, _, _, cx| {
+                                    cx.stop_propagation();
                                     if let Some(target) = target.as_deref() {
                                         this.navigate_to_message(target, cx);
                                     }
                                 }
                             }))
                             .child(
-                                div()
-                                    .chat_text(0.75, 1.0, chat_scale)
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(primary_color)
-                                    .child(q_sender),
-                            )
-                            .child(
-                                div()
-                                    .chat_text(0.75, 1.0, chat_scale)
-                                    .text_color(muted_text)
-                                    .overflow_hidden()
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
                                     .child(
-                                        StyledText::new(q_line).with_highlights(q_spans.into_iter().map(|span| {
-                                            (span.range, HighlightStyle {
-                                                color: Some(mention_color),
-                                                font_weight: Some(FontWeight::MEDIUM),
-                                                ..Default::default()
-                                            })
-                                        })),
+                                        div()
+                                            .chat_text(0.75, 1.0, chat_scale)
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(primary_color)
+                                            .child(q_sender),
+                                    )
+                                    .child(
+                                        div()
+                                            .chat_text(0.75, 1.0, chat_scale)
+                                            .text_color(muted_text)
+                                            .overflow_hidden()
+                                            .child(
+                                                StyledText::new(q_line).with_highlights(q_spans.into_iter().map(|span| {
+                                                    (span.range, HighlightStyle {
+                                                        color: Some(mention_color),
+                                                        font_weight: Some(FontWeight::MEDIUM),
+                                                        ..Default::default()
+                                                    })
+                                                })),
+                                            ),
                                     ),
-                            ),
+                            )
+                            .children(quoted_thumb.map(|url| {
+                                img(url)
+                                    .id(format!("quote-thumb-{}", r_msg.msg.id))
+                                    .w(px(40.0))
+                                    .h(px(40.0))
+                                    .flex_shrink_0()
+                                    .rounded_md()
+                                    .object_fit(ObjectFit::Cover)
+                            })),
                     )
                 } else {
                     None

@@ -137,33 +137,23 @@ impl ChatView {
                     .items_center()
                     .gap_1()
                     .child(
-                        div()
-                            .id("btn-header-phone")
-                            .cursor_pointer()
-                            .p_2()
-                            .rounded_full()
-                            .hover(|s| s.bg(theme.muted.opacity(0.65)))
-                            .tooltip(move |window, cx| {
-                                Tooltip::new(if is_group_chat { "Group voice call" } else { "Voice call" }).build(window, cx)
-                            })
-                            .child(svg().data(PHONE_SVG).size(px(18.0)).text_color(muted_text))
-                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                this.start_call(false, cx);
-                            })),
-                    )
-                    .child(
-                        div()
+                        h_flex()
                             .id("btn-header-video")
                             .cursor_pointer()
-                            .p_2()
+                            .items_center()
+                            .gap_0p5()
+                            .px_2()
+                            .py_2()
                             .rounded_full()
                             .hover(|s| s.bg(theme.muted.opacity(0.65)))
                             .tooltip(move |window, cx| {
-                                Tooltip::new(if is_group_chat { "Group video call" } else { "Video call" }).build(window, cx)
+                                Tooltip::new(if is_group_chat { "Group call" } else { "Call" }).build(window, cx)
                             })
                             .child(svg().data(VIDEO_SVG).size(px(18.0)).text_color(muted_text))
-                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                this.start_call(true, cx);
+                            .child(svg().data(CHEVRON_RIGHT_SVG).size(px(11.0)).text_color(muted_text))
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.open_header_menu(HeaderMenuKind::Call, ev.position, cx);
                             })),
                     )
                     .child(
@@ -189,11 +179,12 @@ impl ChatView {
                             .rounded_full()
                             .hover(|s| s.bg(theme.muted.opacity(0.65)))
                             .tooltip(move |window, cx| {
-                                Tooltip::new("Chat info").build(window, cx)
+                                Tooltip::new("Menu").build(window, cx)
                             })
                             .child(svg().data(MORE_VERTICAL_SVG).size(px(18.0)).text_color(muted_text))
-                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                this.toggle_info_sheet(cx);
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.open_header_menu(HeaderMenuKind::Chat, ev.position, cx);
                             })),
                     )
             })

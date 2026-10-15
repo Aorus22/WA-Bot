@@ -78,10 +78,29 @@ pub struct ChatView {
 
     // Context menu popup on sidebar chat right click
     pub chat_context_menu: Option<ChatContextMenu>,
+    /// Dropdown opened from a header button.
+    pub header_menu: Option<HeaderMenu>,
+    /// When set, the contact picker adds members to this group instead of creating one.
+    pub add_members_for: Option<String>,
+    pub is_exporting_chat: bool,
+    /// Select-messages mode: bubbles get checkboxes and the header becomes an action bar.
+    pub select_mode: bool,
+    pub selected_messages: HashSet<String>,
+    /// Delete in the selection bar needs a second click.
+    pub select_confirm_delete: bool,
+    /// Messages a multi-forward sends, in order (empty for a single forward).
+    pub forward_ids: Vec<String>,
+    /// Select-chats mode in the chat list.
+    pub chat_select_mode: bool,
+    pub selected_chats: HashSet<String>,
 
     // Chat Info Sheet drawer (Right side)
     pub is_info_sheet_open: bool,
     pub info_sheet_tab: InfoSheetTab,
+    /// The info drawer shows the Media / Docs / Links page instead of the main one.
+    pub info_media_open: bool,
+    /// Exit group needs a second click.
+    pub info_confirm_exit: bool,
     pub info_media: Vec<Message>,
     pub info_docs: Vec<Message>,
     pub info_links: Vec<Message>,
@@ -248,9 +267,20 @@ impl ChatView {
             forward_selected: HashSet::new(),
             is_forwarding: false,
             chat_context_menu: None,
+            header_menu: None,
+            add_members_for: None,
+            is_exporting_chat: false,
+            select_mode: false,
+            selected_messages: HashSet::new(),
+            select_confirm_delete: false,
+            forward_ids: Vec::new(),
+            chat_select_mode: false,
+            selected_chats: HashSet::new(),
 
             is_info_sheet_open: false,
             info_sheet_tab: InfoSheetTab::Media,
+            info_media_open: false,
+            info_confirm_exit: false,
             info_media: Vec::new(),
             info_docs: Vec::new(),
             info_links: Vec::new(),
@@ -516,7 +546,12 @@ impl Render for ChatView {
             {
                 let chat = selected_chat.clone().unwrap();
 
-                Some(self.render_info_sheet(window, cx, &chat))
+                // The pages layout has no column to spare: the info page covers the window.
+                if pages {
+                    Some(div().absolute().inset_0().child(self.render_info_sheet(window, cx, &chat, true)).into_any_element())
+                } else {
+                    Some(self.render_info_sheet(window, cx, &chat, false))
+                }
             } else if (self.viewed_by_message.is_some() || self.viewed_by_closing)
                 && selected_chat.is_some()
             {
@@ -555,6 +590,7 @@ impl Render for ChatView {
             // CHAT SIDEBAR CONTEXT MENU POPOVER (RIGHT-CLICK ON CHAT)
             // ====================================================
             .children(self.render_chat_context_menu(window, cx))
+            .children(self.render_header_menu(window, cx))
             // ====================================================
             // MODAL: NEW GROUP DIALOG
             // ====================================================

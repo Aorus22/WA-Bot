@@ -3,6 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import type { Message } from "@/lib/api"
 import { FileText, MoreVertical, Reply, Edit3, Trash2, Download, ExternalLink, Bot, Mic, Forward, SmilePlus, Star, Pin, PinOff, Hourglass, Ban } from "lucide-react"
 import { LazyMedia } from "@/components/LazyMedia"
 import { isMarkdownContent } from "./renderMd"
@@ -22,6 +23,24 @@ const disappearingLabel = (expiresAt: number) =>
 	Date.now() < expiresAt
 		? `Disappears ${new Date(expiresAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
 		: "Disappeared on phone · kept here"
+
+/** What a reply quote says when the original has no text of its own. */
+function quoteMediaLabel(message: Partial<Message>): string {
+	switch (message.type) {
+		case "image": return "📷 Photo"
+		case "video": return "🎥 Video"
+		case "gif": return "GIF"
+		case "sticker": return "Sticker"
+		case "audio":
+		case "ptt":
+		case "voice": return "🎤 Voice message"
+		case "document": return `📄 ${message.content && !message.content.startsWith("[") ? message.content : "Document"}`
+		case "location": return "📍 Location"
+		case "contact": return "👤 Contact"
+		case "poll": return "📊 Poll"
+		default: return "Open original message"
+	}
+}
 
 export const ChatMessageItem = memo(({
 	message,
@@ -170,14 +189,25 @@ export const ChatMessageItem = memo(({
 							<StatusReplyQuote reply={message.extra.statusReply} getMediaUrl={getMediaUrl} />
 						)}
 
-						{repliedMsg && !message.extra?.statusReply && (
-						<div
-						        className="mb-0 p-2 bg-black/5 dark:bg-white/5 border-l-4 border-primary text-[12px] opacity-80 cursor-pointer hover:opacity-100 transition-opacity relative z-10 max-w-[65vw] sm:max-w-[320px] overflow-hidden"
-						        onClick={() => onNavigateToReply?.(repliedMsg.id)}
-						>							<p className="font-bold text-primary truncate">{repliedMsg.from === "me" ? "You" : repliedMsg.senderName || "Unknown"}</p>
-							<p className="truncate opacity-70">{repliedMsg.content || "Open original message"}</p>
-						</div>
-					)}
+						{repliedMsg && !message.extra?.statusReply && (() => {
+							const original = repliedMsg as Partial<Message>
+							const text = (original.content || "").trim()
+							const placeholder = !text || (text.startsWith("[") && text.endsWith("]"))
+							const label = !placeholder ? text : quoteMediaLabel(original)
+							const thumb = original.mediaUrl && ["image", "sticker", "gif"].includes(original.type || "") ? getMediaUrl(original.mediaUrl) : ""
+							return (
+								<div
+									className="mb-0 p-2 bg-black/5 dark:bg-white/5 border-l-4 border-primary text-[12px] opacity-80 cursor-pointer hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/10 transition relative z-10 max-w-[65vw] sm:max-w-[320px] overflow-hidden flex items-center gap-2"
+									onClick={() => onNavigateToReply?.(repliedMsg.id)}
+								>
+									<div className="min-w-0 flex-1">
+										<p className="font-bold text-primary truncate">{repliedMsg.from === "me" ? "You" : (repliedMsg as Partial<Message>).senderName || "Unknown"}</p>
+										<p className="truncate opacity-70">{label}</p>
+									</div>
+									{thumb && <img src={thumb} alt="" className="h-10 w-10 rounded object-cover shrink-0" />}
+								</div>
+							)
+						})()}
 
 					{isSticker ? (
 					        <div className="relative group/sticker cursor-pointer z-10" onClick={(e) => { e.stopPropagation(); onImageClick(getMediaUrl(message.mediaUrl), e.currentTarget, message.id, true) }}>							<div className="w-[160px] h-[160px] flex items-center justify-center">

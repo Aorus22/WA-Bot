@@ -47,6 +47,28 @@ pub struct EditHistoryPopover {
     pub position: Point<Pixels>,
 }
 
+/// Which dropdown a header button opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeaderMenuKind {
+    /// Voice / video call choice beside the conversation title.
+    Call,
+    /// The conversation's three-dot menu.
+    Chat,
+    /// The chat list's three-dot menu.
+    Sidebar,
+}
+
+/// A dropdown opened from a header button (call choice, conversation menu, list menu).
+#[derive(Clone, Debug)]
+pub struct HeaderMenu {
+    pub kind: HeaderMenuKind,
+    pub position: Point<Pixels>,
+    /// The Mute notifications row is expanded into its durations.
+    pub show_mute: bool,
+    /// First "Exit group" click arms it; the second one leaves.
+    pub confirm_exit: bool,
+}
+
 /// Context menu popup state when right-clicking a sidebar chat item
 #[derive(Clone, Debug)]
 pub struct ChatContextMenu {

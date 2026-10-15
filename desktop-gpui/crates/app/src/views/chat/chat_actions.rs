@@ -446,3 +446,237 @@ impl ChatView {
     }
 
 }
+
+impl ChatView {
+    /// Add the picked contacts to the group the picker was opened for.
+    pub fn submit_add_members(&mut self, cx: &mut Context<Self>) {
+        let Some(group_id) = self.add_members_for.clone() else {
+            return;
+        };
+        let jids: Vec<String> = self.new_group_selected.iter().cloned().collect();
+        if jids.is_empty() {
+            toast::error("Pilih minimal satu kontak", cx);
+            return;
+        }
+        self.is_creating_group = true;
+        let base_url = Self::compose_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let client = HttpClient::new(&base_url);
+                let gid = group_id.clone();
+                let res = TOKIO_RT
+                    .spawn(async move { client.update_group_participants(&gid, "add", &jids).await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_creating_group = false;
+                            match res {
+                                Ok(Ok(group)) => {
+                                    this.is_new_group_open = false;
+                                    this.add_members_for = None;
+                                    this.new_group_selected.clear();
+                                    if this.selected_chat_id.as_deref() == Some(group.jid.as_str()) {
+                                        this.group_info = Some(group);
+                                    }
+                                    toast::success("Anggota ditambahkan", cx);
+                                }
+                                _ => toast::error("Gagal menambahkan anggota", cx),
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Open the contact picker to add members to the open group.
+    pub fn open_add_members(&mut self, chat_id: String, cx: &mut Context<Self>) {
+        self.header_menu = None;
+        self.new_group_selected.clear();
+        self.add_members_for = Some(chat_id);
+        self.is_new_group_open = true;
+        cx.notify();
+    }
+
+    /// Mark every chat with unread messages as read.
+    pub fn mark_all_read(&mut self, cx: &mut Context<Self>) {
+        self.header_menu = None;
+        let unread: Vec<String> = if cx.has_global::<ChatStore>() {
+            ChatStore::global(cx).chats.iter().filter(|c| c.unread > 0).map(|c| c.id.clone()).collect()
+        } else {
+            Vec::new()
+        };
+        if unread.is_empty() {
+            toast::success("Tidak ada pesan belum dibaca", cx);
+        }
+        for chat_id in unread {
+            self.mark_chat_read_action(chat_id, cx);
+        }
+        cx.notify();
+    }
+
+    /// Ask for confirmation, then log out of WhatsApp.
+    pub fn open_logout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.header_menu = None;
+        crate::components::dialogs::logout::open_logout_dialog(window, cx, move |_window, cx| {
+            let base_url = if cx.has_global::<AuthState>() {
+                AuthState::global(cx).base_url.clone()
+            } else {
+                "http://127.0.0.1:3000/api".to_string()
+            };
+            cx.spawn(async move |cx| {
+                let client = HttpClient::new(&base_url);
+                let _ = client.logout().await;
+                let _ = cx.update(|cx| {
+                    if cx.has_global::<AuthState>() {
+                        AuthState::global_mut(cx).set_status(crate::state::auth::AuthStatus::Unauthenticated);
+                    }
+                    if cx.has_global::<crate::router::Router>() {
+                        crate::router::Router::global_mut(cx).navigate(crate::router::AppRoute::Chat);
+                    }
+                    cx.refresh_windows();
+                });
+            })
+            .detach();
+        });
+        cx.notify();
+    }
+
+    /// Save the whole conversation as a text file in the Downloads folder.
+    pub fn export_chat(&mut self, chat_id: String, chat_name: String, cx: &mut Context<Self>) {
+        self.header_menu = None;
+        if self.is_exporting_chat {
+            return;
+        }
+        self.is_exporting_chat = true;
+        toast::success("Mengekspor chat…", cx);
+        let base_url = Self::compose_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let result = TOKIO_RT
+                    .spawn(async move {
+                        let client = HttpClient::new(&base_url);
+                        let mut all: Vec<Message> = Vec::new();
+                        let mut before: Option<i64> = None;
+                        // Pages come back newest-first by cursor; stop at the start or a sane cap.
+                        for _ in 0..500 {
+                            let page = client.get_messages(&chat_id, Some(200), before, None).await.map_err(|e| e.to_string())?;
+                            let Some(oldest) = page.first().map(|m| m.timestamp) else { break };
+                            let done = page.len() < 200;
+                            let mut page = page;
+                            page.extend(all);
+                            all = page;
+                            if done {
+                                break;
+                            }
+                            before = Some(oldest);
+                        }
+                        let text = export_chat_text(&chat_name, &all);
+                        let dir = std::env::var_os("HOME")
+                            .or_else(|| std::env::var_os("USERPROFILE"))
+                            .map(std::path::PathBuf::from)
+                            .map(|home| home.join("Downloads"))
+                            .filter(|d| d.is_dir())
+                            .unwrap_or_else(std::env::temp_dir);
+                        let safe: String = chat_name
+                            .chars()
+                            .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
+                            .collect();
+                        let path = dir.join(format!("WhatsApp chat - {}.txt", safe.trim()));
+                        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+                        Ok::<_, String>((path, all.len()))
+                    })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.is_exporting_chat = false;
+                            match result {
+                                Ok(Ok((path, count))) => {
+                                    toast::success(format!("{count} pesan diekspor ke {}", path.display()), cx)
+                                }
+                                _ => toast::error("Gagal mengekspor chat", cx),
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+}
+
+/// The exported text: one line per message, `[date, time] sender: text`.
+pub(crate) fn export_chat_text(chat_name: &str, messages: &[Message]) -> String {
+    format!("Chat with {chat_name}\n\n{}", message_lines(messages))
+}
+
+/// `[date, time] sender: text`, one line per message.
+pub(crate) fn message_lines(messages: &[Message]) -> String {
+    use chrono::TimeZone;
+    let mut out = String::new();
+    for m in messages {
+        let when = chrono::Local
+            .timestamp_millis_opt(m.timestamp)
+            .single()
+            .map(|t| t.format("%d/%m/%Y, %H.%M").to_string())
+            .unwrap_or_default();
+        let who = if m.from == "me" {
+            "You".to_string()
+        } else {
+            m.sender_name
+                .clone()
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| m.from.split('@').next().unwrap_or(&m.from).to_string())
+        };
+        let content = MessageBubbleHelper::decode_content(&m.content);
+        let placeholder = content.trim().is_empty() || (content.starts_with('[') && content.ends_with(']'));
+        let body = if placeholder { crate::views::chat::helpers::quote_media_label(m) } else { content };
+        let deleted = if m.revoked_at.is_some() { " (deleted for everyone)" } else { "" };
+        out.push_str(&format!("[{when}] {who}: {body}{deleted}\n"));
+    }
+    out
+}
+
+#[cfg(test)]
+mod export_tests {
+    // Not `super::*`: that brings gpui's own `test` attribute into scope.
+    use super::export_chat_text;
+    use wabot_backend_client::dto::Message;
+
+    fn message(from: &str, content: &str, message_type: &str) -> Message {
+        Message {
+            from: from.into(),
+            content: content.into(),
+            message_type: message_type.into(),
+            timestamp: 1_700_000_000_000,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn export_has_one_line_per_message_and_names_media() {
+        let mut deleted = message("me", "oops", "text");
+        deleted.revoked_at = Some(1);
+        let text = export_chat_text(
+            "Budi",
+            &[
+                message("628111@s.whatsapp.net", "halo", "text"),
+                message("628111@s.whatsapp.net", "[Image]", "image"),
+                deleted,
+            ],
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "Chat with Budi");
+        assert_eq!(lines.len(), 5, "{text}");
+        assert!(lines[2].ends_with("628111: halo"), "{}", lines[2]);
+        assert!(lines[3].ends_with("628111: 📷 Photo"), "{}", lines[3]);
+        assert!(lines[4].ends_with("You: oops (deleted for everyone)"), "{}", lines[4]);
+    }
+}

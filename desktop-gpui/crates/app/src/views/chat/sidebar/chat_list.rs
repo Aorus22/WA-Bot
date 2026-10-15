@@ -167,7 +167,9 @@ impl ChatView {
                         let mut items = Vec::with_capacity(range.len());
                         for ix in range {
                             if let Some(chat) = this.cached_filtered_chats.get(ix) {
-                                let is_selected = selected_chat_id.as_deref() == Some(&chat.id);
+                                let select_mode = this.chat_select_mode;
+                                let ticked = select_mode && this.selected_chats.contains(&chat.id);
+                                let is_selected = if select_mode { ticked } else { selected_chat_id.as_deref() == Some(&chat.id) };
                                 let chat_id = chat.id.clone();
                                 let is_pinned = chat.pinned_at.is_some();
                                 let is_muted = chat.mute_mode != "off" && !chat.mute_mode.is_empty();
@@ -217,7 +219,11 @@ impl ChatView {
                                             let cid = chat_id.clone();
                                             move |this, _, window, cx| {
                                                 this.chat_context_menu = None;
-                                                this.select_chat(cid.clone(), window, cx);
+                                                if this.chat_select_mode {
+                                                    this.toggle_chat_select(&cid, cx);
+                                                } else {
+                                                    this.select_chat(cid.clone(), window, cx);
+                                                }
                                             }
                                         }),
                                     )
@@ -249,6 +255,21 @@ impl ChatView {
                                             }
                                         }),
                                     )
+                                    // Tick circle while selecting chats
+                                    .children(select_mode.then(|| {
+                                        div()
+                                            .w(px(20.0))
+                                            .h(px(20.0))
+                                            .flex_shrink_0()
+                                            .rounded_full()
+                                            .border_1()
+                                            .border_color(theme.primary)
+                                            .bg(if ticked { theme.primary } else { rgba(0x00000000).into() })
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .children(ticked.then(|| svg().data(CHECK_SVG).size(px(12.0)).text_color(rgb(0xffffff))))
+                                    }))
                                     // Contact Avatar
                                     .child(
                                         div()

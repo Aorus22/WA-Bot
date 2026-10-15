@@ -88,6 +88,58 @@ impl ChatView {
             .children(day_separator)
             .child(body);
 
+        // Select mode: tick circle on the left, and the whole row toggles.
+        let row = match index
+            .checked_sub(1)
+            .and_then(|i| this.cached_render_messages.get(i))
+            .map(|m| m.msg.id.clone())
+            .filter(|_| this.select_mode)
+        {
+            Some(id) => {
+                let ticked = this.selected_messages.contains(&id);
+                let toggle_id = id.clone();
+                div()
+                    .relative()
+                    .w_full()
+                    .pl(px(44.0))
+                    .bg(if ticked { theme.primary.opacity(0.14) } else { rgba(0x00000000).into() })
+                    .child(row)
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(14.0))
+                            .top_0()
+                            .bottom_0()
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .w(px(20.0))
+                                    .h(px(20.0))
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(theme.primary)
+                                    .bg(if ticked { theme.primary } else { rgba(0x00000000).into() })
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .children(ticked.then(|| svg().data(CHECK_SVG).size(px(12.0)).text_color(rgb(0xffffff)))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .cursor_pointer()
+                            .occlude()
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                this.toggle_select(&toggle_id, cx);
+                            })),
+                    )
+            }
+            None => row,
+        };
+
         let fresh_id = index
             .checked_sub(1)
             .and_then(|i| this.cached_render_messages.get(i))

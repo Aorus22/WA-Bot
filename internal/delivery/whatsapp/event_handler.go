@@ -488,6 +488,7 @@ func (h *WhatsAppEventHandler) handlePinInChat(evt *events.Message, pm *waProto.
 		return
 	}
 	chatID := evt.Info.Chat.ToNonAD().String()
+	fmt.Printf("[PIN] chat=%s target=%s type=%v fromMe=%v\n", chatID, targetID, pm.GetType(), evt.Info.IsFromMe)
 	at := pm.GetSenderTimestampMS()
 	if at <= 0 {
 		at = evt.Info.Timestamp.UnixMilli()

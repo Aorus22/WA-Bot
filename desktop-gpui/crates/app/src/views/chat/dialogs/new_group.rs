@@ -13,8 +13,22 @@ impl ChatView {
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         if self.is_new_group_open {
+            let adding = self.add_members_for.is_some();
+            let already_in: HashSet<String> = if adding {
+                self.group_info
+                    .as_ref()
+                    .map(|g| g.participants.iter().map(|p| p.jid.clone()).collect())
+                    .unwrap_or_default()
+            } else {
+                HashSet::new()
+            };
             let contacts: Vec<Chat> = if cx.has_global::<ChatStore>() {
-                ChatStore::global(cx).chats.iter().filter(|c| !c.is_group && !c.archived).cloned().collect()
+                ChatStore::global(cx)
+                    .chats
+                    .iter()
+                    .filter(|c| !c.is_group && !c.archived && !already_in.contains(&c.id))
+                    .cloned()
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -42,7 +56,7 @@ impl ChatView {
                                 h_flex()
                                     .justify_between()
                                     .items_center()
-                                    .child(div().text_lg().font_weight(FontWeight::BOLD).text_color(text_color).child("New group"))
+                                    .child(div().text_lg().font_weight(FontWeight::BOLD).text_color(text_color).child(if adding { "Add members" } else { "New group" }))
                                     .child(
                                         div()
                                             .cursor_pointer()
@@ -52,12 +66,13 @@ impl ChatView {
                                             .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
                                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                 this.is_new_group_open = false;
+                                                this.add_members_for = None;
                                                 cx.notify();
                                             })),
                                     ),
                             )
                             // Group Name Input
-                            .children(self.new_group_field.as_ref().map(|field| field.element(&theme, None)))
+                            .children((!adding).then(|| self.new_group_field.as_ref().map(|field| field.element(&theme, None))).flatten())
                             // Contact Picker Scroll
                             .child(
                                 v_flex()
@@ -124,6 +139,7 @@ impl ChatView {
                                             .child("Cancel")
                                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                                 this.is_new_group_open = false;
+                                                this.add_members_for = None;
                                                 cx.notify();
                                             })),
                                     )
@@ -137,9 +153,18 @@ impl ChatView {
                                             .text_xs()
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(rgb(0xffffff))
-                                            .child(if self.is_creating_group { "Creating..." } else { "Create Group" })
+                                            .child(match (adding, self.is_creating_group) {
+                                                (true, true) => "Adding...",
+                                                (true, false) => "Add",
+                                                (false, true) => "Creating...",
+                                                (false, false) => "Create Group",
+                                            })
                                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                this.submit_create_group(cx);
+                                                if this.add_members_for.is_some() {
+                                                    this.submit_add_members(cx);
+                                                } else {
+                                                    this.submit_create_group(cx);
+                                                }
                                             })),
                                     ),
                             ),

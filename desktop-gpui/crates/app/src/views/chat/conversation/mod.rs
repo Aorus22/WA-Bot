@@ -1,4 +1,6 @@
 mod chat_header;
+mod header_menu;
+mod selection_bar;
 mod empty_state;
 mod message_bubble;
 mod message_list;

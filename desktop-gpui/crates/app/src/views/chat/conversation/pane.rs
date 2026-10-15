@@ -34,7 +34,11 @@ impl ChatView {
                         .relative()
                         .size_full()
                         // Chat Header (Clicking opens Info Sheet)
-                        .child(self.render_chat_header(cx, pages, active_chat))
+                        .child(if self.select_mode {
+                            self.render_selection_bar(cx)
+                        } else {
+                            self.render_chat_header(cx, pages, active_chat).into_any_element()
+                        })
                         // Messages pinned in this chat
                         .children(self.render_pinned_banner(cx))
                         // Messages History View (Optimized for 60fps scrolling) with visual scrollbar

@@ -172,6 +172,15 @@ impl ChatView {
                     );
                 }
 
+                // Select (starts select-messages mode with this one ticked)
+                card = card.child(
+                    menu_row("mm-select", CHECK_SVG, "Select", muted_text, text_color, hover_bg)
+                        .on_mouse_down(MouseButton::Left, cx.listener({
+                            let mid = msg_obj.id.clone();
+                            move |this, _, _, cx| this.enter_select_mode(Some(mid.clone()), cx)
+                        })),
+                );
+
                 // Forward
                 card = card.child(
                     menu_row("mm-forward", FORWARD_SVG, "Forward", muted_text, text_color, hover_bg)

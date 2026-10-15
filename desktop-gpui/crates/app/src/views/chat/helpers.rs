@@ -348,3 +348,21 @@ pub(crate) fn render_avatar(
         .with_loading(make_loading)
         .into_any_element()
 }
+
+/// What to show in a reply quote when the original has no text of its own.
+pub(crate) fn quote_media_label(msg: &Message) -> String {
+    let name = msg.content.trim();
+    match msg.message_type.as_str() {
+        "image" => "📷 Photo".to_string(),
+        "video" => "🎥 Video".to_string(),
+        "gif" => "GIF".to_string(),
+        "sticker" => "Sticker".to_string(),
+        "audio" | "ptt" | "voice" => "🎤 Voice message".to_string(),
+        "document" if !name.is_empty() && !name.starts_with('[') => format!("📄 {name}"),
+        "document" => "📄 Document".to_string(),
+        "location" => "📍 Location".to_string(),
+        "contact" => "👤 Contact".to_string(),
+        "poll" => "📊 Poll".to_string(),
+        _ => "Message".to_string(),
+    }
+}

@@ -40,6 +40,8 @@ impl ChatView {
         }
         self.info_sheet_closing = false;
         self.is_info_sheet_open = true;
+        self.info_media_open = false;
+        self.info_confirm_exit = false;
         self.is_starred_sheet_open = false;
         self.starred_sheet_closing = false;
         self.is_search_sheet_open = false;
@@ -197,6 +199,7 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
         chat: &Chat,
+        full_width: bool,
     ) -> AnyElement {
         let theme = *cx.app_theme();
         let border_color = theme.border;
@@ -211,14 +214,10 @@ impl ChatView {
         } else {
             "http://127.0.0.1:3000/api".to_string()
         };
-        Self::animated_sheet(
-            "chat-info-sheet-in",
-            "chat-info-sheet-out",
-            self.info_sheet_closing,
-            v_flex()
-                .w(px(SHEET_WIDTH))
-                .min_w(px(SHEET_WIDTH))
-                .max_w(px(SHEET_WIDTH))
+        let media_page = self.info_media_open;
+        let sheet = v_flex()
+            .when(!full_width, |el| el.w(px(SHEET_WIDTH)).min_w(px(SHEET_WIDTH)).max_w(px(SHEET_WIDTH)))
+            .when(full_width, |el| el.size_full())
                 .h_full()
                 .overflow_hidden()
                 .border_l_1()
@@ -241,7 +240,13 @@ impl ChatView {
                                 .text_base()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(text_color)
-                                .child(if chat.is_group { "Group Info" } else { "Contact Info" }),
+                                .child(if media_page {
+                                    "Media, links and docs"
+                                } else if chat.is_group {
+                                    "Group info"
+                                } else {
+                                    "Contact info"
+                                }),
                         )
                         .child(
                             div()
@@ -251,11 +256,17 @@ impl ChatView {
                                 .rounded_full()
                                 .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                 .tooltip(move |window, cx| {
-                                    Tooltip::new("Close").build(window, cx)
+                                    Tooltip::new(if media_page { "Back" } else { "Close" }).build(window, cx)
                                 })
-                                .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
+                                .child(svg().data(if media_page { ARROW_LEFT_SVG } else { X_SVG }).size(px(16.0)).text_color(muted_text))
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                    this.close_info_sheet(cx);
+                                    if this.info_media_open {
+                                        this.info_media_open = false;
+                                        cx.notify();
+                                    } else {
+                                        this.info_confirm_exit = false;
+                                        this.close_info_sheet(cx);
+                                    }
                                 })),
                         ),
                 )
@@ -267,97 +278,8 @@ impl ChatView {
                         .overflow_y_scroll()
                         .p_4()
                         .gap_4()
-                        // Profile Section
-                        .child(
-                            v_flex()
-                                .items_center()
-                                .gap_2()
-                                .py_2()
-                                .child(render_avatar(&chat.id, &chat.name, &chat.avatar, chat.is_group, 80.0, &base_url, &theme))
-                                .child(
-                                    div()
-                                        .text_lg()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(text_color)
-                                        .max_w_full()
-                                        .overflow_hidden()
-                                        .child(chat.name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted_text)
-                                        .max_w_full()
-                                        .overflow_hidden()
-                                        .child(chat.id.clone()),
-                                ),
-                        )
-                        // Disappearing messages: the chat's timer, changeable from here
-                        .child({
-                            let current = chat.disappearing_secs;
-                            let chat_id = chat.id.clone();
-                            v_flex()
-                                .gap_2p5()
-                                .p_3()
-                                .rounded_xl()
-                                .border_1()
-                                .border_color(border_color.opacity(0.3))
-                                .bg(theme.muted.opacity(0.2))
-                                .child(
-                                    h_flex()
-                                        .items_center()
-                                        .gap_3()
-                                        .child(svg().data(HOURGLASS_SVG).size(px(18.0)).text_color(primary_color))
-                                        .child(
-                                            v_flex()
-                                                .child(
-                                                    div()
-                                                        .text_sm()
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .text_color(text_color)
-                                                        .child("Disappearing messages"),
-                                                )
-                                                .child(div().text_xs().text_color(muted_text).child(if current == 0 {
-                                                    "Off".to_string()
-                                                } else {
-                                                    format!("New messages disappear on phones after {}", messages::disappearing::disappearing_label(current))
-                                                })),
-                                        ),
-                                )
-                                .child(
-                                    h_flex()
-                                        .p_1()
-                                        .bg(theme.muted.opacity(0.5))
-                                        .rounded_xl()
-                                        .border_1()
-                                        .border_color(border_color.opacity(0.3))
-                                        .justify_around()
-                                        .children(messages::disappearing::DISAPPEARING_OPTIONS.into_iter().map(|(secs, label)| {
-                                            let selected = current == secs;
-                                            let chat_id = chat_id.clone();
-                                            div()
-                                                .id(SharedString::from(format!("disappearing-{secs}")))
-                                                .cursor_pointer()
-                                                .px_2p5()
-                                                .py_1p5()
-                                                .rounded_lg()
-                                                .text_xs()
-                                                .font_weight(if selected { FontWeight::BOLD } else { FontWeight::NORMAL })
-                                                .bg(if selected { theme.primary.opacity(0.18) } else { rgba(0x00000000).into() })
-                                                .text_color(if selected { primary_color } else { muted_text })
-                                                .child(label)
-                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                    this.set_disappearing_timer(chat_id.clone(), secs, cx);
-                                                }))
-                                        })),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(10.5))
-                                        .text_color(muted_text.opacity(0.8))
-                                        .child("Messages stay in this app either way; only phones remove them."),
-                                )
-                        })
+                        .children((!media_page).then(|| self.render_info_main(chat, cx)))
+                        .when(media_page, |s| s
                         // Tabs Row: [Media] [Docs] [Links]
                         .child(
                             h_flex()
@@ -415,27 +337,6 @@ impl ChatView {
                                             cx.notify();
                                         })),
                                 )
-                                .children(if chat.is_group {
-                                    Some(
-                                        div()
-                                            .cursor_pointer()
-                                            .px_3()
-                                            .py_1p5()
-                                            .rounded_lg()
-                                            .text_xs()
-                                            .font_weight(if self.info_sheet_tab == InfoSheetTab::Members { FontWeight::BOLD } else { FontWeight::NORMAL })
-                                            .bg(if self.info_sheet_tab == InfoSheetTab::Members { theme.primary.opacity(0.18) } else { rgba(0x00000000).into() })
-                                            .text_color(if self.info_sheet_tab == InfoSheetTab::Members { primary_color } else { muted_text })
-                                            .child("Members")
-                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                this.info_sheet_tab = InfoSheetTab::Members;
-                                                cx.notify();
-                                            }))
-                                            .into_any_element(),
-                                    )
-                                } else {
-                                    None
-                                }),
                         )
                         // Tab Content
                         .child(
@@ -683,56 +584,16 @@ impl ChatView {
                                             .into_any_element()
                                     }
                                 }
-                                InfoSheetTab::Members => {
-                                    if self.is_loading_info_members {
-                                        v_flex()
-                                            .py_8()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(Spinner::new().color(primary_color))
-                                            .child(div().text_sm().text_color(muted_text).child("Loading members…"))
-                                            .into_any_element()
-                                    } else if let Some(group) = self.group_info.as_ref() {
-                                        v_flex()
-                                            .gap_1()
-                                            .child(div().text_xs().text_color(muted_text).child(format!("{} members", group.participants.len())))
-                                            .children(group.participants.iter().map(|participant| {
-                                                let name = participant.name.as_deref()
-                                                    .filter(|name| !name.trim().is_empty())
-                                                    .unwrap_or_else(|| participant.jid.split('@').next().unwrap_or(&participant.jid));
-                                                h_flex()
-                                                    .w_full()
-                                                    .items_center()
-                                                    .gap_3()
-                                                    .px_2()
-                                                    .py_2()
-                                                    .rounded_lg()
-                                                    .child(render_avatar(&participant.jid, name, "", false, 34.0, &base_url, &theme))
-                                                    .child(
-                                                        v_flex()
-                                                            .flex_1()
-                                                            .child(div().text_sm().text_color(text_color).child(name.to_string()))
-                                                            .child(div().text_xs().text_color(muted_text).child(participant.jid.clone())),
-                                                    )
-                                                    .children(if participant.is_admin {
-                                                        Some(div().text_xs().text_color(primary_color).child("admin"))
-                                                    } else {
-                                                        None
-                                                    })
-                                            }))
-                                            .into_any_element()
-                                    } else {
-                                        v_flex()
-                                            .py_8()
-                                            .items_center()
-                                            .child(div().text_sm().text_color(muted_text).child("Group members unavailable"))
-                                            .into_any_element()
-                                    }
-                                },
+                                // Members live on the main page now.
+                                InfoSheetTab::Members => div().into_any_element()
                             }
-                        ),
+                        )),
                 )
-                .into_any_element(),
-        )
+                ;
+        if full_width {
+            sheet.into_any_element()
+        } else {
+            Self::animated_sheet("chat-info-sheet-in", "chat-info-sheet-out", self.info_sheet_closing, sheet.into_any_element())
+        }
     }
 }

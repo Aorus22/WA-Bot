@@ -226,7 +226,19 @@ impl ChatView {
         self.context_menu = None;
         self.forward_selected.clear();
         self.is_forwarding = false;
+        self.forward_ids = Vec::new();
         self.forward_msg = Some((chat_id, msg));
+        cx.notify();
+    }
+
+    /// Open the "Forward to…" dialog for several messages, sent in order.
+    pub fn open_forward_many(&mut self, chat_id: String, msgs: Vec<Message>, cx: &mut Context<Self>) {
+        let Some(first) = msgs.first().cloned() else { return };
+        self.context_menu = None;
+        self.forward_selected.clear();
+        self.is_forwarding = false;
+        self.forward_ids = msgs.iter().map(|m| m.id.clone()).collect();
+        self.forward_msg = Some((chat_id, first));
         cx.notify();
     }
 
@@ -237,6 +249,7 @@ impl ChatView {
             return;
         }
         let targets: Vec<String> = self.forward_selected.iter().cloned().collect();
+        let ids: Vec<String> = if self.forward_ids.is_empty() { vec![msg.id.clone()] } else { self.forward_ids.clone() };
         let base_url = Self::compose_base_url(cx);
         self.is_forwarding = true;
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -244,7 +257,12 @@ impl ChatView {
             async move {
                 let client = HttpClient::new(&base_url);
                 let res = TOKIO_RT
-                    .spawn(async move { client.forward_message(&chat_id, &msg.id, &targets).await })
+                    .spawn(async move {
+                        for id in &ids {
+                            client.forward_message(&chat_id, id, &targets).await.map_err(|e| e.to_string())?;
+                        }
+                        Ok::<_, String>(())
+                    })
                     .await;
                 let ok = matches!(res, Ok(Ok(_)));
                 let _ = cx_handle.update(|cx: &mut App| {
@@ -253,7 +271,9 @@ impl ChatView {
                             this.is_forwarding = false;
                             if ok {
                                 this.forward_msg = None;
+                                this.forward_ids.clear();
                                 this.forward_selected.clear();
+                                this.exit_select_mode(cx);
                                 toast::success("Pesan diteruskan", cx);
                             } else {
                                 toast::error("Gagal meneruskan pesan", cx);

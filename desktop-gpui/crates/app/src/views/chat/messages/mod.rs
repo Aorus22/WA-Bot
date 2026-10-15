@@ -1,4 +1,5 @@
 mod actions;
+pub(crate) mod selection;
 mod context_menu;
 pub(crate) mod disappearing;
 mod documents;

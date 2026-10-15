@@ -52,6 +52,12 @@ impl ChatView {
         self.mention_query = None;
         self.group_info = None;
         self.info_sheet_tab = InfoSheetTab::Media;
+        self.info_media_open = false;
+        self.header_menu = None;
+        self.select_mode = false;
+        self.selected_messages.clear();
+        self.select_confirm_delete = false;
+        self.info_confirm_exit = false;
         self.reply_to = None;
         self.editing_message = None;
         self.pending_attachment = None;
