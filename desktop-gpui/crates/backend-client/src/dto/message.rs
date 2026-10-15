@@ -192,6 +192,10 @@ pub struct Message {
     pub extra: Option<MessageExtra>,
     #[serde(default)]
     pub starred: bool,
+    /// When the sender deleted the message for everyone, in unix milliseconds.
+    /// The message is kept and still readable here.
+    #[serde(default)]
+    pub revoked_at: Option<i64>,
     /// When the message was starred, in unix milliseconds; only on `/starred` rows.
     #[serde(default)]
     pub starred_at: Option<i64>,

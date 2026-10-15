@@ -948,7 +948,8 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
         if (!chat) return
         try {
             await api.deleteMessage(chat.id, messageId)
-            useChatStore.getState().deleteMessage(chat.id, messageId)
+            // Deleted for everyone, but never from our own database.
+            useChatStore.getState().patchMessage(chat.id, messageId, { revokedAt: Date.now() })
         } catch (err) {
             toast.error("Failed to delete message")
         }

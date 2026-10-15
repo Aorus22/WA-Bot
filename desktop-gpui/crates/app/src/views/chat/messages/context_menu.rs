@@ -247,7 +247,7 @@ impl ChatView {
                 }
 
                 // Edit (own text messages)
-                if is_from_me && !has_media {
+                if is_from_me && !has_media && msg_obj.revoked_at.is_none() {
                     card = card.child(
                         menu_row("mm-edit", EDIT_SVG, "Edit", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
@@ -257,8 +257,8 @@ impl ChatView {
                     );
                 }
 
-                // Delete (own messages)
-                if is_from_me {
+                // Delete (own messages that are not already deleted)
+                if is_from_me && msg_obj.revoked_at.is_none() {
                     card = card.child(menu_separator(border_color)).child(
                         menu_row("mm-delete", TRASH_SVG, "Delete", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({

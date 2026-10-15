@@ -108,6 +108,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 					})
 				}
 				break
+			case "message_revoked":
+				if (message.payload?.id) {
+					useChatStore.getState().patchMessage(message.payload.chatId, message.payload.id, {
+						revokedAt: message.payload.revokedAt || Date.now(),
+					})
+				}
+				break
 			case "message_edited":
 				if (message.payload) {
 					setIncomingMessage({

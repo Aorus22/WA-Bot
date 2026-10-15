@@ -188,6 +188,10 @@ type Message struct {
 	Extra       *MessageExtra   `json:"extra,omitempty"`
 	// Starred is derived from message_stars, never written through SaveMessage.
 	Starred bool `json:"starred,omitempty"`
+	// RevokedAt (Unix ms) is set when the sender deleted the message for
+	// everyone. The message stays stored and readable here; it is derived from
+	// message_revocations, never written through SaveMessage.
+	RevokedAt int64 `json:"revokedAt,omitempty"`
 	// RawProto is the serialized waE2E.Message of incoming messages; kept for
 	// lossless forwarding. Not exposed over JSON.
 	RawProto []byte `json:"-"`
@@ -332,6 +336,10 @@ func (s *MessageStore) initLocked() error {
 			chat_id TEXT NOT NULL,
 			starred INTEGER NOT NULL DEFAULT 1,
 			starred_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS message_revocations (
+			message_id TEXT PRIMARY KEY,
+			revoked_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_stars_chat ON message_stars(chat_id, starred, starred_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS chat_pins (
@@ -559,7 +567,8 @@ const messageColumns = `id, chat_id,
 	receiver_id, content, timestamp, status, msg_type, ifnull(media_url, '') as media_url,
 	is_automatic, ifnull(sender_name, '') as sender_name, ifnull(metadata, '') as reply_to_id,
 	ifnull(forwarded, 0) as forwarded, ifnull(reactions, '') as reactions, ifnull(extra_meta, '') as extra_meta,
-	EXISTS(SELECT 1 FROM message_stars WHERE message_id = messages.id AND starred = 1) as starred`
+	EXISTS(SELECT 1 FROM message_stars WHERE message_id = messages.id AND starred = 1) as starred,
+	COALESCE((SELECT revoked_at FROM message_revocations WHERE message_id = messages.id), 0) as revoked_at`
 
 func decodeMessageMeta(msg *Message, forwarded int, reactionsJSON, extraJSON string) {
 	msg.Forwarded = forwarded == 1
@@ -591,7 +600,7 @@ func scanMessageRow(sc rowScanner, extra ...any) (Message, error) {
 	dest := []any{
 		&msg.ID, &msg.ChatID, &msg.From, &msg.To, &msg.Content, &msg.Timestamp,
 		&msg.Status, &msg.Type, &msg.MediaURL, &isAuto, &msg.SenderName,
-		&msg.ReplyToID, &forwarded, &reactionsJSON, &extraJSON, &starred,
+		&msg.ReplyToID, &forwarded, &reactionsJSON, &extraJSON, &starred, &msg.RevokedAt,
 	}
 	if err := sc.Scan(append(dest, extra...)...); err != nil {
 		return msg, err
@@ -1424,15 +1433,22 @@ func (s *MessageStore) SyncChatPreview(msgID, content string) (string, bool) {
 	return chatID, n > 0
 }
 
-func (s *MessageStore) DeleteMessage(msgID string) error {
+// MarkMessageRevoked records that the sender deleted a message for everyone.
+// The message itself is kept, content and media included. It reports whether
+// the message is stored here; a repeat (our own echo) keeps the first time.
+func (s *MessageStore) MarkMessageRevoked(msgID string, atMs int64) (bool, error) {
+	if atMs <= 0 {
+		atMs = time.Now().UnixMilli()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`
-                DELETE FROM messages WHERE id = ?
-        `, msgID)
-
-	return err
+	var stored bool
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)`, msgID).Scan(&stored); err != nil || !stored {
+		return false, err
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO message_revocations (message_id, revoked_at) VALUES (?, ?)`, msgID, atMs)
+	return true, err
 }
 
 // ApplyReaction returns the new reaction list after sender sets (or removes,

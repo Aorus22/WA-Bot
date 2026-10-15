@@ -968,14 +968,21 @@ func (h *WhatsAppEventHandler) handleProtocolChange(evt *events.Message) bool {
 			eventChatID = h.msgStore.ResolveChatID(chatID)
 		}
 		if isRevoke(pm) {
+			// Deleted for everyone: keep the message, flag it.
 			targetID := pm.GetKey().GetID()
+			revokedAt := evt.Info.Timestamp.UnixMilli()
 			if h.msgStore != nil {
-				h.msgStore.DeleteMessage(targetID)
+				if stored, err := h.msgStore.MarkMessageRevoked(targetID, revokedAt); err != nil {
+					fmt.Printf("[REVOKE] Failed to flag %s: %v\n", targetID, err)
+				} else if !stored {
+					fmt.Printf("[REVOKE] %s is not stored, nothing to flag\n", targetID)
+				}
 			}
 			if h.httpServer != nil {
-				h.httpServer.BroadcastMessage("message_deleted", map[string]string{
-					"chatId": eventChatID,
-					"id":     targetID,
+				h.httpServer.BroadcastMessage("message_revoked", map[string]interface{}{
+					"chatId":    eventChatID,
+					"id":        targetID,
+					"revokedAt": revokedAt,
 				})
 			}
 			return true

@@ -98,17 +98,34 @@ func TestEditFromThePhoneUpdatesTheMessageAndKeepsTheOldText(t *testing.T) {
 	}
 }
 
-func TestRevokeDeletesTheMessage(t *testing.T) {
+func TestRevokeKeepsTheMessageAndFlagsIt(t *testing.T) {
 	h, store, recorder := editFixture(t)
 	h.handleMessage(protocolEvent(false, &waE2E.ProtocolMessage{
 		Key:  &waCommon.MessageKey{ID: proto.String("orig")},
 		Type: waE2E.ProtocolMessage_REVOKE.Enum(),
 	}))
-	if _, err := store.GetMessageByID("orig"); err == nil {
-		t.Fatal("a revoked message must be gone")
+	msg, err := store.GetMessageByID("orig")
+	if err != nil {
+		t.Fatal("a revoked message must be kept")
 	}
-	if len(recorder.types) != 1 || recorder.types[0] != "message_deleted" {
-		t.Fatalf("broadcasts = %v, want one message_deleted", recorder.types)
+	if msg.RevokedAt == 0 || msg.Content != "d" {
+		t.Fatalf("revoked message = %+v, want original content and a revoke time", msg)
+	}
+	if len(recorder.types) != 1 || recorder.types[0] != "message_revoked" {
+		t.Fatalf("broadcasts = %v, want one message_revoked", recorder.types)
+	}
+	if recorder.events[0]["id"] != "orig" || recorder.events[0]["revokedAt"] != msg.RevokedAt {
+		t.Fatalf("event = %v", recorder.events[0])
+	}
+
+	// Our own echo of the same revoke must not move the time.
+	first := msg.RevokedAt
+	h.handleMessage(protocolEvent(true, &waE2E.ProtocolMessage{
+		Key:  &waCommon.MessageKey{ID: proto.String("orig")},
+		Type: waE2E.ProtocolMessage_REVOKE.Enum(),
+	}))
+	if again, _ := store.GetMessageByID("orig"); again.RevokedAt != first {
+		t.Fatalf("revoke time moved: %d -> %d", first, again.RevokedAt)
 	}
 }
 

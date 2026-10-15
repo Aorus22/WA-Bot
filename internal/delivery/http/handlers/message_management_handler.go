@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -34,13 +36,18 @@ func (mh *MessageManagementHandler) DeleteMessage(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Deleted for everyone: the message stays in our database, flagged.
+	revokedAt := time.Now().UnixMilli()
 	if mh.handler.msgRepo != nil {
-		mh.handler.msgRepo.DeleteMessage(msgID)
+		if _, err := mh.handler.msgRepo.MarkMessageRevoked(msgID, revokedAt); err != nil {
+			fmt.Printf("[REVOKE] Failed to flag %s: %v\n", msgID, err)
+		}
 	}
 
-	mh.handler.BroadcastMessage("message_deleted", map[string]string{
-		"chatId": chatID,
-		"id":     msgID,
+	mh.handler.BroadcastMessage("message_revoked", map[string]interface{}{
+		"chatId":    chatID,
+		"id":        msgID,
+		"revokedAt": revokedAt,
 	})
 
 	mh.handler.sendSuccess(w, nil)

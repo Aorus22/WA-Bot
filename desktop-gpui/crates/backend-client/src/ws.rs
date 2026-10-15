@@ -33,6 +33,12 @@ pub enum WsEvent {
         chat_id: String,
         id: String,
     },
+    /// Deleted for everyone by the sender; the message stays, flagged.
+    MessageRevoked {
+        chat_id: String,
+        id: String,
+        revoked_at: i64,
+    },
     MessageEdited {
         chat_id: String,
         id: String,
@@ -297,6 +303,16 @@ impl WsMessage {
                     .get("disappearingSecs")
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u32),
+            },
+            "message_revoked" => WsEvent::MessageRevoked {
+                chat_id: self.chat_id_field(),
+                id: self
+                    .payload
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                revoked_at: self.payload.get("revokedAt").and_then(|v| v.as_i64()).unwrap_or(0),
             },
             "message_starred" => WsEvent::MessageStarred {
                 chat_id: self.chat_id_field(),
@@ -623,6 +639,14 @@ mod tests {
         assert_eq!(
             event("chat_cleared", serde_json::json!({"chatId": "a@s.whatsapp.net"})),
             WsEvent::ChatCleared { chat_id: "a@s.whatsapp.net".into() }
+        );
+    }
+
+    #[test]
+    fn a_revoked_message_is_flagged_not_removed() {
+        assert_eq!(
+            event("message_revoked", serde_json::json!({"chatId": "a@s.whatsapp.net", "id": "m1", "revokedAt": 1700000000000i64})),
+            WsEvent::MessageRevoked { chat_id: "a@s.whatsapp.net".into(), id: "m1".into(), revoked_at: 1700000000000 }
         );
     }
 

@@ -245,6 +245,15 @@ impl ChatView {
                 } else {
                     None
                 })
+                // Deleted for everyone by the sender; we keep it and say so.
+                .children(r_msg.msg.revoked_at.map(|_| {
+                    div()
+                        .mb_1()
+                        .text_xs()
+                        .italic()
+                        .text_color(rgb(0xe5484d))
+                        .child("🚫 Deleted for everyone · kept here")
+                }))
                 // Quote of the status this message replies to
                 .children(status_reply.as_ref().map(|reply| {
                     Self::render_status_reply_card(reply, &base_url, primary_color, muted_text, theme.muted, chat_scale)

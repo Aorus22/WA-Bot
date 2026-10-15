@@ -137,6 +137,8 @@ export type Message = {
 	reactions?: ReactionEntry[]
 	extra?: MessageExtra
 	starred?: boolean
+	/** Unix ms; the sender deleted the message for everyone. We keep it. */
+	revokedAt?: number
 }
 
 /** A starred message as listed by /starred. */

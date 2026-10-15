@@ -178,23 +178,19 @@ impl ChatView {
             "http://127.0.0.1:3000/api".to_string()
         };
 
+        // Deleted for everyone, never from our own database: flag it at once and
+        // put the flag back if the request fails.
+        let revoked_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64);
         if cx.has_global::<ChatStore>() {
-            ChatStore::global_mut(cx).delete_message(&chat_id, &msg_id);
-        }
-        let removed_row = self.cached_render_messages.iter().position(|m| m.msg.id == msg_id).map(|index| index + 1);
-        let old_items = self.messages_list_state.item_count();
-        self.cached_render_messages.retain(|m| m.msg.id != msg_id);
-        let total_items = if self.cached_render_messages.is_empty() { 0 } else { self.cached_render_messages.len() + 1 };
-        if total_items == 0 {
-            self.messages_list_state.splice(0..old_items, 0);
-        } else if let Some(row) = removed_row {
-            self.messages_list_state.splice(row..row + 1, 0);
-            self.messages_list_state.remeasure_items(0..total_items);
+            ChatStore::global_mut(cx).patch_message(&chat_id, &msg_id, |m| m.revoked_at = Some(revoked_at));
         }
         cx.notify();
 
         let cid = chat_id.clone();
         let mid = msg_id.clone();
+        let (chat_id_back, msg_id_back) = (chat_id.clone(), msg_id.clone());
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let view_weak = this;
             let cx_handle = cx.clone();
@@ -210,6 +206,9 @@ impl ChatView {
                                     toast::success("Pesan berhasil dihapus", cx);
                                 }
                                 _ => {
+                                    if cx.has_global::<ChatStore>() {
+                                        ChatStore::global_mut(cx).patch_message(&chat_id_back, &msg_id_back, |m| m.revoked_at = None);
+                                    }
                                     toast::error("Gagal menghapus pesan", cx);
                                 }
                             }

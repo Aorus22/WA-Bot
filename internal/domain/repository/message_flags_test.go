@@ -127,3 +127,25 @@ func TestChatDisappearingTimer(t *testing.T) {
 		t.Fatalf("messages = %+v", msgs)
 	}
 }
+
+func TestRevokedMessageIsKeptAndSurvivesRewrite(t *testing.T) {
+	s := newTestStore(t)
+	chat := "1@s.whatsapp.net"
+	seedMessages(t, s, chat, "m1")
+
+	if stored, err := s.MarkMessageRevoked("ghost", 5); err != nil || stored {
+		t.Fatalf("unknown message: stored=%v err=%v", stored, err)
+	}
+	if stored, err := s.MarkMessageRevoked("m1", 500); err != nil || !stored {
+		t.Fatalf("stored=%v err=%v", stored, err)
+	}
+	_, _ = s.MarkMessageRevoked("m1", 900) // echo keeps the first time
+
+	// History sync rewrites the row; the flag must stay.
+	seedMessages(t, s, chat, "m1")
+
+	msgs, _ := s.GetMessages(chat, 10, 0, 0)
+	if len(msgs) != 1 || msgs[0].RevokedAt != 500 || msgs[0].Content != "m1" {
+		t.Fatalf("messages = %+v", msgs)
+	}
+}

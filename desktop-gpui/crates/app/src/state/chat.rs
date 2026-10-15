@@ -346,6 +346,11 @@ impl ChatStore {
                 self.delete_message(chat_id, id);
                 true
             }
+            WsEvent::MessageRevoked { chat_id, id, revoked_at } => {
+                // Deleted for everyone, but we keep it: flag, do not remove.
+                self.patch_message(chat_id, id, |m| m.revoked_at = Some(*revoked_at));
+                true
+            }
             WsEvent::MessageEdited { chat_id, id, content, extra } => {
                 self.patch_message(chat_id, id, |m| {
                     m.content = content.clone();
