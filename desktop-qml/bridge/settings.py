@@ -41,6 +41,7 @@ class Settings(QObject):
         super().__init__(parent)
         self._path = path or settings_path()
         self._data: dict[str, Any] = {}
+        self._transient: set[str] = set()  # keys previewed but not yet written to disk
         self.reload()
 
     def reload(self) -> None:
@@ -50,8 +51,21 @@ class Settings(QObject):
         except (OSError, ValueError):
             self._data = {}
         d = self._data
+        try:
+            legacy = int(d.get("settings_version") or 0) < 1
+        except (TypeError, ValueError):
+            legacy = True
+        # GPUI schema v1 migration: the old slider stopped at 70, so a saved 70 meant "dragged to the end".
+        if legacy and d.get("window_transparency") == 70:
+            d["window_transparency"] = 100
         for k, v in DEFAULTS.items():
             d.setdefault(k, v)
+        d["settings_version"] = max(1, d["settings_version"]) if isinstance(d["settings_version"], int) else 1
+        for k in ("ui_font_scale", "chat_font_scale", "window_transparency"):
+            try:
+                d[k] = int(d[k])
+            except (TypeError, ValueError):
+                d[k] = DEFAULTS[k]
         d["ui_font_scale"] = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, int(d["ui_font_scale"])))
         d["chat_font_scale"] = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, int(d["chat_font_scale"])))
         d["window_transparency"] = max(0, min(100, int(d["window_transparency"])))
@@ -66,14 +80,19 @@ class Settings(QObject):
     @Slot(str, "QVariant")
     def set(self, key: str, value) -> None:
         if self._data.get(key) == value:
+            if key in self._transient:  # value was only previewed: persist it now
+                self._transient.discard(key)
+                self.save()
             return
         self._data[key] = value
+        self._transient.discard(key)
         self.changed.emit(key)
         self.save()
 
     def set_transient(self, key: str, value) -> None:
         """Change without writing to disk (live preview of sliders)."""
         self._data[key] = value
+        self._transient.add(key)
         self.changed.emit(key)
 
     def save(self) -> None:

@@ -385,6 +385,59 @@ def connect_or_start() -> tuple[str, OwnedBackend | None]:
     return owned.api_url, owned
 
 
+# --- restarting (GPUI `backend::restart` + `backend_process::stop_listener`) -----------------
+
+def stop_listener(port: int, grace: float = 5.0) -> None:
+    """Stop the process listening on `port`, but only when it is `wa-bot-backend`: SIGTERM, then
+    SIGKILL after `grace` seconds. Raises BackendError when it is some other program."""
+    pid = pid_listening_on(port)
+    if pid is None:
+        raise BackendError(f"could not tell which process is listening on port {port}")
+    name = process_name(pid) or ""
+    if name != BACKEND_PROCESS_NAME:
+        raise BackendError(
+            f"port {port} is held by '{name}' (pid {pid}), not by {BACKEND_PROCESS_NAME}; leaving it alone")
+
+    def gone(within: float) -> bool:
+        end = time.monotonic() + within
+        while time.monotonic() < end:
+            if not is_wabot_backend(port):
+                return True
+            time.sleep(0.15)
+        return False
+
+    os.kill(pid, signal.SIGTERM)
+    if gone(grace):
+        return
+    os.kill(pid, signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM)
+    if not gone(3.0):
+        raise BackendError(f"pid {pid} would not stop")
+
+
+def restart_backend(owned: OwnedBackend | None, port: int | None, use_registry: bool = True
+                    ) -> tuple[str, OwnedBackend]:
+    """Stop the backend (the one we own through its handle, else an adopted wa-bot-backend found by
+    its port) and spawn a fresh one, on the same port when it can be reused. Returns (url, owned):
+    the caller then owns the new backend."""
+    old_record = owned.record if owned else None
+    if owned:
+        owned.stop(5.0)
+    if port and is_wabot_backend(port):
+        if old_record is None:
+            rec = read_core(core_file())
+            old_record = rec if rec and rec.port == port else None
+        stop_listener(port, 5.0)
+    if use_registry and old_record:
+        remove_core_if(core_file(), old_record)
+    try:
+        new = spawn_bundled(use_registry, preferred_port=port)
+    except BackendError:
+        if port is None:
+            raise
+        new = spawn_bundled(use_registry)  # the port can linger for a moment; any free one beats staying down
+    return new.api_url, new
+
+
 # --- entry point ----------------------------------------------------------------
 
 def explicit_url(argv: list[str], env: dict[str, str]) -> str | None:

@@ -58,8 +58,16 @@ class ThemeManager(QObject):
     def register_preset(self, preset: dict[str, Any]) -> None:
         """Add or replace a preset (used for the live desktop palette)."""
         self._extra[preset["name"]] = preset
-        if preset["name"] == self._preset["name"]:
-            self._apply(preset["name"])
+        if preset["name"] in (self._preset["name"], self._settings.get_py("theme_preset")):
+            self._apply(self._settings.get_py("theme_preset"))
+            self.changed.emit()
+
+    def unregister_preset(self, name: str) -> None:
+        """Drop a preset added with `register_preset` (e.g. the desktop palette vanished)."""
+        if self._extra.pop(name, None) is None:
+            return
+        if name == self._preset["name"]:
+            self._apply(self._settings.get_py("theme_preset"))  # falls back to default-dark
             self.changed.emit()
 
     def find(self, name: str) -> dict[str, Any] | None:

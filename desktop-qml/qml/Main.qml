@@ -20,5 +20,7 @@ ApplicationWindow {
 
     Rectangle { anchors.fill: parent; color: "transparent" }
     Shell { anchors.fill: parent; win: win }
+    // Start-up gate: "Connecting to WA Bot..." / backend-unavailable screen over everything below the titlebar.
+    Loader { anchors.fill: parent; anchors.topMargin: 48; source: Qt.resolvedUrl("pages/auth/StartupGate.qml") }
     ResizeHandles { win: win }
 }

@@ -14,6 +14,8 @@ class BackendController(QObject):
     stateChanged = Signal()
     apiUrlChanged = Signal()
     _resolved = Signal(str, object, str)  # url, OwnedBackend|None, error
+    _restarted = Signal(str, object, str)
+    restartFinished = Signal(str, str)  # url, error ("" on success)
 
     def __init__(self, argv: list[str], parent: QObject | None = None):
         super().__init__(parent)
@@ -26,6 +28,7 @@ class BackendController(QObject):
         self._busy = False
         self._closed = False
         self._resolved.connect(self._on_resolved)
+        self._restarted.connect(self._on_restarted)
         # An owned backend that dies is restarted; an attached one is re-resolved
         # by `recheck()` (called when the WebSocket drops).
         self._watch = QTimer(self)
@@ -97,6 +100,47 @@ class BackendController(QObject):
             discovery.remove_core_if(discovery.core_file(), self._owned.record)
             self._owned = None
             self.start()
+
+    @Slot()
+    def restart(self) -> None:
+        """Stop the backend and spawn a fresh one (Settings > Backend). Like GPUI `backend::restart`:
+        a backend we own is stopped through its handle, an adopted one is found by its port and
+        stopped only when it really is `wa-bot-backend`; either way we own the new one. Emits
+        `restartFinished(url, error)`."""
+        if self._busy or self._closed:
+            self.restartFinished.emit(self._api_url, "backend is busy")
+            return
+        self._busy = True
+        old, self._owned = self._owned, None
+        port = discovery.loopback_port(self._api_url)
+        use_registry = not self._explicit
+        self._set_state("resolving", "")
+
+        def work() -> None:
+            try:
+                url, owned = discovery.restart_backend(old, port, use_registry)
+                err = ""
+            except Exception as e:
+                url, owned, err = "", None, str(e)
+            self._restarted.emit(url, owned, err)
+
+        threading.Thread(target=work, name="backend-restart", daemon=True).start()
+
+    def _on_restarted(self, url: str, owned, err: str) -> None:
+        self._busy = False
+        if self._closed:
+            if owned is not None:
+                owned.stop()
+            return
+        if owned is not None:
+            self._owned = owned
+        if url and url != self._api_url:
+            self._api_url = url
+            self.apiUrlChanged.emit()
+        self._set_state("ready", "")
+        self.restartFinished.emit(self._api_url, err)
+        if err:
+            self.start()  # whatever went wrong, try to find or start a backend again
 
     @Slot()
     def recheck(self) -> None:
