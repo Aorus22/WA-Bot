@@ -126,6 +126,24 @@ func (ch *CallHandler) HangupCall(w http.ResponseWriter, r *http.Request) {
 	ch.handler.sendJSON(w, map[string]string{"status": "ended"})
 }
 
+// CreateMediaSession issues a one-shot token a client uses to attach its
+// microphone/camera to the call over the media WebSocket (ws_path?token=...).
+// A token is consumed by the first connection, so a reconnecting client asks
+// for a fresh one.
+func (ch *CallHandler) CreateMediaSession(w http.ResponseWriter, r *http.Request) {
+	id := ch.handler.getJID(r, "id")
+	sess, err := ch.callSvc.CreateMediaSession(id)
+	if err != nil {
+		writeCallError(ch.handler, w, err)
+		return
+	}
+	ch.handler.sendJSON(w, map[string]any{
+		"token":      sess.Token,
+		"expires_at": sess.ExpiresAt.UnixMilli(),
+		"ws_path":    "/ws/calls/" + id + "/media",
+	})
+}
+
 // StartVideo requests an audio→video upgrade on the active call.
 func (ch *CallHandler) StartVideo(w http.ResponseWriter, r *http.Request) {
 	id := ch.handler.getJID(r, "id")

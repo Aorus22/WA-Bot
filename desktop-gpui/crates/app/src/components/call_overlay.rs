@@ -12,6 +12,7 @@ use gpui_component::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::CallType;
 
+use crate::call_media::CallMediaState;
 use crate::icons::*;
 use crate::state::auth::AuthState;
 use crate::state::call::{format_duration, now_millis, CallManager};
@@ -51,6 +52,9 @@ const SKY: u32 = 0x0ea5e9;
 
 pub struct CallOverlayView {
     _call_sub: Subscription,
+    /// Repaints on every new picture or media error (absent until
+    /// `call_media::init` ran).
+    _media_sub: Option<Subscription>,
     now_ms: i64,
     action: Option<CallAction>,
     error: Option<String>,
@@ -61,6 +65,10 @@ impl CallOverlayView {
         let call_sub = cx.observe_global::<CallManager>(|_this, cx| {
             cx.notify();
         });
+
+        let media_sub = cx
+            .has_global::<CallMediaState>()
+            .then(|| cx.observe_global::<CallMediaState>(|_this, cx| cx.notify()));
 
         // 1s ticker keeps the connected duration live while a call is up.
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -92,6 +100,7 @@ impl CallOverlayView {
 
         Self {
             _call_sub: call_sub,
+            _media_sub: media_sub,
             now_ms: now_millis(),
             action: None,
             error: None,
@@ -416,6 +425,12 @@ impl CallOverlayView {
         let is_video = mgr.is_video_call() || video_on;
         let is_group = mgr.is_group_call();
 
+        // Live pictures and media problems from the call-media engine.
+        let (remote_image, local_image, media_error) = match CallMediaState::global(cx) {
+            Some(media) => (media.remote_image(), media.local_image(), media.error_text()),
+            None => (None, None, None),
+        };
+
         let participants = mgr
             .active_call
             .as_ref()
@@ -550,15 +565,52 @@ impl CallOverlayView {
                             .text_2xl()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(ON_DARK).opacity(0.95))
-                            .child(name),
+                            .child(name.clone()),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(rgb(ON_DARK).opacity(0.5))
-                            .child(peer),
+                            .child(peer.clone()),
                     ),
             );
+
+        // The other party's camera replaces the avatar while pictures arrive.
+        if let Some(remote) = remote_image.clone() {
+            column = v_flex()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .px_4()
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .rounded_xl()
+                        .overflow_hidden()
+                        .bg(rgb(0x000000))
+                        .child(
+                            img(ImageSource::Render(remote))
+                                .size_full()
+                                .object_fit(ObjectFit::Contain),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .left(px(12.0))
+                                .bottom(px(12.0))
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .bg(rgb(0x000000).opacity(0.5))
+                                .text_sm()
+                                .text_color(rgb(ON_DARK).opacity(0.95))
+                                .child(name.clone()),
+                        ),
+                );
+        }
 
         if is_group && !participant_labels.is_empty() {
             column = column.child(
@@ -649,9 +701,48 @@ impl CallOverlayView {
                                     .text_xs()
                                     .text_color(rgb(DANGER))
                                     .child(err.clone())
+                            }))
+                            .children(media_error.map(|err| {
+                                div()
+                                    .max_w(px(520.0))
+                                    .text_xs()
+                                    .text_center()
+                                    .text_color(rgb(AMBER))
+                                    .child(err)
                             })),
                     ),
             )
+            // Self-view while the local camera is on.
+            .children(video_on.then(|| {
+                let tile = div()
+                    .id("call-self-view")
+                    .absolute()
+                    .right(px(24.0))
+                    .bottom(px(210.0))
+                    .w(px(176.0))
+                    .h(px(132.0))
+                    .rounded_lg()
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(rgb(ON_DARK).opacity(0.25))
+                    .bg(rgb(0x18181b))
+                    .flex()
+                    .items_center()
+                    .justify_center();
+                match local_image {
+                    Some(local) => tile.child(
+                        img(ImageSource::Render(local))
+                            .size_full()
+                            .object_fit(ObjectFit::Cover),
+                    ),
+                    None => tile.child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(ON_DARK).opacity(0.6))
+                            .child("Starting camera…"),
+                    ),
+                }
+            }))
             .with_animation(
                 "call-overlay-in",
                 crate::components::motion::enter(crate::components::motion::BASE_MS),

@@ -560,6 +560,12 @@ export type CallLog = {
         created_at: number
 }
 
+export type CallMediaSession = {
+        token: string
+        expires_at: number
+        ws_path: string
+}
+
 export type CallHistoryResponse = {
         logs: CallLog[]
 }
@@ -1385,6 +1391,13 @@ class ApiClient {	private baseUrl: string
 
 	async rejectCall(id: string): Promise<{ status: string }> {
 		return this.request<{ status: string }>(`/calls/${encodeURIComponent(id)}/reject`, {
+			method: "POST",
+		})
+	}
+
+	/** One-shot token (120 s) + path for the call media WebSocket. Request a fresh one per (re)connect. */
+	async createCallMediaSession(id: string): Promise<CallMediaSession> {
+		return this.request<CallMediaSession>(`/calls/${encodeURIComponent(id)}/media-session`, {
 			method: "POST",
 		})
 	}

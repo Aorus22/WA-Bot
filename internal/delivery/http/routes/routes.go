@@ -209,6 +209,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/calls/{id}/answer", callHandler.AnswerCall).Methods("POST", "OPTIONS")
 	api.HandleFunc("/calls/{id}/reject", callHandler.RejectCall).Methods("POST", "OPTIONS")
 	api.HandleFunc("/calls/{id}/hangup", callHandler.HangupCall).Methods("POST", "OPTIONS")
+	api.HandleFunc("/calls/{id}/media-session", callHandler.CreateMediaSession).Methods("POST", "OPTIONS")
 	api.HandleFunc("/calls/{id}/video/start", callHandler.StartVideo).Methods("POST", "OPTIONS")
 	api.HandleFunc("/calls/{id}/video/accept", callHandler.AcceptVideo).Methods("POST", "OPTIONS")
 	api.HandleFunc("/calls/{id}/video/reject", callHandler.RejectVideo).Methods("POST", "OPTIONS")

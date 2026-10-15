@@ -2,6 +2,8 @@ package call
 
 import (
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/purpshell/meowcaller"
 )
@@ -25,6 +27,8 @@ type CallVideo struct {
 	closed    chan struct{}
 	closeOnce sync.Once
 	call      *meowcaller.Call
+	// orientation is the peer's display orientation in clockwise quarter turns.
+	orientation atomic.Int32
 }
 
 // NewCallVideo builds the video bridge for the given call.
@@ -52,17 +56,60 @@ func NewCallVideo(call *meowcaller.Call, buffer int) *CallVideo {
 }
 
 // Sink returns the meowcaller.VideoSink adapter forwarding inbound access units
-// to the bridge queue. Frames are dropped when the queue is full (no consumer).
-func (v *CallVideo) Sink() meowcaller.VideoSink {
-	return meowcaller.VideoSinkFunc(func(accessUnit []byte) {
+// to the bridge queue. It also receives the peer's display orientation
+// (meowcaller.VideoOrientationSink). When the queue is full the oldest unit is
+// dropped so a slow consumer sees recent frames rather than stale ones.
+func (v *CallVideo) Sink() meowcaller.VideoSink { return &videoSink{v: v} }
+
+type videoSink struct{ v *CallVideo }
+
+func (s *videoSink) WriteVideo(accessUnit []byte) error {
+	v := s.v
+	select {
+	case <-v.closed:
+		return nil
+	default:
+	}
+	// The access unit is only valid during this call; copy before queueing.
+	frame := VideoFrame{AccessUnit: append([]byte(nil), accessUnit...)}
+	for {
 		select {
-		case <-v.closed:
-			return
-		case v.frames <- VideoFrame{AccessUnit: accessUnit}:
+		case v.frames <- frame:
+			return nil
 		default:
-			// no consumer: drop
 		}
-	})
+		select {
+		case <-v.frames:
+		default:
+		}
+	}
+}
+
+func (s *videoSink) Close() error { return nil }
+
+func (s *videoSink) SetOrientation(orientation int) { s.v.SetOrientation(orientation) }
+
+// SetOrientation records the peer's display orientation (clockwise quarter turns).
+func (v *CallVideo) SetOrientation(orientation int) {
+	v.orientation.Store(int32(((orientation % 4) + 4) % 4))
+}
+
+// Orientation returns the peer's display orientation in clockwise quarter turns.
+func (v *CallVideo) Orientation() int { return int(v.orientation.Load()) }
+
+// CanSend reports whether the call currently owns an outbound video flow, i.e.
+// whether encoding pictures from the client is worthwhile.
+func (v *CallVideo) CanSend() bool {
+	return v.call != nil && v.call.IsSendingVideo()
+}
+
+// SendVideoWithDuration forwards one access unit and advances the RTP clock by
+// the time since the previous picture.
+func (v *CallVideo) SendVideoWithDuration(accessUnit []byte, d time.Duration) error {
+	if v.call == nil {
+		return ErrCallNotActive
+	}
+	return v.call.SendVideoWithDuration(accessUnit, d)
 }
 
 // Frames returns the inbound video queue drained by the media WebSocket writer.

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, dialog, session, systemPreferences } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -128,6 +128,31 @@ ipcMain.handle('get-backend-port', () => {
     return backendPort;
 });
 
+// Microphone/camera for calls (getUserMedia). Electron grants every permission
+// when no handler is installed; we keep that behaviour but, on macOS, also ask
+// the OS for microphone/camera access so getUserMedia does not silently fail.
+function setupMediaPermissions() {
+    const ses = session.defaultSession;
+    ses.setPermissionCheckHandler(() => true);
+    ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+        if (permission !== 'media') {
+            callback(true);
+            return;
+        }
+        if (process.platform !== 'darwin') {
+            callback(true);
+            return;
+        }
+        const types = (details && details.mediaTypes) || [];
+        const wanted = [];
+        if (types.includes('audio')) wanted.push('microphone');
+        if (types.includes('video')) wanted.push('camera');
+        Promise.all(wanted.map((t) => systemPreferences.askForMediaAccess(t)))
+            .then((results) => callback(results.every(Boolean)))
+            .catch(() => callback(false));
+    });
+}
+
 function createWindow() {
     const isWin = process.platform === 'win32';
     const isMac = process.platform === 'darwin';
@@ -150,7 +175,9 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js')
+            preload: path.join(__dirname, 'preload.js'),
+            // Calls: remote audio must start playing without a click inside the window.
+            autoplayPolicy: 'no-user-gesture-required'
         },
         title: "WA Bot Desktop",
         icon: nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png')),
@@ -240,6 +267,7 @@ app.on('ready', () => {
     } else {
         startBackend();
     }
+    setupMediaPermissions();
     createWindow();
 });
 

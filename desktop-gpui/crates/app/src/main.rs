@@ -130,6 +130,8 @@ fn main() {
             cx.set_global(ConnectionState::default());
             cx.set_global(ChatStore::new());
             cx.set_global(CallManager::new());
+            // Mic, speaker and camera follow the call state (media WebSocket).
+            wabot_app::call_media::init(cx);
 
             let mut auth_state = AuthState::default();
             let base_url = detect_backend_url();

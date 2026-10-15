@@ -46,11 +46,18 @@ notify-rust = { workspace = true }
 tempfile = { workspace = true }
 # Microphone capture for voice notes (ALSA on Linux, which the .deb already depends on).
 cpal = "=0.15.3"
+# JPEG decoding of call video frames and the tray icon (PNG); both codecs are
+# already compiled in through gpui.
+image = { workspace = true }
+
+[dev-dependencies]
+# Fake media WebSocket server in the call session tests.
+futures-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }
 ksni = { workspace = true }
-image = { workspace = true }
 
 [package.metadata.deb]
 name = "wa-bot"

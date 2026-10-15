@@ -1,14 +1,18 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useSyncExternalStore } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { VideoOff, Maximize2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { RemoteVideoRenderer } from "@/lib/callVideo"
 
 type Props = {
   callId: string
   localEnabled: boolean
   remoteEnabled: boolean
   targetLabel: string
-  onIncomingVideo?: (data: Uint8Array, participantJid?: string) => void
+  /** Live camera stream for the local picture-in-picture (owned by the parent). */
+  localStream: MediaStream | null
+  /** Paints incoming JPEG frames on the canvas this component attaches. */
+  remoteRenderer: RemoteVideoRenderer
   className?: string
 }
 
@@ -20,52 +24,26 @@ function initials(label: string) {
   return (parts[0][0] + parts[1][0]).toUpperCase()
 }
 
-export function VideoStage({ localEnabled, remoteEnabled, targetLabel, onIncomingVideo, className }: Props) {
+export function VideoStage({ localEnabled, remoteEnabled, targetLabel, localStream, remoteRenderer, className }: Props) {
   const remoteCanvasRef = useRef<HTMLCanvasElement>(null)
-  const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
-  const localStreamRef = useRef<MediaStream | null>(null)
 
-  // Local preview when enabled
-  useEffect(() => {
-    if (!localEnabled) {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((t) => t.stop())
-        localStreamRef.current = null
-      }
-      if (localVideoRef.current) localVideoRef.current.srcObject = null
-      return
-    }
-    let cancelled = false
-    async function start() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop())
-          return
-        }
-        localStreamRef.current = stream
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream
-      } catch {
-        // permission denied — keep fallback
-      }
-    }
-    start()
-    return () => {
-      cancelled = true
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((t) => t.stop())
-        localStreamRef.current = null
-      }
-    }
-  }, [localEnabled])
+  const hasRemoteFrames = useSyncExternalStore(
+    (onChange) => remoteRenderer.subscribe(onChange),
+    () => remoteRenderer.hasFrames,
+  )
 
-  // Remote video placeholder rendering — if backend sends H264 access units,
-  // the parent wires onIncomingVideo to decode via WebCodecs. We keep a canvas ready.
+  // Local preview: the parent owns the camera (it also feeds the call), we only display it.
   useEffect(() => {
-    if (!onIncomingVideo) return
-    // parent already hooks useCallMedia; this effect just keeps refs ready
-  }, [onIncomingVideo])
+    const el = localVideoRef.current
+    if (!el) return
+    el.srcObject = localEnabled ? localStream : null
+  }, [localEnabled, localStream])
+
+  useEffect(() => {
+    remoteRenderer.attach(remoteEnabled ? remoteCanvasRef.current : null)
+    return () => remoteRenderer.attach(null)
+  }, [remoteRenderer, remoteEnabled])
 
   // Simple animated placeholder for remote when enabled but no frames yet
   return (
@@ -83,30 +61,27 @@ export function VideoStage({ localEnabled, remoteEnabled, targetLabel, onIncomin
 
         {remoteEnabled ? (
           <>
-            {/* when we have real video, video element would be visible */}
-            <video
-              ref={remoteVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className={cn("absolute inset-0 w-full h-full object-cover", "hidden")}
+            <canvas
+              ref={remoteCanvasRef}
+              className={cn("absolute inset-0 h-full w-full object-contain", !hasRemoteFrames && "opacity-0")}
             />
-            <canvas ref={remoteCanvasRef} className="absolute inset-0 w-full h-full hidden" />
 
             {/* placeholder until frames arrive */}
-            <div className="relative z-10 flex flex-col items-center gap-4 px-6 text-center">
-              <div className="h-20 w-20 rounded-full bg-white/10 backdrop-blur flex items-center justify-center border border-white/10">
-                <span className="text-xl font-semibold tracking-tight text-white">{initials(targetLabel)}</span>
+            {!hasRemoteFrames && (
+              <div className="relative z-10 flex flex-col items-center gap-4 px-6 text-center">
+                <div className="h-20 w-20 rounded-full bg-white/10 backdrop-blur flex items-center justify-center border border-white/10">
+                  <span className="text-xl font-semibold tracking-tight text-white">{initials(targetLabel)}</span>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-white/90">Remote camera on</p>
+                  <p className="text-xs text-white/50">Waiting for video stream…</p>
+                </div>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-[11px] tracking-widest font-medium text-white/60 uppercase">Live</span>
+                </div>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-white/90">Remote camera on</p>
-                <p className="text-xs text-white/50">Waiting for video stream…</p>
-              </div>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[11px] tracking-widest font-medium text-white/60 uppercase">Live</span>
-              </div>
-            </div>
+            )}
 
             {/* shimmer bar */}
             <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent" />

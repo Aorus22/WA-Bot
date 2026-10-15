@@ -51,8 +51,8 @@ type CallMedia struct {
 // meowcaller call exists); the bridges simply stay unwired until then.
 func NewCallMedia(call *meowcaller.Call) *CallMedia {
 	m := &CallMedia{
-		source: NewChannelAudioSource(16),
-		sink:   NewChannelAudioSink(32),
+		source: NewChannelAudioSource(3),
+		sink:   NewChannelAudioSink(8),
 		video:  NewCallVideo(call, 32),
 		done:   make(chan struct{}),
 	}
@@ -79,6 +79,35 @@ func (m *CallMedia) WriteOutgoingVideo(accessUnit []byte) error {
 		return ErrCallNotActive
 	}
 	return m.video.SendVideo(accessUnit)
+}
+
+// WriteOutgoingVideoDuration forwards one H.264 access unit, advancing the RTP
+// timestamp by the time since the previous picture.
+func (m *CallMedia) WriteOutgoingVideoDuration(accessUnit []byte, d time.Duration) error {
+	if m == nil || m.video == nil {
+		return ErrCallNotActive
+	}
+	return m.video.SendVideoWithDuration(accessUnit, d)
+}
+
+// CanSendVideo reports whether the call currently accepts outgoing video.
+func (m *CallMedia) CanSendVideo() bool {
+	return m != nil && m.video != nil && m.video.CanSend()
+}
+
+// VideoOrientation is the peer's display orientation in clockwise quarter turns.
+func (m *CallMedia) VideoOrientation() int {
+	if m == nil || m.video == nil {
+		return 0
+	}
+	return m.video.Orientation()
+}
+
+// SetVideoOrientation records the peer's display orientation.
+func (m *CallMedia) SetVideoOrientation(orientation int) {
+	if m != nil && m.video != nil {
+		m.video.SetOrientation(orientation)
+	}
 }
 
 // IncomingAudio returns the inbound remote-audio frame channel drained by the

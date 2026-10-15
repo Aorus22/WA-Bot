@@ -69,14 +69,116 @@ func (h *CallMediaHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return conn.WriteMessage(msgType, data)
 	}
 
-	go h.readPump(conn, media)
-	h.writePump(conn, media, write)
+	video := newMediaVideo(media, r.URL.Query().Get("video") == "jpeg")
+	defer video.close()
+
+	go h.readPump(conn, media, video)
+	h.writePump(conn, media, video, write)
+}
+
+// mediaVideo adapts the call's H.264 video to what this connection speaks. In
+// "jpeg" mode the client exchanges plain JPEG pictures and ffmpeg transcodes to
+// and from H.264; otherwise access units pass through untouched. Encoder and
+// decoder are started on first use, so audio-only calls never spawn ffmpeg.
+type mediaVideo struct {
+	media *call.CallMedia
+	jpeg  bool
+
+	mu        sync.Mutex
+	enc       *call.JPEGToH264
+	encFailed bool
+	dec       *call.H264ToJPEG
+	closed    bool
+}
+
+func newMediaVideo(media *call.CallMedia, jpeg bool) *mediaVideo {
+	v := &mediaVideo{media: media, jpeg: jpeg}
+	if jpeg {
+		v.dec = call.NewH264ToJPEG()
+	}
+	return v
+}
+
+// decoded returns the decoded-picture channel, nil (blocks forever in a select)
+// when the connection is not in JPEG mode.
+func (v *mediaVideo) decoded() <-chan []byte {
+	if v.dec == nil {
+		return nil
+	}
+	return v.dec.Frames()
+}
+
+// fromClient handles one outgoing video payload from the client.
+func (v *mediaVideo) fromClient(payload []byte) {
+	if len(payload) >= 2 && payload[0] == 0xff && payload[1] == 0xd8 {
+		if !v.jpeg || !v.media.CanSendVideo() {
+			return
+		}
+		v.mu.Lock()
+		if v.closed || v.encFailed {
+			v.mu.Unlock()
+			return
+		}
+		if v.enc == nil {
+			enc, err := call.NewJPEGToH264(func(au []byte, d time.Duration) {
+				_ = v.media.WriteOutgoingVideoDuration(au, d)
+			})
+			if err != nil {
+				log.Printf("media ws: video unavailable: %v", err)
+				v.encFailed = true
+				v.mu.Unlock()
+				return
+			}
+			v.enc = enc
+		}
+		enc := v.enc
+		v.mu.Unlock()
+		enc.WriteJPEG(payload)
+		return
+	}
+	// Already H.264 Annex-B: pass through.
+	_ = v.media.WriteOutgoingVideo(payload)
+}
+
+// toClient handles one H.264 access unit from the peer.
+func (v *mediaVideo) toClient(au []byte) {
+	if v.dec != nil {
+		v.dec.WriteAU(au)
+	}
+}
+
+// keyframeRequested reports whether the request was handled locally (JPEG mode:
+// the encoder is restarted so the next picture is an IDR).
+func (v *mediaVideo) keyframeRequested() bool {
+	if !v.jpeg {
+		return false
+	}
+	v.mu.Lock()
+	enc := v.enc
+	v.mu.Unlock()
+	if enc != nil {
+		enc.ForceKeyframe()
+	}
+	return true
+}
+
+func (v *mediaVideo) close() {
+	v.mu.Lock()
+	v.closed = true
+	enc := v.enc
+	v.mu.Unlock()
+	if enc != nil {
+		enc.Close()
+	}
+	if v.dec != nil {
+		v.dec.Close()
+	}
 }
 
 // readPump reads binary frames from the browser and feeds them into the call.
 // A 1 MiB read limit bounds a single frame; a pong handler keeps the read
 // deadline alive so a quiet-but-connected browser is not spuriously dropped.
-func (h *CallMediaHandler) readPump(conn *websocket.Conn, media *call.CallMedia) {
+func (h *CallMediaHandler) readPump(conn *websocket.Conn, media *call.CallMedia, video *mediaVideo) {
 	defer conn.Close()
 	conn.SetReadLimit(1 << 20)
 	conn.SetPongHandler(func(string) error {
@@ -104,7 +206,7 @@ func (h *CallMediaHandler) readPump(conn *websocket.Conn, media *call.CallMedia)
 			}
 			media.WriteOutgoingAudio(frame)
 		case call.FrameKindOutgoingVideo:
-			_ = media.WriteOutgoingVideo(payload)
+			video.fromClient(payload)
 		}
 	}
 }
@@ -112,11 +214,12 @@ func (h *CallMediaHandler) readPump(conn *websocket.Conn, media *call.CallMedia)
 // writePump drains the call's inbound media and control channels and writes
 // them to the browser. It returns when the connection is gone or the call ends
 // (media.Ended fires), sending a close frame so the peer sees a clean shutdown.
-func (h *CallMediaHandler) writePump(conn *websocket.Conn, media *call.CallMedia, write func(int, []byte) error) {
+func (h *CallMediaHandler) writePump(conn *websocket.Conn, media *call.CallMedia, video *mediaVideo, write func(int, []byte) error) {
 	audioCh := media.IncomingAudio()
 	videoCh := media.IncomingVideo()
 	keyframeCh := media.KeyframeRequests()
 	endedCh := media.Ended()
+	picCh := video.decoded()
 
 	pingTicker := time.NewTicker(54 * time.Second)
 	defer pingTicker.Stop()
@@ -139,6 +242,10 @@ func (h *CallMediaHandler) writePump(conn *websocket.Conn, media *call.CallMedia
 			if !ok {
 				return
 			}
+			if video.jpeg {
+				video.toClient(vf.AccessUnit)
+				continue
+			}
 			meta, _ := json.Marshal(map[string]string{"participant_jid": vf.ParticipantJID})
 			data, err := call.EncodeFrame(call.FrameKindIncomingVideo, meta, vf.AccessUnit)
 			if err != nil {
@@ -148,9 +255,26 @@ func (h *CallMediaHandler) writePump(conn *websocket.Conn, media *call.CallMedia
 			if err := write(websocket.BinaryMessage, data); err != nil {
 				return
 			}
+		case pic := <-picCh:
+			meta, _ := json.Marshal(map[string]any{
+				"participant_jid": "",
+				"orientation":     media.VideoOrientation(),
+				"format":          "jpeg",
+			})
+			data, err := call.EncodeFrame(call.FrameKindIncomingVideo, meta, pic)
+			if err != nil {
+				log.Printf("media ws encode picture: %v", err)
+				continue
+			}
+			if err := write(websocket.BinaryMessage, data); err != nil {
+				return
+			}
 		case _, ok := <-keyframeCh:
 			if !ok {
 				return
+			}
+			if video.keyframeRequested() {
+				continue
 			}
 			body, _ := json.Marshal(mediaControlMessage{Type: "keyframe_request"})
 			data, err := call.EncodeFrame(call.FrameKindKeyframe, nil, body)

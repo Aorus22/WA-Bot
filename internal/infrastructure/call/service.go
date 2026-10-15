@@ -1096,6 +1096,7 @@ func (s *CallService) wireCallbacks(session *CallSession, call *meowcaller.Call)
 			return
 		}
 		session.RemoteVideoEnabled = vs.Active
+		session.Media.SetVideoOrientation(vs.Orientation)
 		videoEnabled := session.VideoEnabled
 		remoteVideoEnabled := session.RemoteVideoEnabled
 		s.mu.Unlock()

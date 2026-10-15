@@ -4,6 +4,8 @@ import { useCallMedia } from "@/hooks/useCallMedia"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { VideoStage } from "@/components/call/VideoStage"
+import { CallAudioEngine } from "@/lib/callAudio"
+import { CameraSender, RemoteVideoRenderer } from "@/lib/callVideo"
 import { PhoneOff, Mic, MicOff, Volume2, VolumeX, Video, VideoOff, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -36,7 +38,16 @@ export function CallOverlay() {
 	const [ending, setEnding] = useState(false)
 	const [cameraBusy, setCameraBusy] = useState(false)
 	const [now, setNow] = useState(() => Date.now())
-	const media = useCallMedia()
+	const [audioError, setAudioError] = useState<string | null>(null)
+	const [cameraError, setCameraError] = useState<string | null>(null)
+	const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+	const [remoteRenderer] = useState(() => new RemoteVideoRenderer())
+	const engineRef = useRef<CallAudioEngine | null>(null)
+	const media = useCallMedia({
+		onIncomingAudio: (frame) => engineRef.current?.playRemote(frame),
+		onIncomingVideo: (jpeg, meta) => remoteRenderer.push(jpeg, meta.orientation),
+	})
+	const { connectMedia, disconnectMedia, sendAudioFrame, sendVideoFrame, isMuted } = media
 
 	const call = activeCall
 	const visible = useMemo(() => {
@@ -58,21 +69,61 @@ export function CallOverlay() {
 		return () => window.clearInterval(i)
 	}, [visible])
 
-	// media connection lifecycle
+	// Media session: audio engine (mic + playback) and the media socket live as long
+	// as the call is answered/connecting for this call id.
 	const callId = call?.id ?? null
-	const wasVisible = useRef(false)
+	const sessionCallId = visible && connected ? callId : null
 	useEffect(() => {
-		if (visible && connected && callId) {
-			if (!wasVisible.current) {
-				media.connectMedia(callId)
-				wasVisible.current = true
-			}
+		if (!sessionCallId) return
+		const engine = new CallAudioEngine()
+		engine.open()
+		engineRef.current = engine
+		engine.startMicrophone(sendAudioFrame).catch((err: unknown) => {
+			if (engineRef.current === engine) setAudioError(err instanceof Error ? err.message : "Could not start the microphone.")
+		})
+		connectMedia(sessionCallId)
+		return () => {
+			engine.close()
+			if (engineRef.current === engine) engineRef.current = null
+			disconnectMedia()
+			setAudioError(null)
 		}
-		if (!visible && wasVisible.current) {
-			media.disconnectMedia()
-			wasVisible.current = false
+	}, [sessionCallId, connectMedia, disconnectMedia, sendAudioFrame])
+
+	useEffect(() => {
+		engineRef.current?.setMuted(isMuted)
+	}, [isMuted, sessionCallId])
+
+	useEffect(() => {
+		engineRef.current?.setSpeakerOn(speakerOn)
+	}, [speakerOn, sessionCallId])
+
+	// Camera: capture and send JPEG frames while video is on during a live call.
+	const wantCamera = !!sessionCallId && !!cameraOn
+	useEffect(() => {
+		if (!wantCamera) return
+		let cancelled = false
+		const sender = new CameraSender()
+		sender
+			.start(sendVideoFrame)
+			.then((stream) => {
+				if (!cancelled) setLocalStream(stream)
+			})
+			.catch((err: unknown) => {
+				if (!cancelled) setCameraError(err instanceof Error ? err.message : "Could not start the camera.")
+			})
+		return () => {
+			cancelled = true
+			sender.stop()
+			setLocalStream(null)
+			setCameraError(null)
 		}
-	}, [visible, connected, callId]) // eslint-disable-line react-hooks/exhaustive-deps
+	}, [wantCamera, sendVideoFrame])
+
+	// Forget the last remote picture when the remote camera goes off or the call ends.
+	useEffect(() => {
+		if (!remoteOn || !sessionCallId) remoteRenderer.reset()
+	}, [remoteOn, sessionCallId, remoteRenderer])
 
 	if (!visible || !call) return null
 
@@ -137,6 +188,21 @@ export function CallOverlay() {
 					)}
 				</div>
 
+				{(audioError || cameraError || media.mediaError) && (
+					<div className="mx-auto mt-3 flex max-w-[90%] flex-wrap items-center justify-center gap-2 rounded-full border border-amber-400/30 bg-amber-500/15 px-3.5 py-1.5 text-xs font-medium text-amber-200 backdrop-blur">
+						<span>{audioError ?? cameraError ?? media.mediaError}</span>
+						{!audioError && !cameraError && media.mediaError && (
+							<button
+								type="button"
+								className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] hover:bg-white/20"
+								onClick={() => connectMedia(call.id)}
+							>
+								Retry
+							</button>
+						)}
+					</div>
+				)}
+
 				<div className="flex-1 min-h-0 p-4 sm:p-6 flex flex-col items-center justify-center gap-5">
 					{showVideo ? (
 						<div className="w-full max-w-4xl flex-1 min-h-0">
@@ -145,6 +211,8 @@ export function CallOverlay() {
 								localEnabled={cameraOn}
 								remoteEnabled={remoteOn}
 								targetLabel={call.target}
+								localStream={localStream}
+								remoteRenderer={remoteRenderer}
 								className="h-full"
 							/>
 						</div>

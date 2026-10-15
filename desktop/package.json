@@ -50,7 +50,11 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.png",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "WA Bot uses the microphone for voice and video calls.",
+        "NSCameraUsageDescription": "WA Bot uses the camera for video calls."
+      }
     },
     "linux": {
       "target": "AppImage",
