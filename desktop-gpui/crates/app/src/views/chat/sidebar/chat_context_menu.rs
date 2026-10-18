@@ -23,7 +23,7 @@ impl ChatView {
             let confirm_leave = ctx.confirm_leave;
             let show_mute_submenu = ctx.show_mute_submenu;
             let menu_pos = ctx.position;
-            let hover_bg: Hsla = theme.muted.opacity(0.6);
+            let hover_bg: Hsla = theme.foreground.opacity(0.12);
             let danger: Hsla = rgb(0xef4444).into();
 
             let mut menu = menu_surface(232.0, card_bg, border_color)
@@ -36,7 +36,7 @@ impl ChatView {
             if unread > 0 {
                 let cid = chat_id.clone();
                 menu = menu.child(
-                    menu_row("cm-read", CHECK_CHECK_SVG, "Mark as read", primary_color, text_color, hover_bg)
+                    menu_row(window, cx, "cm-read", CHECK_CHECK_SVG, "Mark as read", primary_color, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                             this.mark_chat_read_action(cid.clone(), cx);
                             this.chat_context_menu = None;
@@ -50,6 +50,8 @@ impl ChatView {
                 let cid = chat_id.clone();
                 menu = menu.child(
                     menu_row(
+                            window,
+                            cx,
                         "cm-archive",
                         ARCHIVE_SVG,
                         if is_archived { "Unarchive chat" } else { "Archive chat" },
@@ -69,7 +71,7 @@ impl ChatView {
             if is_muted {
                 let cid = chat_id.clone();
                 menu = menu.child(
-                    menu_row("cm-unmute", VOLUME_X_SVG, "Unmute notifications", muted_text, text_color, hover_bg)
+                    menu_row(window, cx, "cm-unmute", VOLUME_X_SVG, "Unmute notifications", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                             this.set_mute(cid.clone(), "off".to_string(), cx);
                             this.chat_context_menu = None;
@@ -78,7 +80,7 @@ impl ChatView {
                 );
             } else {
                 menu = menu.child(
-                    menu_row("cm-mute", VOLUME_X_SVG, "Mute notifications", muted_text, text_color, hover_bg)
+                    menu_row(window, cx, "cm-mute", VOLUME_X_SVG, "Mute notifications", muted_text, text_color, hover_bg)
                         .child(div().flex_1())
                         .child(svg().data(CHEVRON_RIGHT_SVG).size(px(13.0)).text_color(muted_text))
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
@@ -96,14 +98,14 @@ impl ChatView {
                     ] {
                         let cid = chat_id.clone();
                         menu = menu.child(
-                            h_flex()
-                                .id(id)
-                                .cursor_pointer()
-                                .pl_12()
-                                .pr_5()
-                                .py_2()
-                                .items_center()
-                                .hover(move |s| s.bg(hover_bg))
+                            with_hover_fade(
+                                h_flex().id(id).cursor_pointer().pl_12().pr_5().py_2().items_center(),
+                                id,
+                                hover_bg,
+                                px(0.0),
+                                window,
+                                cx,
+                            )
                                 .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child(label))
                                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                                     this.set_mute(cid.clone(), mode.to_string(), cx);
@@ -120,6 +122,8 @@ impl ChatView {
                 let cid = chat_id.clone();
                 menu = menu.child(
                     menu_row(
+                            window,
+                            cx,
                         "cm-pin",
                         PIN_SVG,
                         if is_pinned { "Unpin chat" } else { "Pin chat" },
@@ -142,6 +146,8 @@ impl ChatView {
                     .child(menu_separator(border_color))
                     .child(
                         menu_row(
+                            window,
+                            cx,
                             "cm-exit",
                             USER_MINUS_SVG,
                             if confirm_leave { "Click again to exit group" } else { "Exit group" },

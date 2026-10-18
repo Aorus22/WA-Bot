@@ -1662,6 +1662,103 @@ func (s *MessageStore) SaveReceipt(msgID, participantJID string, kind ReceiptKin
 	return err == nil, err
 }
 
+// TickFor is the tick a message deserves given how many of its `total`
+// recipients have it: sent until everyone has it, delivered until everyone has
+// read it. A private chat is the case total = 1.
+func TickFor(delivered, read, total int) string {
+	switch {
+	case total > 0 && read >= total:
+		return "read"
+	case total > 0 && delivered >= total:
+		return "delivered"
+	}
+	return "sent"
+}
+
+// RecordReceipt is the one place a delivery or read receipt changes anything:
+// it stores the receipt, derives the message's tick from every receipt stored
+// so far and moves the stored status forward to it. Because the tick comes
+// from the receipts, the order they arrive in does not matter. total is the
+// number of recipients (1 in a private chat, 0 when unknown). Receipts for
+// messages that are not ours are ignored.
+func (s *MessageStore) RecordReceipt(msgID, participantJID string, kind ReceiptKind, at int64, exclude map[string]bool, total int) (status string, changed bool, err error) {
+	participantJID = strings.TrimSpace(participantJID)
+	if participantJID == "" {
+		return "", false, nil
+	}
+	if at <= 0 {
+		at = time.Now().UnixMilli()
+	}
+	deliveredAt, readAt := at, int64(0)
+	if kind == ReceiptRead {
+		readAt = at
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var chatID, current string
+	err = s.db.QueryRow(`SELECT chat_id, ifnull(status, '') FROM messages WHERE id = ? AND sender_id = 'me' LIMIT 1`, msgID).Scan(&chatID, &current)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if _, err = s.db.Exec(`INSERT INTO message_read_receipts
+		(message_id, chat_id, participant_jid, delivered_at, read_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(message_id, participant_jid) DO UPDATE SET
+			delivered_at = CASE WHEN delivered_at = 0 THEN excluded.delivered_at ELSE delivered_at END,
+			read_at = CASE WHEN read_at = 0 THEN excluded.read_at ELSE read_at END`,
+		msgID, chatID, participantJID, deliveredAt, readAt); err != nil {
+		return "", false, err
+	}
+
+	rows, err := s.db.Query(`SELECT participant_jid, delivered_at, read_at FROM message_read_receipts WHERE message_id = ?`, msgID)
+	if err != nil {
+		return "", false, err
+	}
+	delivered, read := 0, 0
+	for rows.Next() {
+		var jid string
+		var d, r int64
+		if err := rows.Scan(&jid, &d, &r); err != nil {
+			rows.Close()
+			return "", false, err
+		}
+		if exclude[jidUser(jid)] {
+			continue
+		}
+		if d > 0 || r > 0 {
+			delivered++
+		}
+		if r > 0 {
+			read++
+		}
+	}
+	rows.Close()
+
+	status = TickFor(delivered, read, total)
+	if tickRank(current) >= tickRank(status) {
+		return current, false, nil
+	}
+	if _, err = s.db.Exec(`UPDATE messages SET status = ? WHERE id = ?`, status, msgID); err != nil {
+		return "", false, err
+	}
+	return status, true, nil
+}
+
+func tickRank(v string) int {
+	switch v {
+	case "read":
+		return 3
+	case "delivered":
+		return 2
+	case "sent":
+		return 1
+	}
+	return 0
+}
+
 // GroupMessagesWithReceipts lists outgoing group messages that already carry
 // receipts, with the status they are stored under.
 func (s *MessageStore) GroupMessagesWithReceipts() ([]MessageStatusRow, error) {
@@ -1684,6 +1781,38 @@ func (s *MessageStore) GroupMessagesWithReceipts() ([]MessageStatusRow, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// RepairPrivateReadStatuses raises outgoing private-chat messages that have a
+// stored read receipt but a lower tick (a late "delivered" receipt used to
+// overwrite "read"). It returns the ids it changed.
+func (s *MessageStore) RepairPrivateReadStatuses() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT m.id FROM messages m
+		LEFT JOIN chats c ON c.id = m.chat_id
+		WHERE m.sender_id = 'me' AND ifnull(c.is_group, 0) = 0
+		  AND ifnull(m.status, '') IN ('', 'sent', 'delivered')
+		  AND EXISTS (SELECT 1 FROM message_read_receipts r WHERE r.message_id = m.id AND r.read_at > 0)`)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		if _, err := s.db.Exec(`UPDATE messages SET status = 'read' WHERE id = ?`, id); err != nil {
+			return nil, err
+		}
+	}
+	return ids, nil
 }
 
 // MessageStatusRow is a stored message id with its chat and tick status.

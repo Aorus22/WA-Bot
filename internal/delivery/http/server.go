@@ -251,10 +251,6 @@ func (s *HTTPServer) SaveAndBroadcastMessage(msg *repository.Message) {
 	s.handler.SaveAndBroadcastMessage(msg)
 }
 
-func (s *HTTPServer) UpdateMessageStatus(msgID, status string) {
-	s.handler.UpdateMessageStatus(msgID, status)
-}
-
 func (s *HTTPServer) SendToUser(userID string, msgType string, payload interface{}) {
 	s.handler.SendToUser(userID, msgType, payload)
 }

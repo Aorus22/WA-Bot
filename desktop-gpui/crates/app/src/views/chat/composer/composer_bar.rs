@@ -203,6 +203,7 @@ impl ChatView {
                 primary_color,
                 text_color,
                 muted_text,
+                window,
                 cx,
             ))
             .children({
@@ -224,17 +225,16 @@ impl ChatView {
                         .border_color(border_color)
                         .shadow_xl()
                         .children(members.into_iter().enumerate().map(|(index, (jid, name, is_admin))| {
-                            h_flex()
-                                .id(SharedString::from(format!("mention-{jid}")))
-                                .w_full()
-                                .cursor_pointer()
-                                .items_center()
-                                .gap_3()
-                                .px_3()
-                                .py_2()
-                                .rounded_lg()
+                            let key = SharedString::from(format!("mention-{jid}"));
+                            with_hover_fade(
+                                h_flex().id(key.clone()).w_full().cursor_pointer().items_center().gap_3().px_3().py_2().rounded_lg(),
+                                key,
+                                theme.foreground.opacity(0.12),
+                                px(8.0),
+                                window,
+                                cx,
+                            )
                                 .when(index == selected, |row| row.bg(primary_color.opacity(0.18)))
-                                .hover(|style| style.bg(theme.muted.opacity(0.55)))
                                 .child(render_avatar(&jid, &name, "", false, 32.0, &base_url, &theme))
                                 .child(
                                     v_flex()

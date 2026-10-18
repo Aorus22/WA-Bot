@@ -306,21 +306,7 @@ impl ChatView {
                                 .overflow_hidden()
                                 .relative()
                                 .cursor_pointer()
-                                // The picture has its own menu (copy, save), not the bubble's.
-                                .on_mouse_down(MouseButton::Right, cx.listener({
-                                    let url = click_url.clone();
-                                    move |this, ev: &MouseDownEvent, _, cx| {
-                                        cx.stop_propagation();
-                                        this.context_menu = None;
-                                        this.text_menu = None;
-                                        this.image_menu = Some(ImageMenu {
-                                            file_name: messages::image_menu::image_file_name(&url),
-                                            url: url.clone(),
-                                            position: ev.position,
-                                        });
-                                        cx.notify();
-                                    }
-                                }))
+                                .when(r_msg.msg.status == "pending", |f| f.opacity(0.7))
                                 .on_mouse_down(MouseButton::Left, cx.listener({
                                     let u = click_url.clone();
                                     let open_msg = r_msg.msg.clone();
@@ -333,7 +319,10 @@ impl ChatView {
                                     // The id is what lets gpui key frame state for
                                     // multi-frame GIF/WebP; without it only the first
                                     // frame ever renders.
-                                    img(full_url)
+                                    img(match m_url.strip_prefix(LOCAL_MEDIA_PREFIX) {
+                                        Some(path) => ImageSource::from(std::path::PathBuf::from(path)),
+                                        None => ImageSource::from(full_url),
+                                    })
                                         .id(format!("msg-image-{}", r_msg.msg.id))
                                         .w(px(image_w))
                                         .h(px(image_h))

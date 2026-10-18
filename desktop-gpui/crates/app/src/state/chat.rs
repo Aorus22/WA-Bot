@@ -31,6 +31,16 @@ pub fn sort_asc(mut msgs: Vec<Message>) -> Vec<Message> {
     msgs
 }
 
+/// Union by id (later entries win), oldest first. A fetched page can overlap
+/// messages the socket already delivered.
+pub fn merge_by_id(existing: Vec<Message>, incoming: Vec<Message>) -> Vec<Message> {
+    let mut by_id: HashMap<String, Message> = HashMap::with_capacity(existing.len() + incoming.len());
+    for m in existing.into_iter().chain(incoming) {
+        by_id.insert(m.id.clone(), m);
+    }
+    sort_asc(by_id.into_values().collect())
+}
+
 /// How long a typing indicator lasts without being renewed.
 pub const TYPING_TTL: std::time::Duration = std::time::Duration::from_secs(6);
 
@@ -171,7 +181,7 @@ impl ChatStore {
 
     pub fn set_messages(&mut self, chat_id: &str, msgs: Vec<Message>, has_more: bool) {
         let entry = self.ensure_chat_state(chat_id);
-        entry.messages = sort_asc(msgs);
+        entry.messages = merge_by_id(Vec::new(), msgs);
         entry.has_more = has_more;
         entry.has_more_next = false;
         entry.loaded = true;
@@ -181,9 +191,7 @@ impl ChatStore {
 
     pub fn prepend_messages(&mut self, chat_id: &str, msgs: Vec<Message>, has_more: bool) {
         let entry = self.ensure_chat_state(chat_id);
-        let mut combined = msgs;
-        combined.extend(entry.messages.clone());
-        entry.messages = sort_asc(combined);
+        entry.messages = merge_by_id(msgs, entry.messages.clone());
         entry.has_more = has_more;
         entry.loading_more = false;
     }
@@ -191,9 +199,7 @@ impl ChatStore {
     pub fn append_messages(&mut self, chat_id: &str, msgs: Vec<Message>) {
         let entry = self.ensure_chat_state(chat_id);
         let has_next = !msgs.is_empty();
-        let mut combined = entry.messages.clone();
-        combined.extend(msgs);
-        entry.messages = sort_asc(combined);
+        entry.messages = merge_by_id(entry.messages.clone(), msgs);
         entry.has_more_next = has_next;
         entry.loading_newer = false;
     }
@@ -202,11 +208,13 @@ impl ChatStore {
         let entry = self.ensure_chat_state(chat_id);
         let existing_index = entry.messages.iter().position(|m| m.id == msg.id);
 
-        // Rule 4: If incoming message has a real id and matches a pending temp message,
-        // replace the temp one in place without duplicating
+        // Rule 4: If incoming message has a real id and matches a local temp message,
+        // replace the temp one in place without duplicating. A temp that already got
+        // its HTTP answer ("sent") still waits for this echo, e.g. replies, whose
+        // endpoint returns no id.
         if existing_index.is_none() && !msg.id.starts_with("temp-") {
             let pending_index = entry.messages.iter().position(|m| {
-                m.status == "pending"
+                matches!(m.status.as_str(), "pending" | "sent")
                     && m.id.starts_with("temp-")
                     && (m.content == msg.content
                         || (m.message_type == msg.message_type
@@ -662,6 +670,32 @@ mod tests {
         assert_eq!(store.messages_by_chat["chat-1"].messages.len(), 1);
         assert_eq!(store.messages_by_chat["chat-1"].messages[0].id, "msg-real-999");
         assert_eq!(store.messages_by_chat["chat-1"].messages[0].status, "sent");
+    }
+
+    #[test]
+    fn test_reply_echo_after_http_answer_does_not_duplicate() {
+        let mut store = ChatStore::new();
+        store.upsert_message("chat-1", make_test_msg("temp-1", 1000, "balasan", "pending"));
+        // The reply request finished first: temp is marked sent, id untouched.
+        store.patch_message("chat-1", "temp-1", |m| m.status = "sent".to_string());
+        store.upsert_message("chat-1", make_test_msg("real-1", 1001, "balasan", "sent"));
+
+        let msgs = &store.messages_by_chat["chat-1"].messages;
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].id, "real-1");
+    }
+
+    #[test]
+    fn test_fetched_pages_do_not_duplicate_known_messages() {
+        let mut store = ChatStore::new();
+        store.set_messages("chat-1", vec![make_test_msg("a", 100, "a", "sent")], true);
+        store.upsert_message("chat-1", make_test_msg("b", 200, "b", "sent"));
+        store.append_messages("chat-1", vec![make_test_msg("b", 200, "b", "read")]);
+        store.prepend_messages("chat-1", vec![make_test_msg("a", 100, "a", "sent")], true);
+
+        let msgs = &store.messages_by_chat["chat-1"].messages;
+        assert_eq!(msgs.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(msgs[1].status, "read");
     }
 
     #[test]

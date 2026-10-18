@@ -28,7 +28,6 @@ import (
 type HTTPServer interface {
 	BroadcastMessage(msgType string, payload interface{})
 	SaveAndBroadcastMessage(msg *repository.Message)
-	UpdateMessageStatus(msgID, status string)
 }
 
 // AccountEvents is notified about account link changes so per-account data
@@ -111,6 +110,11 @@ func (h *WhatsAppEventHandler) SetMediaRetryHub(hub *MediaRetryHub) {
 }
 
 func (h *WhatsAppEventHandler) HandleEvent(evt interface{}) {
+	// Fix ticks written before per-stage receipts existed once per run. Any
+	// event will do: the connected event can fire before the store is bound.
+	if h.msgStore != nil {
+		h.statusRepair.Do(func() { go h.repairGroupStatuses() })
+	}
 	switch v := evt.(type) {
 	case *events.MediaRetry:
 		if h.mediaRetries != nil {
@@ -683,12 +687,7 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 		return
 	}
 
-	status := "sent"
-	if evt.Type == events.ReceiptTypeDelivered {
-		status = "delivered"
-	} else if evt.Type == events.ReceiptTypeRead {
-		status = "read"
-	} else {
+	if evt.Type != events.ReceiptTypeDelivered && evt.Type != events.ReceiptTypeRead {
 		return
 	}
 
@@ -699,26 +698,30 @@ func (h *WhatsAppEventHandler) handleReceipt(evt *events.Receipt) {
 		h.handleGroupReceipt(evt)
 		return
 	}
-	// A private chat has a single recipient: keep when each stage happened for
-	// the message info sheet.
-	if h.msgStore != nil && !evt.IsFromMe {
-		kind := repository.ReceiptDelivered
-		if evt.Type == events.ReceiptTypeRead {
-			kind = repository.ReceiptRead
-		}
-		contact := evt.Chat.ToNonAD().String()
-		for _, msgID := range evt.MessageIDs {
-			if _, err := h.msgStore.SaveReceipt(string(msgID), contact, kind, evt.Timestamp.UnixMilli()); err != nil {
-				fmt.Printf("[RECEIPT] Failed to save receipt for %s: %v\n", msgID, err)
-			}
-		}
-	}
-	if h.httpServer == nil {
+	// A private chat has a single recipient.
+	if h.msgStore == nil || evt.IsFromMe {
 		return
 	}
-
+	kind := repository.ReceiptDelivered
+	if evt.Type == events.ReceiptTypeRead {
+		kind = repository.ReceiptRead
+	}
+	contact := evt.Chat.ToNonAD().String()
 	for _, msgID := range evt.MessageIDs {
-		h.httpServer.UpdateMessageStatus(msgID, status)
+		h.applyReceipt(string(msgID), contact, kind, evt.Timestamp.UnixMilli(), nil, 1)
+	}
+}
+
+// applyReceipt hands one receipt to the store, which derives the message's tick
+// from all receipts so far, and tells clients when that tick moved.
+func (h *WhatsAppEventHandler) applyReceipt(msgID, who string, kind repository.ReceiptKind, at int64, own map[string]bool, total int) {
+	status, changed, err := h.msgStore.RecordReceipt(msgID, who, kind, at, own, total)
+	if err != nil {
+		fmt.Printf("[RECEIPT] Failed to record receipt for %s: %v\n", msgID, err)
+		return
+	}
+	if changed && h.httpServer != nil {
+		h.httpServer.BroadcastMessage("message_status", map[string]interface{}{"id": msgID, "status": status})
 		fmt.Printf("✅ Updated status for %s to %s\n", msgID, status)
 	}
 }
@@ -746,42 +749,16 @@ func (h *WhatsAppEventHandler) handleGroupReceipt(evt *events.Receipt) {
 		return
 	}
 
-	chatID := evt.Chat.String()
-	total := h.groupRecipientCount(chatID, own)
+	total := h.groupRecipientCount(evt.Chat.String(), own)
 	for _, msgID := range evt.MessageIDs {
-		id := string(msgID)
-		if _, err := h.msgStore.SaveReceipt(id, member.String(), kind, evt.Timestamp.UnixMilli()); err != nil {
-			fmt.Printf("[RECEIPT] Failed to save receipt for %s: %v\n", id, err)
-			continue
-		}
-		if total == 0 {
-			continue
-		}
-		delivered, read, err := h.msgStore.CountReceipts(chatID, id, own)
-		if err != nil {
-			continue
-		}
-		status := groupStatusFor(delivered, read, total)
-		if status == "sent" {
-			continue
-		}
-		if changed, err := h.msgStore.UpgradeMessageStatus(id, status); err == nil && changed && h.httpServer != nil {
-			h.httpServer.BroadcastMessage("message_status", map[string]interface{}{"id": id, "status": status})
-			fmt.Printf("✅ Updated status for %s to %s (%d/%d)\n", id, status, read, total)
-		}
+		h.applyReceipt(string(msgID), member.String(), kind, evt.Timestamp.UnixMilli(), own, total)
 	}
 }
 
 // groupStatusFor is the tick a group message deserves given who has it: sent
 // until every member has it, delivered until every member has read it.
 func groupStatusFor(delivered, read, total int) string {
-	switch {
-	case total > 0 && read >= total:
-		return "read"
-	case total > 0 && delivered >= total:
-		return "delivered"
-	}
-	return "sent"
+	return repository.TickFor(delivered, read, total)
 }
 
 // repairGroupStatuses lowers group message ticks that an older build set as
@@ -790,6 +767,19 @@ func groupStatusFor(delivered, read, total int) string {
 func (h *WhatsAppEventHandler) repairGroupStatuses() {
 	if h.msgStore == nil {
 		return
+	}
+	fmt.Println("[RECEIPT] Checking stored ticks")
+	ids, perr := h.msgStore.RepairPrivateReadStatuses()
+	if perr != nil {
+		fmt.Printf("[RECEIPT] Private tick repair failed: %v\n", perr)
+	}
+	if perr == nil && len(ids) > 0 {
+		for _, id := range ids {
+			if h.httpServer != nil {
+				h.httpServer.BroadcastMessage("message_status", map[string]interface{}{"id": id, "status": "read"})
+			}
+		}
+		fmt.Printf("[RECEIPT] Corrected %d private message tick(s) to read\n", len(ids))
 	}
 	rows, err := h.msgStore.GroupMessagesWithReceipts()
 	if err != nil {

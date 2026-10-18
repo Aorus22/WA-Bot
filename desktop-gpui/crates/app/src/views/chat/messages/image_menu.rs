@@ -54,12 +54,12 @@ impl ChatView {
     ) -> Option<impl IntoElement> {
         let menu = self.image_menu.clone()?;
         let theme = *cx.app_theme();
-        let hover_bg: Hsla = theme.muted.opacity(0.6);
+        let hover_bg: Hsla = theme.foreground.opacity(0.12);
         let (muted_text, text_color) = (theme.muted_foreground, theme.foreground);
 
         let card = menu_surface(208.0, theme.card, theme.border)
             .child(
-                menu_row("im-copy", COPY_SVG, "Copy image", muted_text, text_color, hover_bg)
+                menu_row(window, cx, "im-copy", COPY_SVG, "Copy image", muted_text, text_color, hover_bg)
                     .on_mouse_down(MouseButton::Left, cx.listener({
                         let url = menu.url.clone();
                         move |this, _, _, cx| {
@@ -70,7 +70,7 @@ impl ChatView {
                     })),
             )
             .child(
-                menu_row("im-save", DOWNLOAD_SVG, "Save image as…", muted_text, text_color, hover_bg)
+                menu_row(window, cx, "im-save", DOWNLOAD_SVG, "Save image as…", muted_text, text_color, hover_bg)
                     .on_mouse_down(MouseButton::Left, cx.listener({
                         let (url, name) = (menu.url.clone(), menu.file_name.clone());
                         move |this, _, _, cx| {

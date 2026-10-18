@@ -475,22 +475,6 @@ func (h *Handler) stampDisappearing(msg *repository.Message) {
 	}
 }
 
-func (h *Handler) UpdateMessageStatus(msgID, status string) {
-	if h.msgRepo != nil {
-		if err := h.msgRepo.UpdateMessageStatus(msgID, status); err != nil {
-			fmt.Printf("Failed to update message status: %v\n", err)
-			return
-		}
-
-		if hub, ok := h.hub.(wsHub); ok && hub != nil {
-			hub.BroadcastMessage("message_status", map[string]interface{}{
-				"id":     msgID,
-				"status": status,
-			})
-		}
-	}
-}
-
 func (h *Handler) BroadcastMessage(msgType string, payload interface{}) {
 	if hub, ok := h.hub.(wsHub); ok && hub != nil {
 		hub.BroadcastMessage(msgType, payload)

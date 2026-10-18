@@ -157,7 +157,8 @@ impl ChatView {
             caption.clone()
         };
         let msg_type = kind.optimistic_type(&media_type).to_string();
-        let temp_id = self.push_optimistic_attachment(cx, &chat_id, content, &msg_type, None);
+        let local_preview = if msg_type == "image" { write_local_preview(&file_name, &bytes) } else { None };
+        let temp_id = self.push_optimistic_attachment(cx, &chat_id, content, &msg_type, local_preview);
         if temp_id.is_empty() {
             self.is_sending_attachment = false;
             return;
@@ -644,6 +645,9 @@ impl ChatView {
         let sent_text = wire_text.clone();
         let opt_id_clone = temp_id.clone();
         let rep_id = reply_to_id.clone();
+        // The reply endpoint returns no message id: the bubble keeps its temp id
+        // and the WebSocket echo swaps in the real one (ChatStore rule 4).
+        let is_reply = reply_to_id.is_some();
         let sent_mentions = mention_jids.clone();
 
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -684,13 +688,17 @@ impl ChatView {
                                             &target_chat,
                                             &opt_id_clone,
                                             |m| {
-                                                m.id = id_res.id.clone();
+                                                if !is_reply {
+                                                    m.id = id_res.id.clone();
+                                                }
                                                 m.status = "sent".to_string();
                                             },
                                         );
                                     }
                                     if let Some(rm) = this.cached_render_messages.iter_mut().find(|m| m.msg.id == opt_id_clone) {
-                                        rm.msg.id = id_res.id.clone();
+                                        if !is_reply {
+                                            rm.msg.id = id_res.id.clone();
+                                        }
                                         rm.msg.status = "sent".to_string();
                                     }
                                 }
@@ -716,4 +724,50 @@ impl ChatView {
         .detach();
     }
 
+}
+
+/// Pending previews older than this are pruned the next time one is written.
+const LOCAL_PREVIEW_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Save an outgoing picture where the optimistic bubble can draw it before the
+/// upload finishes. Returns the `file://` media url, or `None` if it can't be
+/// written (the bubble then waits for the real message, as before).
+fn write_local_preview(file_name: &str, bytes: &[u8]) -> Option<String> {
+    let dir = std::env::temp_dir().join("wabot-pending");
+    std::fs::create_dir_all(&dir).ok()?;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let old = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > LOCAL_PREVIEW_TTL);
+            if old {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let ext = match crate::views::chat::messages::image_menu::sniff_image_format(bytes)? {
+        ImageFormat::Png => "png",
+        ImageFormat::Jpeg => "jpg",
+        ImageFormat::Gif => "gif",
+        ImageFormat::Webp => "webp",
+        ImageFormat::Bmp => "bmp",
+        _ => return None,
+    };
+    let stem: String = std::path::Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .collect();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let path = dir.join(format!("{nanos}-{stem}.{ext}"));
+    std::fs::write(&path, bytes).ok()?;
+    Some(format!("{LOCAL_MEDIA_PREFIX}{}", path.display()))
 }

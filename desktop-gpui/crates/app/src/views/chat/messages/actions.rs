@@ -364,14 +364,23 @@ impl ChatView {
             let cx_handle = cx.clone();
             async move {
                 let client = HttpClient::new(&base_url);
+                // Only groups have a roster to look up; asking the backend for a
+                // private chat's "group" makes it query WhatsApp until it times out.
+                let is_group = chat_id.ends_with("@g.us");
                 let (group_result, receipts_result) = tokio::join!(
-                    client.get_group(&chat_id),
+                    async {
+                        if is_group {
+                            client.get_group(&chat_id).await.map(Some)
+                        } else {
+                            Ok(None)
+                        }
+                    },
                     client.get_message_receipts(&chat_id, &message_id),
                 );
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = view_weak.upgrade() {
                         view.update(cx, |this, cx| {
-                            if let Ok(group) = group_result {
+                            if let Ok(Some(group)) = group_result {
                                 this.group_info = Some(group);
                             }
                             if let Ok(info) = receipts_result {

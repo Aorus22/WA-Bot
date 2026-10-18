@@ -10,16 +10,18 @@ impl ChatView {
         text_color: Hsla,
         hover_bg: Hsla,
         handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        window: &mut Window,
+        cx: &mut App,
     ) -> AnyElement {
-        h_flex()
-            .w_full()
-            .cursor_pointer()
-            .items_center()
-            .gap_3()
-            .px_3()
-            .py_2()
-            .rounded_lg()
-            .hover(move |s| s.bg(hover_bg))
+        let key = SharedString::from(format!("am-{}", label.to_lowercase().replace(' ', "-")));
+        with_hover_fade(
+            h_flex().id(key.clone()).w_full().cursor_pointer().items_center().gap_3().px_3().py_2().rounded_lg(),
+            key,
+            hover_bg,
+            px(8.0),
+            window,
+            cx,
+        )
             .child(svg().data(icon).size(px(16.0)).flex_shrink_0().text_color(accent))
             .child(div().text_sm().text_color(text_color).child(label))
             .on_mouse_down(MouseButton::Left, handler)
@@ -36,9 +38,10 @@ impl ChatView {
         primary_color: Hsla,
         text_color: Hsla,
         muted_text: Hsla,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let hover_bg = theme.muted.opacity(0.5);
+        let hover_bg = theme.foreground.opacity(0.12);
         // Floats above the compose bar: absolute so it never takes flow space
         // (an in-flow panel would stretch the compose container over the chat).
         // Eases up from the compose bar; keyed per panel so switching between
@@ -112,6 +115,8 @@ impl ChatView {
                         text_color,
                         hover_bg,
                         cx.listener(|this, _, _, cx| this.open_emoji_panel(cx)),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "Sticker".to_string(),
@@ -120,6 +125,8 @@ impl ChatView {
                         text_color,
                         hover_bg,
                         cx.listener(|this, _, _, cx| this.open_sticker_panel(cx)),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "Media".to_string(),
@@ -128,6 +135,8 @@ impl ChatView {
                         text_color,
                         hover_bg,
                         cx.listener(|this, _, _, cx| this.pick_attachment(MediaKind::Media, cx)),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "Document".to_string(),
@@ -138,6 +147,8 @@ impl ChatView {
                         cx.listener(|this, _, _, cx| {
                             this.pick_attachment(MediaKind::Document, cx)
                         }),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "Audio".to_string(),
@@ -146,6 +157,8 @@ impl ChatView {
                         text_color,
                         hover_bg,
                         cx.listener(|this, _, _, cx| this.pick_attachment(MediaKind::Audio, cx)),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "GIF".to_string(),
@@ -154,6 +167,8 @@ impl ChatView {
                         text_color,
                         hover_bg,
                         cx.listener(|this, _, _, cx| this.pick_attachment(MediaKind::Gif, cx)),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "Poll".to_string(),
@@ -165,6 +180,8 @@ impl ChatView {
                             this.open_compose_dialog(ComposeDialog::Poll, cx);
                             this.compose_field_focus.focus(window, cx);
                         }),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "Location".to_string(),
@@ -176,6 +193,8 @@ impl ChatView {
                             this.open_compose_dialog(ComposeDialog::Location, cx);
                             this.compose_field_focus.focus(window, cx);
                         }),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         "Contact".to_string(),
@@ -187,6 +206,8 @@ impl ChatView {
                             this.open_compose_dialog(ComposeDialog::Contact, cx);
                             this.compose_field_focus.focus(window, cx);
                         }),
+                        window,
+                        cx,
                     ),
                     Self::attach_menu_row(
                         format!("Markdown {}", if self.is_md_mode { "(on)" } else { "(off)" }),
@@ -195,6 +216,8 @@ impl ChatView {
                         if self.is_md_mode { primary_color } else { text_color },
                         hover_bg,
                         cx.listener(|this, _, window, cx| this.toggle_markdown_mode(window, cx)),
+                        window,
+                        cx,
                     ),
                 ];
                 Some(
@@ -386,15 +409,15 @@ impl ChatView {
                             let url = resolve_media_url(&sticker.media_url, &base_url);
                             let send_url = sticker.media_url.clone();
                             let is_animated = sticker.is_animated;
-                            div()
-                                .w(px(96.0))
-                                .h(px(96.0))
-                                .p_1()
-                                .rounded_xl()
-                                .overflow_hidden()
-                                .cursor_pointer()
-                                .bg(theme.muted.opacity(0.3))
-                                .hover(move |s| s.bg(theme.muted.opacity(0.6)))
+                            let key = SharedString::from(format!("sticker-tile-{}", sticker.id));
+                            with_hover_fade(
+                                div().id(key.clone()).w(px(96.0)).h(px(96.0)).p_1().rounded_xl().overflow_hidden().cursor_pointer().bg(theme.muted.opacity(0.3)),
+                                key,
+                                theme.foreground.opacity(0.14),
+                                px(12.0),
+                                window,
+                                cx,
+                            )
                                 .child(
                                     img(url)
                                         .id(format!("sticker-{}-{}", sticker.id, sticker.media_url))

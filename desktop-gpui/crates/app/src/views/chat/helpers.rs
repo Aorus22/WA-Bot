@@ -172,9 +172,65 @@ pub(crate) fn menu_separator(color: Hsla) -> Div {
     div().h(px(1.0)).my_2().bg(color.opacity(0.5))
 }
 
+/// Hover phase of a menu row: `Idle` until the pointer first enters, so a row
+/// that appears under a still pointer does not flash.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum RowHover {
+    Idle,
+    Over,
+    Left,
+}
+
+/// Give a menu row a highlight that fades in when the pointer enters and out
+/// when it leaves (gpui's `.hover()` style swaps instantly). Call it before
+/// adding the row's content so the highlight sits underneath. `key` must be
+/// unique among the rows on screen.
+pub(crate) fn with_hover_fade(
+    row: Stateful<Div>,
+    key: impl Into<SharedString>,
+    hover_bg: Hsla,
+    radius: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let key: SharedString = key.into();
+    let state = window.use_keyed_state(ElementId::from(SharedString::from(format!("{key}-hover"))), cx, |_, _| RowHover::Idle);
+    let phase = *state.read(cx);
+    let setter = state.clone();
+    let clear = hover_bg.opacity(0.0);
+    let highlight = div().absolute().top_0().left_0().size_full().rounded(radius);
+    let highlight = match phase {
+        RowHover::Idle => highlight.into_any_element(),
+        RowHover::Over | RowHover::Left => {
+            let over = phase == RowHover::Over;
+            let (from, to) = if over { (clear, hover_bg) } else { (hover_bg, clear) };
+            highlight
+                .with_animation(
+                    ElementId::from(SharedString::from(format!("{key}-{}", if over { "fade-in" } else { "fade-out" }))),
+                    crate::components::motion::enter(crate::components::motion::FAST_MS),
+                    move |el, d| el.bg(crate::components::motion::lerp_color(from, to, d)),
+                )
+                .into_any_element()
+        }
+    };
+    row.relative()
+        .on_hover(move |hovered, _, cx| {
+            let next = if *hovered { RowHover::Over } else { RowHover::Left };
+            setter.update(cx, |phase, cx| {
+                if *phase != next {
+                    *phase = next;
+                    cx.notify();
+                }
+            });
+        })
+        .child(highlight)
+}
+
 /// One row of a context menu: icon + label, full-width hover highlight. The
 /// caller adds the click handler.
 pub(crate) fn menu_row(
+    window: &mut Window,
+    cx: &mut App,
     id: &'static str,
     icon: &'static [u8],
     label: &'static str,
@@ -182,16 +238,16 @@ pub(crate) fn menu_row(
     text_color: Hsla,
     hover_bg: Hsla,
 ) -> Stateful<Div> {
-    h_flex()
-        .id(id)
-        .cursor_pointer()
-        .px_5()
-        .py_2p5()
-        .gap_4()
-        .items_center()
-        .hover(move |s| s.bg(hover_bg))
-        .child(svg().data(icon).size(px(17.0)).text_color(icon_color))
-        .child(div().text_sm().text_color(text_color).child(label))
+    with_hover_fade(
+        h_flex().id(id).cursor_pointer().px_5().py_2p5().gap_4().items_center(),
+        id,
+        hover_bg,
+        px(0.0),
+        window,
+        cx,
+    )
+    .child(svg().data(icon).size(px(17.0)).text_color(icon_color))
+    .child(div().text_sm().text_color(text_color).child(label))
 }
 
 /// Conversation sidebar sizing: the desktop opens at 360 like before, and
@@ -236,10 +292,17 @@ pub(crate) fn resolve_avatar_url(avatar: &str, chat_id: &str, base_url: &str) ->
     format!("{clean_base}/avatar/{}", urlencode(chat_id))
 }
 
+/// `media_url` prefix marking a file on this machine (the optimistic bubble's picture).
+pub(crate) const LOCAL_MEDIA_PREFIX: &str = "file://";
+
 pub(crate) fn resolve_media_url(media_url: &str, base_url: &str) -> String {
     let media_url = media_url.trim();
     if media_url.starts_with("http://") || media_url.starts_with("https://") {
         return media_url.to_string();
+    }
+    // Local preview of an attachment that is still uploading: a plain file path.
+    if let Some(path) = media_url.strip_prefix(LOCAL_MEDIA_PREFIX) {
+        return path.to_string();
     }
     let clean_base = base_url.trim_end_matches('/');
     let clean_url = media_url.trim_start_matches('/');

@@ -39,3 +39,27 @@ func TestGroupReceiptsTrackDeliveryAndRead(t *testing.T) {
 		t.Fatal("status must not move backwards")
 	}
 }
+
+func TestPrivateTickFollowsReceiptsInAnyOrder(t *testing.T) {
+	s := newTestStore(t)
+	const chat = "2@s.whatsapp.net"
+	if err := s.SaveMessage(&Message{ID: "p1", ChatID: chat, From: "me", To: chat, Content: "hi", Timestamp: 1, Status: "sent", Type: "text"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if status, changed, err := s.RecordReceipt("p1", chat, ReceiptRead, 300, nil, 1); err != nil || !changed || status != "read" {
+		t.Fatalf("read: status=%q changed=%v err=%v", status, changed, err)
+	}
+	// A delivery receipt arriving after the read one must not undo it.
+	if status, changed, err := s.RecordReceipt("p1", chat, ReceiptDelivered, 400, nil, 1); err != nil || changed || status != "read" {
+		t.Fatalf("late delivered: status=%q changed=%v err=%v", status, changed, err)
+	}
+	var stored string
+	if err := s.db.QueryRow(`SELECT status FROM messages WHERE id = 'p1'`).Scan(&stored); err != nil || stored != "read" {
+		t.Fatalf("stored status = %q err=%v", stored, err)
+	}
+	// Receipts for someone else's message are ignored.
+	if _, changed, _ := s.RecordReceipt("nope", chat, ReceiptRead, 1, nil, 1); changed {
+		t.Fatal("unknown message changed")
+	}
+}

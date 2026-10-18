@@ -11,14 +11,14 @@ impl ChatView {
     ) -> Option<impl IntoElement> {
         let request = self.text_menu.clone()?;
         let theme = *cx.app_theme();
-        let hover_bg: Hsla = theme.muted.opacity(0.6);
+        let hover_bg: Hsla = theme.foreground.opacity(0.12);
         let (muted_text, text_color) = (theme.muted_foreground, theme.foreground);
 
         let mut card = menu_surface(208.0, theme.card, theme.border);
         if let Some(url) = request.link.clone() {
             card = card
                 .child(
-                    menu_row("tm-open", EXTERNAL_LINK_SVG, "Open in browser", muted_text, text_color, hover_bg)
+                    menu_row(window, cx, "tm-open", EXTERNAL_LINK_SVG, "Open in browser", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener({
                             let url = url.clone();
                             move |this, _, _, cx| {
@@ -29,7 +29,7 @@ impl ChatView {
                         })),
                 )
                 .child(
-                    menu_row("tm-copy-link", LINK_SVG, "Copy link", muted_text, text_color, hover_bg)
+                    menu_row(window, cx, "tm-copy-link", LINK_SVG, "Copy link", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
                             toast::success("Disalin ke clipboard", cx);
@@ -40,7 +40,7 @@ impl ChatView {
         }
         if let Some(text) = request.selection.clone() {
             card = card.child(
-                menu_row("tm-copy", COPY_SVG, "Copy", muted_text, text_color, hover_bg)
+                menu_row(window, cx, "tm-copy", COPY_SVG, "Copy", muted_text, text_color, hover_bg)
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                         toast::success("Disalin ke clipboard", cx);
