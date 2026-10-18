@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+build/
+dist/
+*.whl
+*.egg-info/
+/parity/gpui-baselines/*.png
+/parity/screenshots/*.png
