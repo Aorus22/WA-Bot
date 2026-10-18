@@ -1,0 +1,151 @@
+name: Desktop GPUI Release
+
+# AppImage of the GPUI desktop app (shell + bundled Go backend).
+#
+#   beta    run manually from the `develop` branch. Publishes the rolling
+#           prerelease `beta` (version X.Y.Z-beta.N). Download it by hand to try
+#           new features. The in-app updater never offers it.
+#   stable  push a `vX.Y.Z` tag on `main` (must match desktop-gpui/Cargo.toml).
+#           Publishes a normal release; the in-app updater reads /releases/latest.
+#
+# Assets: wa-bot_<version>_x86_64.AppImage and SHA256SUMS.txt.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'beta (rolling prerelease) or stable (needs tag input)'
+        required: true
+        default: 'beta'
+        type: choice
+        options: [beta, stable]
+      tag:
+        description: 'stable only: tag to publish, e.g. v0.2.0'
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-gpui-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  appimage:
+    name: Build and publish AppImage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve channel
+        id: ch
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=${{ inputs.channel }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # stable builds the tag; beta builds the branch it was started from.
+          ref: ${{ github.ref }}
+
+      # desktop-gpui/Cargo.toml patches gpui from ../../gpui-wayland-patches.
+      - name: Fetch gpui patches
+        run: git clone --depth 1 https://github.com/Aorus22/gpui-wayland-patches.git "$GITHUB_WORKSPACE/../gpui-wayland-patches"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca407 # v1
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c3 # v2.9.2
+        with:
+          workspaces: desktop-gpui
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools desktop-file-utils libasound2-dev libx11-xcb-dev \
+            libssl-dev libxkbcommon-x11-dev libxkbcommon-dev libwayland-dev libvulkan-dev \
+            libfontconfig1-dev libxcb1-dev libdbus-1-dev pkg-config clang cmake
+
+      - name: Check version and stamp beta
+        id: ver
+        run: |
+          BASE="$(awk -F'"' '/^version/ {print $2; exit}' desktop-gpui/Cargo.toml)"
+          if [[ "${{ steps.ch.outputs.channel }}" == "stable" ]]; then
+            TAG="${{ steps.ch.outputs.tag }}"
+            [[ "$TAG" == "v$BASE" ]] || { echo "tag $TAG does not match Cargo.toml version $BASE" >&2; exit 1; }
+            VERSION="$BASE"
+          else
+            VERSION="${BASE}-beta.${GITHUB_RUN_NUMBER}"
+            # Only on the runner: the app shows (and the updater compares) this version.
+            sed -i "0,/^version = \"${BASE}\"/s//version = \"${VERSION}\"/" desktop-gpui/Cargo.toml
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build AppImage
+        run: desktop-gpui/scripts/build-appimage.sh
+
+      - name: Checksums
+        working-directory: desktop-gpui/dist
+        run: sha256sum wa-bot_*_x86_64.AppImage > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Publish release
+        run: |
+          set -euo pipefail
+          cd desktop-gpui/dist
+          APPIMAGE="wa-bot_${{ steps.ver.outputs.version }}_x86_64.AppImage"
+          [[ -f "$APPIMAGE" ]] || { echo "missing $APPIMAGE" >&2; ls; exit 1; }
+          SHORT="${GITHUB_SHA:0:7}"
+
+          if [[ "${{ steps.ch.outputs.channel }}" == "beta" ]]; then
+            TAG=beta
+            TITLE="WA Bot beta (develop)"
+            {
+              echo "Beta build ${{ steps.ver.outputs.version }} from \`${SHORT}\` (branch ${GITHUB_REF_NAME})."
+              echo
+              echo "For manual testing only. The in-app updater does not offer it."
+            } > notes.md
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              # Drop assets of earlier beta builds so only the newest remains.
+              gh release view "$TAG" --json assets --jq '.assets[].name' | while read -r a; do
+                gh release delete-asset "$TAG" "$a" --yes
+              done
+              gh release upload "$TAG" "$APPIMAGE" SHA256SUMS.txt --clobber
+              gh release edit "$TAG" --title "$TITLE" --notes-file notes.md --prerelease
+            else
+              gh release create "$TAG" "$APPIMAGE" SHA256SUMS.txt --title "$TITLE" --notes-file notes.md \
+                --target "$GITHUB_SHA" --prerelease
+            fi
+          else
+            TAG="${{ steps.ch.outputs.tag }}"
+            {
+              echo "WA Bot ${{ steps.ver.outputs.version }} built from \`${SHORT}\`."
+              echo
+              echo "Update from inside the app: Settings, Version & Update."
+            } > notes.md
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" "$APPIMAGE" SHA256SUMS.txt --clobber
+              gh release edit "$TAG" --notes-file notes.md --prerelease=false --latest
+            else
+              gh release create "$TAG" "$APPIMAGE" SHA256SUMS.txt --title "WA Bot ${TAG}" \
+                --notes-file notes.md --verify-tag --latest
+            fi
+          fi
+          gh release view "$TAG" --json url --jq .url

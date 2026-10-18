@@ -44,6 +44,10 @@ flume = { workspace = true }
 parking_lot = { workspace = true }
 notify-rust = { workspace = true }
 tempfile = { workspace = true }
+# In-app updater (GitHub Releases): blocking HTTP, checksum and version compare.
+reqwest = { workspace = true }
+sha2 = "=0.10.9"
+semver = "=1.0.28"
 # Microphone capture for voice notes (ALSA on Linux, which the .deb already depends on).
 cpal = "=0.15.3"
 

@@ -39,6 +39,11 @@ jobs:
         with:
           workspaces: desktop-gpui
 
+      # desktop-gpui/Cargo.toml patches gpui from ../../gpui-wayland-patches.
+      - name: Fetch gpui patches
+        shell: bash
+        run: git clone --depth 1 https://github.com/Aorus22/gpui-wayland-patches.git "$GITHUB_WORKSPACE/../gpui-wayland-patches"
+
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
         run: |

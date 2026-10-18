@@ -53,6 +53,21 @@ use std::borrow::Cow;
 
 use crate::theme::preset::{all_presets, ThemePreset};
 use crate::TOKIO_RT;
+use crate::updater::{self, InstallKind, UpdateInfo};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+/// State of the manual "Check for updates" flow.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UpdateStatus {
+    Idle,
+    Checking,
+    UpToDate,
+    Available(UpdateInfo),
+    Downloading(UpdateInfo),
+    ReadyToRestart,
+    Error(String),
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditField {
@@ -124,6 +139,11 @@ pub struct SettingsView {
     /// Sizes of the chat and media databases.
     pub storage_usage: Option<StorageUsage>,
     pub is_restarting_backend: bool,
+
+    // App updates (GitHub Releases)
+    pub update_status: UpdateStatus,
+    /// (bytes downloaded, total bytes) of the running download.
+    update_progress: Arc<(AtomicU64, AtomicU64)>,
 
     // Asynchronous action states
     pub is_saving_ai: bool,
@@ -260,6 +280,9 @@ impl SettingsView {
             media_polling: false,
             storage_usage: None,
             is_restarting_backend: false,
+
+            update_status: UpdateStatus::Idle,
+            update_progress: Arc::new((AtomicU64::new(0), AtomicU64::new(0))),
 
             is_saving_ai: false,
             is_saving_tts: false,
@@ -644,6 +667,218 @@ impl SettingsView {
             }
         })
         .detach();
+    }
+
+    /// Ask GitHub whether a newer stable release exists.
+    pub fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.update_status, UpdateStatus::Checking | UpdateStatus::Downloading(_)) {
+            return;
+        }
+        self.update_status = UpdateStatus::Checking;
+        cx.notify();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let result = TOKIO_RT
+                    .spawn_blocking(updater::check)
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()));
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |s, cx| {
+                            s.update_status = match result {
+                                Ok(Some(info)) => UpdateStatus::Available(info),
+                                Ok(None) => UpdateStatus::UpToDate,
+                                Err(e) => UpdateStatus::Error(e),
+                            };
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Download the release, verify it and replace the running AppImage.
+    pub fn install_update(&mut self, info: UpdateInfo, cx: &mut Context<Self>) {
+        self.update_status = UpdateStatus::Downloading(info.clone());
+        self.update_progress.0.store(0, Ordering::Relaxed);
+        self.update_progress.1.store(0, Ordering::Relaxed);
+        cx.notify();
+        let progress = self.update_progress.clone();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let worker = TOKIO_RT.spawn_blocking(move || {
+                    updater::download_and_install(&info, &progress.0, &progress.1)
+                });
+                // Repaint the percentage while the blocking download runs.
+                while !worker.is_finished() {
+                    TOKIO_RT.spawn(tokio::time::sleep(std::time::Duration::from_millis(200))).await.ok();
+                    let alive = cx_handle.update(|cx: &mut App| match this.upgrade() {
+                        Some(view) => {
+                            view.update(cx, |_, cx| cx.notify());
+                            true
+                        }
+                        None => false,
+                    });
+                    if !alive {
+                        break;
+                    }
+                }
+                let result = worker.await.unwrap_or_else(|e| Err(e.to_string()));
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |s, cx| {
+                            s.update_status = match result {
+                                Ok(()) => UpdateStatus::ReadyToRestart,
+                                Err(e) => UpdateStatus::Error(e),
+                            };
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Relaunch the updated AppImage once this process (and its backend) is gone.
+    pub fn restart_app(&mut self, cx: &mut Context<Self>) {
+        match updater::spawn_restart() {
+            Ok(()) => cx.quit(),
+            Err(e) => {
+                self.update_status = UpdateStatus::Error(e);
+                cx.notify();
+            }
+        }
+    }
+
+    fn render_update_card(
+        &self,
+        text_color: Hsla,
+        muted_text: Hsla,
+        border_color: Hsla,
+        tag_bg: Hsla,
+        secondary_bg: Hsla,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let status = self.update_status.clone();
+        let appimage = matches!(updater::install_kind(), InstallKind::AppImage(_));
+        let (line, is_error): (String, bool) = match &status {
+            UpdateStatus::Idle => (String::new(), false),
+            UpdateStatus::Checking => ("Checking for updates...".into(), false),
+            UpdateStatus::UpToDate => ("You're up to date.".into(), false),
+            UpdateStatus::Available(i) => (format!("Version {} is available.", i.version), false),
+            UpdateStatus::Downloading(_) => {
+                let done = self.update_progress.0.load(Ordering::Relaxed);
+                let total = self.update_progress.1.load(Ordering::Relaxed);
+                (
+                    if total > 0 {
+                        format!("Downloading... {}%", done * 100 / total)
+                    } else {
+                        format!("Downloading... {:.1} MB", done as f64 / 1_048_576.0)
+                    },
+                    false,
+                )
+            }
+            UpdateStatus::ReadyToRestart => ("Update installed. Restart to apply.".into(), false),
+            UpdateStatus::Error(e) => (e.clone(), true),
+        };
+        let button = move |id: &'static str, label: &'static str| {
+            div()
+                .id(id)
+                .flex_none()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .bg(tag_bg)
+                .border_1()
+                .border_color(border_color)
+                .cursor_pointer()
+                .hover(move |s| s.bg(secondary_bg))
+                .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child(label))
+        };
+
+        let busy = matches!(status, UpdateStatus::Checking | UpdateStatus::Downloading(_));
+        let mut actions = h_flex().gap_2();
+        if !busy && !matches!(status, UpdateStatus::ReadyToRestart) {
+            actions = actions.child(
+                button("update-check", "Check for updates")
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.check_for_updates(cx))),
+            );
+        }
+        if let UpdateStatus::Available(info) = &status {
+            if appimage && info.appimage_url.is_some() && info.sums_url.is_some() {
+                let i = info.clone();
+                actions = actions.child(button("update-install", "Update now").on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, _, cx| this.install_update(i.clone(), cx)),
+                ));
+            }
+            let url = info.page_url.clone();
+            actions = actions.child(button("update-open", "Release page").on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |_, _, _, _| {
+                    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                }),
+            ));
+        }
+        if matches!(status, UpdateStatus::ReadyToRestart) {
+            actions = actions.child(
+                button("update-restart", "Restart")
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.restart_app(cx))),
+            );
+        }
+
+        let mut text = div().flex().flex_col().gap_1().child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(text_color)
+                .child(format!("Version {}", updater::CURRENT_VERSION)),
+        );
+        if !line.is_empty() {
+            let color = if is_error { gpui::red() } else { muted_text };
+            text = text.child(div().text_xs().text_color(color).child(line));
+        }
+        if matches!(&status, UpdateStatus::Available(_)) && !appimage {
+            text = text.child(
+                div()
+                    .text_xs()
+                    .text_color(muted_text)
+                    .child("Not running from an AppImage. Download the release to update."),
+            );
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(muted_text)
+                    .child("VERSION & UPDATE"),
+            )
+            .child(
+                div()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(border_color)
+                    .px_4()
+                    .py_3()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(text)
+                    .child(actions),
+            )
+            .into_any_element()
     }
 
     /// Follow a running history sync: the status is refetched every couple of
@@ -1702,6 +1937,7 @@ impl Render for SettingsView {
         let primary_color = theme.primary;
         let secondary_bg = theme.secondary;
         let tag_bg = theme.muted;
+        let update_card = self.render_update_card(text_color, muted_text, border_color, tag_bg, secondary_bg, cx);
 
         // Chat history card: depth choice, start/stop, and what the sync is doing.
         let history_card = self.render_history_card(
@@ -3301,7 +3537,8 @@ impl Render for SettingsView {
                                             ),
                                     ),
                             ),
-                    ),
+                    )
+                    .child(update_card)
             )
             )
             .child(
