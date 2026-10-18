@@ -21,6 +21,7 @@ impl ChatView {
         let primary_color = theme.primary;
         let framed = !crate::popover::is_popover(cx) && window_material::is_framed_window(window);
         let base_url = Self::compose_base_url(cx);
+        let media_base = base_url.clone();
         let group = self.group_info.clone();
         let message = self.viewed_by_message.clone();
 
@@ -127,11 +128,51 @@ impl ChatView {
 
         if let Some(message) = message.as_ref() {
             let text = MessageBubbleHelper::decode_content(&message.content);
-            let text = if text.trim().is_empty() {
-                format!("[{}]", message.message_type)
-            } else {
-                text
+            // Media shows itself; a placeholder such as "[Sticker]" is not a caption.
+            let is_placeholder = text.trim().is_empty()
+                || (text.starts_with('[') && text.ends_with(']') && !text.contains(' '));
+            let media_url = message.media_url.as_ref().map(|url| resolve_media_url(url, &media_base));
+            let media: Option<AnyElement> = match message.message_type.as_str() {
+                "sticker" => media_url.map(|url| {
+                    img(url).id("info-sticker").w(px(140.0)).h(px(140.0)).object_fit(ObjectFit::Contain).into_any_element()
+                }),
+                "image" | "gif" => media_url.map(|url| {
+                    img(url)
+                        .id("info-image")
+                        .w(px(240.0))
+                        .max_h(px(260.0))
+                        .rounded_lg()
+                        .object_fit(ObjectFit::Cover)
+                        .into_any_element()
+                }),
+                "video" => Some(
+                    video_preview(
+                        "info-video",
+                        message.extra.as_ref()
+                            .and_then(|extra| extra.thumbnail.as_deref())
+                            .map(|url| resolve_media_url(url, &media_base)),
+                        240.0,
+                        170.0,
+                    )
+                    .into_any_element(),
+                ),
+                _ => None,
             };
+            if let Some(media) = media {
+                let sticker = message.message_type == "sticker";
+                body = body.child(
+                    h_flex().w_full().justify_end().px_4().pt_4().child(
+                        v_flex()
+                            .max_w(px(260.0))
+                            .gap_1()
+                            .when(!sticker, |b| b.p_1().rounded_lg().bg(primary_color.opacity(0.22)))
+                            .child(media)
+                            .when(!is_placeholder, |b| {
+                                b.child(div().px_2().pb_1().text_sm().text_color(text_color).child(text.clone()))
+                            }),
+                    ),
+                );
+            } else {
             body = body.child(
                 h_flex().w_full().justify_end().px_4().py_4().child(
                     div()
@@ -142,9 +183,10 @@ impl ChatView {
                         .bg(primary_color.opacity(0.22))
                         .text_sm()
                         .text_color(text_color)
-                        .child(text),
+                        .child(if is_placeholder { format!("[{}]", message.message_type) } else { text }),
                 ),
             );
+            }
         }
 
         if loading {

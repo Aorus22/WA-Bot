@@ -77,6 +77,34 @@ pub fn rise_in<E: Styled + IntoElement + 'static>(
     })
 }
 
+/// WhatsApp's bubble entrance: a quick fade while the bubble settles up into
+/// place (WhatsApp also grows it from about 97%; gpui cannot scale a div, so
+/// the settle carries the motion). No overshoot. The element must be `relative()`.
+pub fn bubble_in<E: Styled + IntoElement + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    ms: u64,
+    rise: f32,
+) -> AnimationElement<E> {
+    el.with_animation(
+        id,
+        Animation::new(Duration::from_millis(ms)).with_easing(ease_out_cubic),
+        move |el, d| el.opacity(d).top(px(rise * (1.0 - d))),
+    )
+}
+
+/// The reverse of [`bubble_in`]: fade out while sinking `distance` px.
+pub fn pop_out<E: Styled + IntoElement + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    ms: u64,
+    distance: f32,
+) -> AnimationElement<E> {
+    el.with_animation(id, enter(ms), move |el, d| {
+        el.opacity((1.0 - d).clamp(0.0, 1.0)).top(px(distance * d))
+    })
+}
+
 /// Entrance for a full-window modal backdrop that centres its card: the
 /// backdrop fades in and the card (centred by the backdrop's flex) drifts up
 /// by half of the padding it starts with.

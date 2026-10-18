@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	waHistorySync "go.mau.fi/whatsmeow/proto/waHistorySync"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
@@ -672,7 +673,7 @@ func projectHistoricalEvent(evt *events.Message, chatID string) *repository.Mess
 		SenderName: evt.Info.PushName,
 	}
 	if media {
-		msg.MediaURL = fmt.Sprintf("/chats/%s/messages/%s/media", url.PathEscape(chatID), url.PathEscape(evt.Info.ID))
+		msg.MediaURL = onDemandMediaURL(chatID, evt.Info.ID)
 	}
 	if contextInfo := getContextInfo(evt.Message); contextInfo != nil {
 		msg.ReplyToID = contextInfo.GetStanzaID()
@@ -762,4 +763,29 @@ func fallback(value, fallbackValue string) string {
 		return fallbackValue
 	}
 	return value
+}
+
+// onDemandMediaURL is the API path that downloads a message's file from
+// WhatsApp the first time it is asked for (and serves the stored copy after).
+func onDemandMediaURL(chatID, messageID string) string {
+	return fmt.Sprintf("/chats/%s/messages/%s/media", url.PathEscape(chatID), url.PathEscape(messageID))
+}
+
+// mediaDescriptor wraps a message's proto in the WebMessageInfo that history
+// messages are stored as, so the on-demand download, the media download job
+// and asking the phone work the same for messages received live.
+func mediaDescriptor(chat, sender waTypes.JID, fromMe bool, messageID string, at time.Time, msg *waE2E.Message) ([]byte, error) {
+	key := &waCommon.MessageKey{
+		RemoteJID: proto.String(chat.String()),
+		FromMe:    proto.Bool(fromMe),
+		ID:        proto.String(messageID),
+	}
+	if chat.Server == waTypes.GroupServer && !fromMe && !sender.IsEmpty() {
+		key.Participant = proto.String(sender.ToNonAD().String())
+	}
+	return proto.Marshal(&waWeb.WebMessageInfo{
+		Key:              key,
+		Message:          msg,
+		MessageTimestamp: proto.Uint64(uint64(at.Unix())),
+	})
 }

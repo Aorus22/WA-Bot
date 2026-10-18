@@ -50,6 +50,7 @@ mod data;
 mod dialogs;
 mod helpers;
 mod image_viewer;
+mod video_viewer;
 mod messages;
 mod sheets;
 mod sidebar;

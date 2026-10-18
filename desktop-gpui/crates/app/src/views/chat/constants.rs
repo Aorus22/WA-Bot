@@ -20,7 +20,7 @@ pub(crate) const SHEET_ANIM_MS: u64 = 240;
 /// A live message plays its entrance for this long, then counts as settled.
 pub(crate) const FRESH_MSG_TTL: std::time::Duration = std::time::Duration::from_millis(600);
 /// Entrance duration for a newly arrived message bubble, in ms.
-pub(crate) const MSG_ENTER_MS: u64 = 260;
+pub(crate) const MSG_ENTER_MS: u64 = 220;
 
 
 /// Deterministic color palette for contact avatars

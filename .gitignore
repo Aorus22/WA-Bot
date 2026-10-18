@@ -28,3 +28,6 @@ Wa-Bot-FE/
 desktop-gpui/target/
 wa-bot-backend
 *.AppImage
+
+# Created by Go tests run from ./internal
+internal/wa-bot-messages.db

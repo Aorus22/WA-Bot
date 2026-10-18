@@ -85,3 +85,17 @@ func TestMentionEnrichmentResolvesLIDAndOnlyMarksIncomingOwnMentions(t *testing.
 		t.Fatal("unknown contact still exposes its internal LID")
 	}
 }
+
+func TestApplyMentionNamesKeepsUnresolvedNumbers(t *testing.T) {
+	extra := &repository.MessageExtra{
+		Mentions:     []string{"123@lid", "456@lid"},
+		MentionNames: map[string]string{"123@lid": "Zoë Putri", "456@lid": "  "},
+	}
+	got := applyMentionNames("hi @123, @456 and @12345", extra)
+	if want := "hi @Zoë Putri, @456 and @12345"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := applyMentionNames("@123", nil); got != "@123" {
+		t.Fatalf("nil extra changed the text: %q", got)
+	}
+}

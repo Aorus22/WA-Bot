@@ -138,6 +138,9 @@ type MessageExtra struct {
 	Disappearing *DisappearingMeta `json:"disappearing,omitempty"`
 	// StatusReply is set on messages that reply to a status (story).
 	StatusReply *StatusReplyMeta `json:"statusReply,omitempty"`
+	// Thumbnail is the media URL of a video's preview picture (the JPEG
+	// WhatsApp sends inside the message).
+	Thumbnail string `json:"thumbnail,omitempty"`
 }
 
 // DisappearingMeta records the disappearing timer a message was sent under.
@@ -195,6 +198,9 @@ type Message struct {
 	// RawProto is the serialized waE2E.Message of incoming messages; kept for
 	// lossless forwarding. Not exposed over JSON.
 	RawProto []byte `json:"-"`
+	// RawWeb is the serialized waWeb.WebMessageInfo of a media message: what
+	// downloading its file later needs (the same as history messages keep).
+	RawWeb []byte `json:"-"`
 }
 
 type Chat struct {
@@ -580,7 +586,7 @@ func decodeMessageMeta(msg *Message, forwarded int, reactionsJSON, extraJSON str
 	}
 	if extraJSON != "" {
 		var extra MessageExtra
-		if json.Unmarshal([]byte(extraJSON), &extra) == nil && (extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || len(extra.Edits) > 0 || extra.Disappearing != nil || extra.StatusReply != nil) {
+		if json.Unmarshal([]byte(extraJSON), &extra) == nil && (extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || len(extra.Edits) > 0 || extra.Disappearing != nil || extra.StatusReply != nil || extra.Thumbnail != "") {
 			msg.Extra = &extra
 		}
 	}
@@ -712,8 +718,8 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 		extraJSON = string(b)
 	}
 	_, err = tx.Exec(`
-                INSERT OR REPLACE INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name, metadata, forwarded, reactions, extra_meta, fwd_proto)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO messages (id, chat_id, sender_id, receiver_id, content, timestamp, status, msg_type, media_url, is_automatic, sender_name, metadata, forwarded, reactions, extra_meta, fwd_proto, raw_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, (SELECT raw_message FROM messages WHERE id = ?)))
         `, msg.ID, msg.ChatID, msg.From, msg.To, msg.Content, msg.Timestamp, msg.Status, msg.Type, msg.MediaURL, func() int {
 		if msg.IsAutomatic {
 			return 1
@@ -724,7 +730,7 @@ func (s *MessageStore) SaveMessage(msg *Message) error {
 			return 1
 		}
 		return 0
-	}(), reactionsJSON, extraJSON, msg.RawProto)
+	}(), reactionsJSON, extraJSON, msg.RawProto, msg.RawWeb, msg.ID)
 	if err != nil {
 		return err
 	}
@@ -2050,4 +2056,66 @@ func (s *MessageStore) GetChatLinks(chatID string, limit int, before int64) ([]M
 		return nil, err
 	}
 	return scanMessages(rows)
+}
+
+// LastMessage returns the newest message of a chat that is not deleted, the one
+// the chat list previews. It returns sql.ErrNoRows for an empty chat.
+func (s *MessageStore) LastMessage(chatID string) (*Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msg, err := scanMessageRow(s.db.QueryRow(`
+		SELECT `+messageColumns+`
+		FROM messages WHERE chat_id = ? AND deleted_at IS NULL
+		ORDER BY timestamp DESC, rowid DESC LIMIT 1
+	`, chatID))
+	if err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+// MediaTypes are the message types that carry a downloadable file.
+var MediaTypes = []string{"image", "video", "gif", "sticker", "document", "audio", "ptt"}
+
+// LiveMediaRow is a received media message without a file and without the
+// descriptor needed to fetch it, but with its original proto.
+type LiveMediaRow struct {
+	ID, ChatID, SenderID string
+	Timestamp            int64
+	Proto                []byte
+}
+
+// LiveMediaWithoutSource lists media messages whose file was never stored and
+// that have no download descriptor yet, but kept their original proto.
+func (s *MessageStore) LiveMediaWithoutSource() ([]LiveMediaRow, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT id, chat_id, sender_id, timestamp, fwd_proto FROM messages
+		WHERE msg_type IN ('image','video','gif','sticker','document','audio','ptt')
+		AND ifnull(media_url, '') = '' AND raw_message IS NULL AND fwd_proto IS NOT NULL
+		AND deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LiveMediaRow
+	for rows.Next() {
+		var r LiveMediaRow
+		if err := rows.Scan(&r.ID, &r.ChatID, &r.SenderID, &r.Timestamp, &r.Proto); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SetMediaSource gives a message without a file its download descriptor and
+// the URL that fetches the file on demand.
+func (s *MessageStore) SetMediaSource(messageID string, raw []byte, mediaURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE messages SET raw_message = ?, media_url = ?
+		WHERE id = ? AND ifnull(media_url, '') = ''`, raw, mediaURL, messageID)
+	return err
 }

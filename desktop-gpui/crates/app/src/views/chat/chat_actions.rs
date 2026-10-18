@@ -168,6 +168,7 @@ impl ChatView {
         self.context_menu = None;
         self.chat_context_menu = None;
         self.preview_image_url = None;
+        self.close_video(None, cx);
         cx.notify();
     }
 

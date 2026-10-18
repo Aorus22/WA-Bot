@@ -222,6 +222,12 @@ func (ch *ChatHandler) GetHistoricalMedia(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if cachedURL != "" && !strings.Contains(cachedURL, "/messages/") {
+		// Range requests work here, which a video player needs to seek.
+		path := strings.TrimPrefix(strings.TrimPrefix(cachedURL, "/api/media/"), "/media/")
+		if ch.handler.storage.Exists(path) {
+			ch.handler.storage.ServeMedia(w, r, path)
+			return
+		}
 		if err := ch.serveStoredMedia(w, r, cachedURL, ""); err == nil {
 			return
 		}

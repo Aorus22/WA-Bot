@@ -77,7 +77,7 @@ fetch_tool() {
     [[ -x "$dest" ]] && return
     log "Downloading $(basename "$dest")"
     mkdir -p "$(dirname "$dest")"
-    curl -fL --retry 3 -o "$dest" "$url" || fail "download failed: $url"
+    curl -fL --retry 5 --retry-all-errors --retry-delay 3 -o "$dest" "$url" || fail "download failed: $url"
     chmod +x "$dest"
 }
 run_appimage_tool() { "$1" --appimage-extract-and-run "${@:2}"; }

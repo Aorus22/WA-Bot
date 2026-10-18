@@ -87,8 +87,17 @@ impl ChatView {
             let image_has_caption = is_image
                 && !content.is_empty()
                 && content != "[Image]";
-            let show_image_timestamp =
-                is_image && r_msg.msg.media_url.is_some() && !image_has_caption;
+            let video_has_caption = is_video && !content.is_empty() && content != "[Video]";
+            // Video shows like a picture: its thumbnail, sized the same way.
+            let video_thumbnail = if is_video {
+                r_msg.msg.extra.as_ref()
+                    .and_then(|extra| extra.thumbnail.as_deref())
+                    .map(|url| resolve_media_url(url, &base_url))
+            } else {
+                None
+            };
+            let show_image_timestamp = (is_image && r_msg.msg.media_url.is_some() && !image_has_caption)
+                || (is_video && !video_has_caption);
 
             let is_dark_bg = theme.background.l < 0.5;
             // WhatsApp Web's mention colour.
@@ -143,6 +152,58 @@ impl ChatView {
                 Vec::new()
             };
 
+            // Time and ticks drawn over a picture or video without a caption.
+            let timestamp_overlay = show_image_timestamp.then(|| {
+                                h_flex()
+                                    .absolute()
+                                    .right(px(6.0))
+                                    .bottom(px(6.0))
+                                    .items_center()
+                                    .gap_1()
+                                    .px_1p5()
+                                    .py(px(2.0))
+                                    .rounded_lg()
+                                    .bg(rgba(0x00000099))
+                                    .children(overlay_marks)
+                                    .child(
+                                        div()
+                                            .chat_text(0.75, 1.0, chat_scale)
+                                            .text_color(rgb(0xffffff))
+                                            .child(time_str.clone()),
+                                    )
+                                    .children(if is_from_me {
+                                        match ticks {
+                                            MessageTicks::Read => Some(
+                                                svg()
+                                                    .data(CHECK_CHECK_SVG)
+                                                    .size(px(14.0))
+                                                    .text_color(rgb(0x53bdeb)),
+                                            ),
+                                            MessageTicks::Delivered => Some(
+                                                svg()
+                                                    .data(CHECK_CHECK_SVG)
+                                                    .size(px(14.0))
+                                                    .text_color(rgb(0xffffff).opacity(0.8)),
+                                            ),
+                                            MessageTicks::Sent => Some(
+                                                svg()
+                                                    .data(CHECK_SVG)
+                                                    .size(px(14.0))
+                                                    .text_color(rgb(0xffffff).opacity(0.8)),
+                                            ),
+                                            MessageTicks::Failed => Some(
+                                                svg()
+                                                    .data(X_SVG)
+                                                    .size(px(12.0))
+                                                    .text_color(rgb(0xef4444)),
+                                            ),
+                                            MessageTicks::None => None,
+                                        }
+                                    } else {
+                                        None
+                                    })
+            });
+
             let is_highlighted = this.highlighted_message_id.as_deref() == Some(&r_msg.msg.id);
             let base_bubble_bg: Hsla = bubble_bg.into();
             let final_bubble_bg = if is_highlighted { theme.primary.opacity(0.35) } else { base_bubble_bg };
@@ -151,10 +212,17 @@ impl ChatView {
             // ratios hit the minimum size and get cover-cropped; everything else
             // shows in full. The bubble is exactly as wide as the picture, so a
             // caption wraps to the picture's width instead of widening the bubble.
-            let image_dims: Option<(f32, f32)> = if is_image {
-                r_msg.msg.media_url.as_ref().map(|m_url| {
-                    let full_url = resolve_media_url(m_url, &base_url);
-                    match preview_load_state(&full_url, window, cx) {
+            let dims_source: Option<Option<String>> = if is_image {
+                r_msg.msg.media_url.as_ref().map(|m_url| Some(resolve_media_url(m_url, &base_url)))
+            } else if is_video {
+                Some(video_thumbnail.clone())
+            } else {
+                None
+            };
+            let image_dims: Option<(f32, f32)> = {
+                dims_source.map(|source| {
+                    let state = source.map(|full_url| preview_load_state(&full_url, window, cx));
+                    match state.unwrap_or(PreviewLoad::Loading) {
                         PreviewLoad::Ready(nw, nh) if nw > 0.0 && nh > 0.0 => {
                             let scale = (MESSAGE_IMAGE_MAX_WIDTH / nw)
                                 .min(MESSAGE_IMAGE_MAX_HEIGHT / nh);
@@ -166,10 +234,8 @@ impl ChatView {
                         _ => (MESSAGE_IMAGE_MIN_WIDTH, MESSAGE_IMAGE_MIN_HEIGHT),
                     }
                 })
-            } else {
-                None
             };
-            let mut bubble = if is_image {
+            let mut bubble = if is_image || is_video {
                 // Media bubbles sit close to the thumbnail; text bubbles keep the
                 // roomier text padding.
                 // `px_1` is 4px a side, hence the 8px added to the picture's width.
@@ -329,60 +395,7 @@ impl ChatView {
                                         .rounded_xl()
                                         .object_fit(ObjectFit::Cover)
                                 );
-                        let frame = if show_image_timestamp {
-                            frame.child(
-                                h_flex()
-                                    .absolute()
-                                    .right(px(6.0))
-                                    .bottom(px(6.0))
-                                    .items_center()
-                                    .gap_1()
-                                    .px_1p5()
-                                    .py(px(2.0))
-                                    .rounded_lg()
-                                    .bg(rgba(0x00000099))
-                                    .children(overlay_marks)
-                                    .child(
-                                        div()
-                                            .chat_text(0.75, 1.0, chat_scale)
-                                            .text_color(rgb(0xffffff))
-                                            .child(time_str.clone()),
-                                    )
-                                    .children(if is_from_me {
-                                        match ticks {
-                                            MessageTicks::Read => Some(
-                                                svg()
-                                                    .data(CHECK_CHECK_SVG)
-                                                    .size(px(14.0))
-                                                    .text_color(rgb(0x53bdeb)),
-                                            ),
-                                            MessageTicks::Delivered => Some(
-                                                svg()
-                                                    .data(CHECK_CHECK_SVG)
-                                                    .size(px(14.0))
-                                                    .text_color(rgb(0xffffff).opacity(0.8)),
-                                            ),
-                                            MessageTicks::Sent => Some(
-                                                svg()
-                                                    .data(CHECK_SVG)
-                                                    .size(px(14.0))
-                                                    .text_color(rgb(0xffffff).opacity(0.8)),
-                                            ),
-                                            MessageTicks::Failed => Some(
-                                                svg()
-                                                    .data(X_SVG)
-                                                    .size(px(12.0))
-                                                    .text_color(rgb(0xef4444)),
-                                            ),
-                                            MessageTicks::None => None,
-                                        }
-                                    } else {
-                                        None
-                                    }),
-                            )
-                        } else {
-                            frame
-                        };
+                        let frame = frame.children(timestamp_overlay);
                         Some(frame.into_any_element())
                     } else {
                         None
@@ -417,6 +430,23 @@ impl ChatView {
                     } else {
                         None
                     }
+                } else if is_video {
+                    let video_url = r_msg.msg.media_url.as_ref().map(|url| resolve_media_url(url, &base_url));
+                    let (video_w, video_h) = image_dims.unwrap_or((MESSAGE_IMAGE_MIN_WIDTH, MESSAGE_IMAGE_MIN_HEIGHT));
+                    Some(
+                        video_preview(format!("msg-video-{}", r_msg.msg.id), video_thumbnail.clone(), video_w, video_h)
+                            .id(SharedString::from(format!("msg-video-frame-{}", r_msg.msg.id)))
+                            .cursor_pointer()
+                            .children(timestamp_overlay)
+                            .on_mouse_down(MouseButton::Left, cx.listener({
+                                let open_msg = r_msg.msg.clone();
+                                move |this, _, _, cx| match &video_url {
+                                    Some(url) => this.open_video(url.clone(), Some((open_msg.chat_id.clone(), open_msg.clone())), cx),
+                                    None => toast::error("This video was not downloaded", cx),
+                                }
+                            }))
+                            .into_any_element(),
+                    )
                 } else if is_document {
                     // Web's document card: icon tile, file name,
                     // extension, then Open / Save As actions.

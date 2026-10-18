@@ -32,6 +32,7 @@ func (ch *ChatHandler) GetChats(w http.ResponseWriter, r *http.Request) {
 	chats, err := ch.handler.msgRepo.GetChats()
 	if err == nil {
 		ch.handler.applyChatNames(chats)
+		ch.handler.applyChatPreviewMentions(chats)
 	}
 	if err != nil {
 		fmt.Printf("Error getting chats: %v\n", err)

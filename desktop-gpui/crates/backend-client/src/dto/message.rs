@@ -135,6 +135,9 @@ pub struct MessageExtra {
     pub mentions_me: bool,
     pub disappearing: Option<DisappearingMeta>,
     pub status_reply: Option<StatusReplyMeta>,
+    /// Media URL of a video's preview picture.
+    #[serde(default)]
+    pub thumbnail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -63,6 +63,11 @@ type WhatsAppClient struct {
 	handlersMu sync.Mutex
 	handlers   []func(event interface{})
 
+	// presenceIdle turns the account back offline once nobody has been
+	// watching a one-to-one chat for presenceIdleAfter.
+	presenceMu   sync.Mutex
+	presenceIdle *time.Timer
+
 	appStateMutationMu      sync.Mutex
 	appStateRecoveryMu      sync.Mutex
 	appStateRecoveryWaiters map[appstate.WAPatchName][]chan struct{}
@@ -990,7 +995,31 @@ func (w *WhatsAppClient) SubscribeUserPresence(ctx context.Context, jid string) 
 	if err != nil {
 		return err
 	}
+	w.markOnlineWhileWatching(ctx)
 	return w.client.SubscribePresence(ctx, targetJID)
+}
+
+// presenceIdleAfter is how long the account stays online after the last chat
+// was opened. Clients renew it while a chat stays open.
+const presenceIdleAfter = 5 * time.Minute
+
+// markOnlineWhileWatching sets the account online, which WhatsApp requires
+// before it sends "typing..." events, and schedules going offline again.
+// Staying online for good would stop push notifications on the phone.
+func (w *WhatsAppClient) markOnlineWhileWatching(ctx context.Context) {
+	w.presenceMu.Lock()
+	defer w.presenceMu.Unlock()
+	if err := w.client.SendPresence(ctx, waTypes.PresenceAvailable); err != nil {
+		fmt.Printf("[PRESENCE] Couldn't go online: %v\n", err)
+	}
+	if w.presenceIdle != nil {
+		w.presenceIdle.Stop()
+	}
+	w.presenceIdle = time.AfterFunc(presenceIdleAfter, func() {
+		if err := w.client.SendPresence(context.Background(), waTypes.PresenceUnavailable); err != nil {
+			fmt.Printf("[PRESENCE] Couldn't go offline: %v\n", err)
+		}
+	})
 }
 
 func (w *WhatsAppClient) SendPresence(to string, isTyping bool) error {

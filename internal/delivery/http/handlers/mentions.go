@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	waTypes "go.mau.fi/whatsmeow/types"
@@ -117,5 +118,48 @@ func (h *Handler) enrichMessagesMentions(messages []repository.Message) {
 	own := h.ownMentionJIDs()
 	for i := range messages {
 		h.enrichMessageMentions(&messages[i], own)
+	}
+}
+
+var mentionToken = regexp.MustCompile(`@(\d+)`)
+
+// applyMentionNames replaces "@<number>" in content by "@<name>" for the
+// mentions of extra that have a resolved name. Mentions without one are kept,
+// so clients can decide how to show them.
+func applyMentionNames(content string, extra *repository.MessageExtra) string {
+	if extra == nil || len(extra.MentionNames) == 0 {
+		return content
+	}
+	names := make(map[string]string, len(extra.MentionNames))
+	for jid, name := range extra.MentionNames {
+		if name = strings.TrimSpace(name); name != "" {
+			names[strings.SplitN(jid, "@", 2)[0]] = name
+		}
+	}
+	return mentionToken.ReplaceAllStringFunc(content, func(token string) string {
+		if name, ok := names[token[1:]]; ok {
+			return "@" + name
+		}
+		return token
+	})
+}
+
+// applyChatPreviewMentions shows people's names instead of numbers in the
+// last-message preview of the chat list.
+func (h *Handler) applyChatPreviewMentions(chats []repository.Chat) {
+	if h.msgRepo == nil {
+		return
+	}
+	own := h.ownMentionJIDs()
+	for i := range chats {
+		if !mentionToken.MatchString(chats[i].LastMsg) {
+			continue
+		}
+		msg, err := h.msgRepo.LastMessage(chats[i].ID)
+		if err != nil || msg.Content != chats[i].LastMsg || msg.Extra == nil {
+			continue
+		}
+		h.enrichMessageMentions(msg, own)
+		chats[i].LastMsg = applyMentionNames(chats[i].LastMsg, msg.Extra)
 	}
 }

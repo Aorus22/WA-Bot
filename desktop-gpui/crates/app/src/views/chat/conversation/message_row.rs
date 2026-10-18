@@ -150,11 +150,11 @@ impl ChatView {
                 })
             });
         match fresh_id {
-            Some(id) => crate::components::motion::rise_in(
+            Some(id) => crate::components::motion::bubble_in(
                 row,
                 SharedString::from(format!("msg-in-{id}")),
                 MSG_ENTER_MS,
-                12.0,
+                8.0,
             )
             .into_any_element(),
             None => row.into_any_element(),

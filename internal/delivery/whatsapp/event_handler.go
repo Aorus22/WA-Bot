@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -768,6 +769,7 @@ func (h *WhatsAppEventHandler) repairGroupStatuses() {
 	if h.msgStore == nil {
 		return
 	}
+	h.repairLiveMediaSources()
 	fmt.Println("[RECEIPT] Checking stored ticks")
 	ids, perr := h.msgStore.RepairPrivateReadStatuses()
 	if perr != nil {
@@ -1328,6 +1330,16 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 					content = "[Video]"
 				}
 			}
+			safeJID := strings.NewReplacer("@", "_", ".", "_").Replace(senderJID.String())
+			stamp := time.Now().UnixMilli()
+			if thumb := vid.GetJPEGThumbnail(); len(thumb) > 0 {
+				name := fmt.Sprintf("vidthumb_%d_%s.jpg", stamp, safeJID)
+				if _, err := h.storage.Save(ctx, name, bytes.NewReader(thumb)); err == nil {
+					extra.Thumbnail = "/media/" + name
+				}
+			}
+			// The video itself is fetched when it is opened (see below), so a
+			// large one does not hold the message back.
 		} else if payload.GetDocumentMessage() != nil {
 			msgType = "document"
 			doc := payload.GetDocumentMessage()
@@ -1514,12 +1526,23 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 				return ""
 			}(),
 		}
-		if extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || extra.Disappearing != nil || extra.StatusReply != nil {
+		if extra.Poll != nil || extra.Location != nil || extra.Contact != nil || extra.ViewOnce != nil || extra.GIF || extra.LinkPreview != nil || len(extra.Mentions) > 0 || extra.Disappearing != nil || extra.StatusReply != nil || extra.Thumbnail != "" {
 			msg.Extra = &extra
 		}
 		// Keep the serialized original proto for lossless forwarding.
 		if raw, err := proto.Marshal(evt.Message); err == nil {
 			msg.RawProto = raw
+		}
+		// Media keeps what downloading its file needs. A file not stored now
+		// (a video, or a failed download) is fetched when it is first opened,
+		// or by the media download in Settings.
+		if slices.Contains(repository.MediaTypes, msg.Type) {
+			if raw, err := mediaDescriptor(evt.Info.Chat, evt.Info.Sender, evt.Info.IsFromMe, evt.Info.ID, evt.Info.Timestamp, evt.Message); err == nil {
+				msg.RawWeb = raw
+				if msg.MediaURL == "" {
+					msg.MediaURL = onDemandMediaURL(msg.ChatID, msg.ID)
+				}
+			}
 		}
 
 		if h.httpServer != nil {
@@ -1905,6 +1928,7 @@ func (h *WhatsAppEventHandler) handleChatPresence(evt *events.ChatPresence) {
 	if h.httpServer == nil {
 		return
 	}
+	fmt.Printf("[PRESENCE] chat=%s sender=%s state=%s media=%s\n", evt.Chat, evt.Sender, evt.State, evt.Media)
 	chatID := evt.Chat.String()
 	sender := ""
 	if !evt.Sender.IsEmpty() {
@@ -2002,4 +2026,71 @@ func (h *WhatsAppEventHandler) saveStarredSticker(id string, action *waSyncActio
 	if err := h.msgStore.SaveStarredSticker(id, "/media/"+filename, action.GetIsLottie()); err != nil {
 		fmt.Printf("[STICKER] Failed to save starred sticker %s: %v\n", id, err)
 	}
+}
+
+// repairLiveMediaSources makes media received live before descriptors were
+// kept downloadable again: their original proto is still stored, which is all
+// the on-demand download needs.
+func (h *WhatsAppEventHandler) repairLiveMediaSources() {
+	rows, err := h.msgStore.LiveMediaWithoutSource()
+	if err != nil {
+		fmt.Printf("[MEDIA] Media repair skipped: %v\n", err)
+		return
+	}
+	fixed := 0
+	for _, row := range rows {
+		var msg waProto.Message
+		if proto.Unmarshal(row.Proto, &msg) != nil {
+			continue
+		}
+		chat, err := waTypes.ParseJID(row.ChatID)
+		if err != nil {
+			continue
+		}
+		fromMe := row.SenderID == "me"
+		var sender waTypes.JID
+		if !fromMe {
+			sender, _ = waTypes.ParseJID(row.SenderID)
+		}
+		raw, err := mediaDescriptor(chat, sender, fromMe, row.ID, time.UnixMilli(row.Timestamp), &msg)
+		if err != nil {
+			continue
+		}
+		if h.msgStore.SetMediaSource(row.ID, raw, onDemandMediaURL(row.ChatID, row.ID)) == nil {
+			fixed++
+		}
+		h.restoreVideoThumbnail(row.ID, msg.GetVideoMessage())
+	}
+	if fixed > 0 {
+		fmt.Printf("[MEDIA] %d received media file(s) can be downloaded again\n", fixed)
+		if h.httpServer != nil {
+			h.httpServer.BroadcastMessage("chats_changed", map[string]interface{}{})
+		}
+	}
+}
+
+// restoreVideoThumbnail stores the preview picture that came inside a video
+// message, for videos received before it was kept.
+func (h *WhatsAppEventHandler) restoreVideoThumbnail(messageID string, video *waProto.VideoMessage) {
+	thumb := video.GetJPEGThumbnail()
+	if len(thumb) == 0 || h.storage == nil {
+		return
+	}
+	stored, err := h.msgStore.GetMessageByID(messageID)
+	if err != nil {
+		return
+	}
+	extra := stored.Extra
+	if extra == nil {
+		extra = &repository.MessageExtra{}
+	}
+	if extra.Thumbnail != "" {
+		return
+	}
+	name := fmt.Sprintf("vidthumb_%s.jpg", messageID)
+	if _, err := h.storage.Save(context.Background(), name, bytes.NewReader(thumb)); err != nil {
+		return
+	}
+	extra.Thumbnail = "/media/" + name
+	_ = h.msgStore.UpdateMessageExtra(messageID, extra)
 }

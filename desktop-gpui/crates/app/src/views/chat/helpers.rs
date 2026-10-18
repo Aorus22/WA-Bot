@@ -34,6 +34,9 @@ pub(crate) struct MentionSpan {
 
 /// Rewrites `@<id>` tokens to the contact's name and returns the byte ranges of
 /// every mention in the rewritten text, so callers can colour them.
+/// Label for a mention whose name nobody knows yet.
+const UNKNOWN_MENTION: &str = "Unknown";
+
 pub(crate) fn render_message_mentions_with_spans(
     content: &str,
     message: &Message,
@@ -64,7 +67,9 @@ pub(crate) fn render_message_mentions_with_spans(
         let number = &part[..end];
         let start = rendered.len();
         rendered.push('@');
-        rendered.push_str(names.get(number).copied().unwrap_or(number));
+        // A mentioned person without a known name is "Unknown", never a raw LID.
+        let fallback = if mentioned.contains_key(number) { UNKNOWN_MENTION } else { number };
+        rendered.push_str(names.get(number).copied().unwrap_or(fallback));
         if let Some(jid) = mentioned.get(number) {
             spans.push(MentionSpan { range: start..rendered.len(), jid: (*jid).to_string() });
         }
@@ -106,9 +111,9 @@ mod mention_tests {
     }
 
     #[test]
-    fn unresolved_mentions_and_plain_at_text_keep_their_content() {
+    fn unresolved_mentions_read_unknown_and_plain_at_text_is_kept() {
         let m = message(serde_json::json!(["123@lid"]), serde_json::json!({}));
-        assert_eq!(render_message_mentions("halo @123 dan @456", &m, None), "halo @123 dan @456");
+        assert_eq!(render_message_mentions("halo @123 dan @456", &m, None), "halo @Unknown dan @456");
         let plain = message(serde_json::json!([]), serde_json::json!({"123@lid": "Nama"}));
         assert_eq!(render_message_mentions("@123", &plain, None), "@123");
     }
@@ -428,4 +433,45 @@ pub(crate) fn quote_media_label(msg: &Message) -> String {
         "poll" => "📊 Poll".to_string(),
         _ => "Message".to_string(),
     }
+}
+
+/// Filled triangle for the play button on video previews.
+const PLAY_TRIANGLE_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" fill="currentColor"/></svg>"#;
+
+/// A video's preview: its thumbnail (or a dark tile while there is none) with
+/// WhatsApp's round play button in the middle.
+pub(crate) fn video_preview(id: impl Into<SharedString>, thumbnail: Option<String>, width: f32, height: f32) -> Div {
+    let id: SharedString = id.into();
+    div()
+        .w(px(width))
+        .h(px(height))
+        .rounded_xl()
+        .overflow_hidden()
+        .relative()
+        .bg(rgb(0x111b21))
+        .children(thumbnail.map(|url| {
+            img(url)
+                .id(SharedString::from(format!("{id}-thumb")))
+                .w(px(width))
+                .h(px(height))
+                .object_fit(ObjectFit::Cover)
+        }))
+        .child(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .size(px(46.0))
+                        .rounded_full()
+                        .bg(rgba(0x00000080))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(svg().data(PLAY_TRIANGLE_SVG).size(px(22.0)).text_color(rgb(0xffffff))),
+                ),
+        )
 }

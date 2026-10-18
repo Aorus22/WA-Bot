@@ -50,11 +50,12 @@ sha2 = "=0.10.9"
 semver = "=1.0.28"
 # Microphone capture for voice notes (ALSA on Linux, which the .deb already depends on).
 cpal = "=0.15.3"
+# Video frames handed to gpui as RenderImage (gpui uses the same version).
+image = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }
 ksni = { workspace = true }
-image = { workspace = true }
 
 [package.metadata.deb]
 name = "wa-bot"

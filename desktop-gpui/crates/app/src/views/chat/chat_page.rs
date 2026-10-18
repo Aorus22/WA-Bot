@@ -53,6 +53,12 @@ pub struct ChatView {
     /// Messages that just arrived live (id -> arrival). They play a short
     /// entrance; history, scroll-back and chat switches never do.
     pub(crate) fresh_msgs: std::collections::HashMap<String, std::time::Instant>,
+    /// Typing bubble: (chat id, typist JID, name) shown last, kept for the exit animation.
+    pub(crate) typing_shown: Option<(String, String, String)>,
+    /// When the typing bubble started leaving (nobody is typing any more).
+    pub(crate) typing_left_at: Option<std::time::Instant>,
+    /// Counts typing sessions so each one replays the pop-in animation.
+    pub(crate) typing_session: u32,
 
     // Conversation sidebar width and its live resize drag (web parity)
     pub sidebar_width: f32,
@@ -188,6 +194,10 @@ pub struct ChatView {
     /// Pointer-drag pan in progress: (mouse x, mouse y, pan x, pan y) at the start.
     pub preview_drag: Option<(f32, f32, f32, f32)>,
     pub preview_focus: FocusHandle,
+    /// Full-screen video player, while one is open.
+    pub(crate) video_view: Option<super::video_viewer::VideoView>,
+    pub(crate) video_focus: FocusHandle,
+    pub(crate) video_needs_focus: bool,
     pub preview_needs_focus: bool,
     /// Viewer bounds from the last frame (for zoom-to-cursor math).
     pub preview_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
@@ -252,6 +262,9 @@ impl ChatView {
             },
             measured_text_scale: (100, 100),
             fresh_msgs: std::collections::HashMap::new(),
+            typing_shown: None,
+            typing_left_at: None,
+            typing_session: 0,
 
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             sidebar_resize_drag: None,
@@ -333,6 +346,9 @@ impl ChatView {
             preview_pan: (0.0, 0.0),
             preview_drag: None,
             preview_focus: cx.focus_handle(),
+            video_view: None,
+            video_focus: cx.focus_handle(),
+            video_needs_focus: false,
             preview_needs_focus: false,
             preview_bounds: std::rc::Rc::new(std::cell::Cell::new(Bounds::default())),
 
@@ -367,6 +383,11 @@ impl Render for ChatView {
             // Keys (Esc, arrows, +/-) go to the viewer as soon as it opens.
             self.preview_focus.focus(window, cx);
             self.preview_needs_focus = false;
+        }
+        if self.video_needs_focus && self.video_view.is_some() {
+            // Space, arrows and Esc go to the player as soon as it opens.
+            self.video_focus.focus(window, cx);
+            self.video_needs_focus = false;
         }
         let theme = *cx.app_theme();
         let border_color = theme.border;
@@ -626,5 +647,6 @@ impl Render for ChatView {
             // Full-screen image viewer: fit-to-window, wheel zoom around the
             // cursor, drag to pan, double-click to zoom, Esc / click outside to close.
             .children(self.render_image_viewer(window, cx))
+            .children(self.render_video_viewer(window, cx))
     }
 }

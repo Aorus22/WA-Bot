@@ -17,7 +17,7 @@ var HistoryMediaGroups = map[string][]string{
 	"image":    {"image"},
 	"sticker":  {"sticker"},
 	"audio":    {"audio", "ptt"},
-	"video":    {"video"},
+	"video":    {"video", "gif"},
 	"document": {"document"},
 }
 

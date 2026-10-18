@@ -406,11 +406,13 @@ impl ChatStore {
                 let mentions_me = incoming && msg.extra.as_ref().is_some_and(|extra| extra.mentions_me);
                 let unread_here = incoming
                     && (!chat_is_visible || self.active_chat_id.as_deref() != Some(&chat_id));
+                // The chat list previews the text with names, not mention numbers.
+                let preview = crate::views::chat::render_message_mentions_with_spans(&msg.content, &msg, None).0;
                 self.upsert_message(&chat_id, *msg.clone());
 
                 if let Some(pos) = self.chats.iter().position(|c| c.id == chat_id) {
                     let mut existing = self.chats.remove(pos);
-                    existing.last_msg = msg.content.clone();
+                    existing.last_msg = preview;
                     existing.last_time = msg.timestamp;
                     if unread_here {
                         existing.unread += 1;
@@ -422,7 +424,7 @@ impl ChatStore {
                         id: chat_id.clone(),
                         name: msg.sender_name.clone().unwrap_or_else(|| chat_id.clone()),
                         avatar: String::new(),
-                        last_msg: msg.content.clone(),
+                        last_msg: preview,
                         last_time: msg.timestamp,
                         unread: if unread_here { 1 } else { 0 },
                         has_unread_mention: unread_here && mentions_me,
@@ -776,6 +778,18 @@ mod tests {
             "extra": {"mentions": ["123@lid"], "mentionsMe": mentions_me}
         })).unwrap();
         WsEvent::NewMessage(Box::new(message))
+    }
+
+    #[test]
+    fn chat_preview_shows_mention_names_not_numbers() {
+        let mut store = ChatStore::default();
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id": "m1", "chatId": "group@g.us", "content": "hai @123 dan @456", "status": "received",
+            "timestamp": 1, "extra": {"mentions": ["123@lid", "456@lid"], "mentionNames": {"123@lid": "Budi"}}
+        })).unwrap();
+        let event = WsEvent::NewMessage(Box::new(message));
+        store.handle_ws_event(&event);
+        assert_eq!(store.chats[0].last_msg, "hai @Budi dan @Unknown");
     }
 
     #[test]

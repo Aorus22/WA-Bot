@@ -45,9 +45,29 @@ impl ChatView {
         // groups send them anyway.
         if !chat_id.ends_with("@g.us") {
             let (base_url, target) = (Self::compose_base_url(cx), chat_id.clone());
-            TOKIO_RT.spawn(async move {
-                let _ = HttpClient::new(&base_url).subscribe_chat_presence(&target).await;
-            });
+            // WhatsApp expires the subscription and the backend goes offline again
+            // after a while, so renew both while the chat stays open.
+            cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                let cx = cx.clone();
+                async move {
+                    loop {
+                        let url = base_url.clone();
+                        let chat = target.clone();
+                        let _ = TOKIO_RT
+                            .spawn(async move { HttpClient::new(&url).subscribe_chat_presence(&chat).await })
+                            .await;
+                        cx.background_executor().timer(std::time::Duration::from_secs(240)).await;
+                        let still_open = this
+                            .upgrade()
+                            .map(|view| cx.update(|cx: &mut App| view.read(cx).selected_chat_id.as_deref() == Some(target.as_str())))
+                            .unwrap_or(false);
+                        if !still_open {
+                            break;
+                        }
+                    }
+                }
+            })
+            .detach();
         }
         self.mention_query = None;
         self.group_info = None;
