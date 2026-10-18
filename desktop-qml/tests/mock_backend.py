@@ -1,9 +1,11 @@
 """In-process mock of the Go backend for tests and offscreen screenshots — so nothing ever
-touches a real WhatsApp account. REST under /api, JSON WebSocket at /ws, static media.
+touches a real WhatsApp account. REST under /api, JSON WebSocket at /ws, binary call-media
+WebSocket under /ws/calls/{id}/media, and static media.
 
     mb = MockBackend(); mb.start()           # picks a free port
     mb.url                                    # "http://127.0.0.1:PORT/api"  (pass as --url)
     mb.broadcast("new_message", {...})        # push a WS event to every connected client
+    mb.send_media_frame(binary_frame)          # send one binary call-media frame
     @mb.route("GET", r"/chats/(?P<id>[^/]+)/messages")
     def messages(req): return 200, [...]      # req.params, req.query, req.json(), req.body, req.method
 
@@ -21,6 +23,7 @@ import json
 import re
 import socket
 import struct
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -59,6 +62,9 @@ class MockBackend:
     def __init__(self, areas: list[str] | None = None, port: int = 0):
         self.routes: list[tuple[str, re.Pattern, Callable[[Request], Any]]] = []
         self.clients: list[socket.socket] = []
+        self.media_clients: list[socket.socket] = []
+        self.media_frames: list[bytes] = []
+        self.media_handshakes: list[tuple[str, str]] = []
         self.requests: list[tuple[str, str, bytes]] = []  # (method, path, body) log for assertions
         self.state: dict[str, Any] = {"logged_in": True, "phone": "628123456789"}
         self._lock = threading.Lock()
@@ -110,21 +116,60 @@ class MockBackend:
         head = bytes([0x80 | opcode]) + (bytes([n]) if n < 126 else b"\x7e" + struct.pack(">H", n) if n < 65536 else b"\x7f" + struct.pack(">Q", n))
         return head + data
 
+    @staticmethod
+    def _recv_exact(sock: socket.socket, size: int) -> bytes | None:
+        data = bytearray()
+        while len(data) < size:
+            part = sock.recv(size - len(data))
+            if not part:
+                return None
+            data.extend(part)
+        return bytes(data)
+
     def close_clients(self) -> None:
         with self._lock:
-            for c in self.clients:
+            for c in self.clients + self.media_clients:
                 try:
                     c.sendall(self._frame(struct.pack(">H", 1000), 0x8))
                     c.close()
                 except OSError:
                     pass
             self.clients.clear()
+            self.media_clients.clear()
+
+    def send_media_frame(self, data: bytes) -> None:
+        """Send one binary media WebSocket frame to every attached media client."""
+        frame = self._frame(data, 0x2)
+        with self._lock:
+            for client in list(self.media_clients):
+                try:
+                    client.sendall(frame)
+                except OSError:
+                    self.media_clients.remove(client)
 
     def wait_for_client(self, timeout: float = 5.0) -> bool:
         end = time.time() + timeout
         while time.time() < end:
             if self.clients:
                 return True
+            time.sleep(0.02)
+        return False
+
+    def wait_for_media_client(self, timeout: float = 5.0) -> bool:
+        end = time.time() + timeout
+        while time.time() < end:
+            with self._lock:
+                if self.media_clients:
+                    return True
+            time.sleep(0.02)
+        return False
+
+    def wait_for_media_clients(self, count: int, timeout: float = 5.0) -> bool:
+        end = time.time() + timeout
+        while time.time() < end:
+            with self._lock:
+                if len(self.media_clients) >= count:
+                    return True
             time.sleep(0.02)
         return False
 
@@ -143,13 +188,23 @@ class MockBackend:
                 body = self.rfile.read(n) if n else b""
                 if self.path.split("?")[0] == "/ws" and self.headers.get("Upgrade", "").lower() == "websocket":
                     return self._ws()
+                path = self.path.split("?", 1)[0]
+                if (path.startswith("/ws/calls/")
+                        and path.endswith("/media")
+                        and self.headers.get("Upgrade", "").lower() == "websocket"):
+                    return self._ws_media()
                 status, data, ctype = outer._dispatch(self.command, self.path, body, self.headers)
                 self.send_response(status)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Connection", "close")
                 self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # offscreen clients can exit while a slow fixture response is in flight
+                self.close_connection = True
 
             do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _handle
 
@@ -188,6 +243,86 @@ class MockBackend:
                         if sock in outer.clients:
                             outer.clients.remove(sock)
                     self.close_connection = True
+
+            def _ws_media(self):
+                u = urlparse(self.path)
+                token = parse_qs(u.query).get("token", [""])[0]
+                path = unquote(u.path)
+                requested_call_id = path[len("/ws/calls/"):-len("/media")] if path.startswith("/ws/calls/") and path.endswith("/media") else ""
+                with outer._lock:
+                    outer.media_handshakes.append((self.path, token))
+                    sessions = outer.state.setdefault("media_sessions", {})
+                    call_id = sessions.pop(token, None) if token else None
+                    by_call = outer.state.setdefault("media_session_by_call", {})
+                    if call_id and by_call.get(call_id) == token:
+                        by_call.pop(call_id, None)
+                call = outer.state.get("active_call")
+                if call_id is None or call_id != requested_call_id or not call or call.get("id") != call_id:
+                    self.send_response(403)
+                    self.send_header("Content-Length", "0")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.close_connection = True
+                    return
+
+                key = self.headers["Sec-WebSocket-Key"]
+                accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+                self.send_response(101, "Switching Protocols")
+                self.send_header("Upgrade", "websocket")
+                self.send_header("Connection", "Upgrade")
+                self.send_header("Sec-WebSocket-Accept", accept)
+                self.end_headers()
+                sock = self.connection
+                with outer._lock:
+                    outer.media_clients.append(sock)
+                try:
+                    while True:
+                        hdr = outer._recv_exact(sock, 2)
+                        if hdr is None:
+                            break
+                        opcode, length = hdr[0] & 0x0F, hdr[1] & 0x7F
+                        if length == 126:
+                            size = outer._recv_exact(sock, 2)
+                            if size is None:
+                                break
+                            length = struct.unpack(">H", size)[0]
+                        elif length == 127:
+                            size = outer._recv_exact(sock, 8)
+                            if size is None:
+                                break
+                            length = struct.unpack(">Q", size)[0]
+                        mask = outer._recv_exact(sock, 4) if hdr[1] & 0x80 else None
+                        payload = outer._recv_exact(sock, length) if length else b""
+                        if payload is None:
+                            break
+                        if mask:
+                            payload = bytes(value ^ mask[i % 4] for i, value in enumerate(payload))
+                        if opcode == 0x2:
+                            with outer._lock:
+                                outer.media_frames.append(payload)
+                                # Model the remote participant: client OUT_* frames return to
+                                # the other call client as the matching IN_* frame kinds.
+                                if len(payload) >= 3 and payload[0] in (0x01, 0x02):
+                                    relayed = bytes([payload[0] + 2]) + payload[1:]
+                                    wire_frame = outer._frame(relayed, 0x2)
+                                    for peer in list(outer.media_clients):
+                                        if peer is not sock:
+                                            try:
+                                                peer.sendall(wire_frame)
+                                            except OSError:
+                                                outer.media_clients.remove(peer)
+                        elif opcode == 0x9:
+                            sock.sendall(outer._frame(payload, 0xA))
+                        elif opcode == 0x8:
+                            break
+                except OSError:
+                    pass
+                finally:
+                    with outer._lock:
+                        if sock in outer.media_clients:
+                            outer.media_clients.remove(sock)
+                    self.close_connection = True
+
 
         self._server = ThreadingHTTPServer(("127.0.0.1", self._port), H)
         self._server.daemon_threads = True
@@ -248,9 +383,15 @@ class MockBackend:
         def media(req):
             return 200, jpeg_placeholder(), "image/png"
 
+        @self.route("GET", r"/avatar/(?P<jid>.+)")
+        def avatar(req):
+            # Chat rows request avatars during screenshot/startup smokes; keep
+            # those requests image-valid so QML logs reflect UI problems only.
+            return 200, jpeg_placeholder((72, 116, 132)), "image/png"
+
 
 if __name__ == "__main__":
-    mb = MockBackend().start()
+    mb = MockBackend(areas=sys.argv[1:]).start()
     print(mb.url)
     try:
         while True:

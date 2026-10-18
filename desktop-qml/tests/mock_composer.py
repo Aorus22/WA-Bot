@@ -20,7 +20,10 @@ STICKERS = [
     {"id": "f2", "mediaUrl": "/media/sticker-wa-2.webp", "isAnimated": True, "source": "wa"},
     {"id": "f3", "mediaUrl": "/media/sticker-custom-1.webp", "isAnimated": False, "source": "custom"},
 ]
-RECENT = [{"id": "r1", "mediaUrl": "/media/sticker-recent-1.webp", "isAnimated": False, "source": "recent"}]
+RECENT = [
+    {"id": "r1", "mediaUrl": "/media/sticker-recent-1.webp", "isAnimated": False, "source": "recent"},
+    {"id": "r2", "mediaUrl": "/media/sticker-recent-2.webp", "isAnimated": True, "source": "recent"},
+]
 PARTICIPANTS = [
     {"jid": SARI, "name": "Sari Wulandari", "isAdmin": True, "isSuperAdmin": False},
     {"jid": BUDI, "name": "Budi Santoso", "isAdmin": False},

@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -99,6 +100,23 @@ def test_data_dir_override(monkeypatch):
     assert d.data_dir() == Path("/tmp/wabot-x")
     monkeypatch.delenv("WABOT_HOME")
     assert d.data_dir().name == ".wa-bot"
+
+
+def test_backend_binary_uses_frozen_bundle_directory(tmp_path, monkeypatch):
+    monkeypatch.delenv("WABOT_BACKEND", raising=False)
+    name = f"wa-bot-backend{d.BACKEND_EXE_SUFFIX}"
+    binary = tmp_path / name
+    binary.write_text("prebuilt test executable")
+    monkeypatch.setattr(d.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(d.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert d.backend_binary() == binary
+
+
+def test_backend_binary_resolves_relative_environment_override(tmp_path, monkeypatch):
+    binary = tmp_path / "backend"
+    binary.write_text("prebuilt test executable")
+    monkeypatch.setenv("WABOT_BACKEND", os.path.relpath(binary, Path.cwd()))
+    assert d.backend_binary() == binary.resolve()
 
 
 def test_spawn_env_uses_env_only_no_secrets():

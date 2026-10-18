@@ -20,7 +20,6 @@ FEATURE_MODULES = [
     "statuses",   # Statuses: status stories
     "channels",   # Channels
     "calls",      # Calls: call state + media transport
-    "botadmin",   # BotAdmin: triggers, cron, webhooks, docs, AI assistant
     "system",     # System: settings page backing, history sync, GTK palette
     "platform",   # Platform: notifications, tray, single instance, popover
 ]
@@ -37,6 +36,9 @@ class Services:
     qt_app: Any
     toast: Any = None
     engine: Any = None
+    call_frames: Any = None
+    argv: list[str] = field(default_factory=list)
+    single_instance: Any = None
     exposed: dict[str, Any] = field(default_factory=dict)
 
     def expose(self, name: str, obj: Any) -> None:

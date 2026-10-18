@@ -665,24 +665,6 @@ class Composer(QObject):
         if self._chat and path:
             self._send_file(path, kind or "media")
 
-    @Slot("QVariantList", str)
-    def sendFiles(self, urls, kind: str) -> None:
-        for u in urls or []:
-            self.sendFile(str(u), kind)
-
-    @Slot("QVariantList")
-    def handleDrop(self, urls) -> None:
-        """Files dropped on the chat: one file is staged (caption friendly), several go out as is."""
-        paths = [url_to_path(str(u)) for u in (urls or [])]
-        paths = [p for p in paths if p and os.path.isfile(p)]
-        if not paths or not self._chat:
-            return
-        if len(paths) == 1 and not self._edit:
-            self._stage(paths[0])
-        else:
-            for p in paths:
-                self._send_file(p, _kind_for(p))
-
     def _send_file(self, path: str, kind: str, *, caption: str = "", temp: bool = False, name: str | None = None,
                    mime: str | None = None) -> None:
         chat = self._chat
@@ -718,20 +700,12 @@ class Composer(QObject):
     # ------------------------------------------------------------------ clipboard / paste
     @Slot(result=bool)
     def handlePaste(self) -> bool:
-        """Ctrl+V hook (GPUI `stage_clipboard_image`): returns True when the paste was consumed (an image or
-        file(s) on the clipboard and no text). Text falls through to the editor's normal paste."""
+        """Ctrl+V hook for GPUI's image-paste path. Text and file URLs fall through normally."""
         if not self._chat or self._edit:
             return False
         md = QGuiApplication.clipboard().mimeData()
         if md is None:
             return False
-        if md.hasText() and md.text().strip() and not md.hasUrls():
-            return False
-        if md.hasUrls():
-            paths = [u.toLocalFile() for u in md.urls() if u.isLocalFile() and os.path.isfile(u.toLocalFile())]
-            if paths:
-                self.handleDrop(paths)
-                return True
         if md.hasText() and md.text().strip():
             return False
         if md.hasImage():
@@ -744,11 +718,6 @@ class Composer(QObject):
                     self._stage(path, temp=True, name=name)
                     return True
         return False
-
-    @Slot(result=bool)
-    def clipboardHasFiles(self) -> bool:
-        md = QGuiApplication.clipboard().mimeData()
-        return bool(md and (md.hasImage() or md.hasUrls()))
 
     # ------------------------------------------------------------------ stickers
     @Slot()
@@ -803,7 +772,7 @@ class Composer(QObject):
     def _dialog_send(self, kind: str, path: str, body: dict, ok_toast: str, fail_toast: str) -> str:
         if not self._chat:
             return "No chat selected"
-        if self._dialog_busy:
+        if self._dialog_busy or self._uploads:
             return ""
         self._dialog_busy = True
         self.busyChanged.emit()

@@ -39,7 +39,7 @@ qml/assets/icons/*.svg      Lucide icons (`Icon { name: "check" }`). Missing one
                             ~/.cargo/registry/src/*/gpui-kit-assets-0.7.1/assets/icons/<name>.svg
 tests/mock_backend.py       mock REST+WS backend; area fixtures go in tests/mock_<area>.py with `install(mb)`
 scripts/shot.py             offscreen screenshot:  .venv/bin/python scripts/shot.py OUT.png --route chat \
-                              --preset whatsapp-dark --size 1100x720 --url <mock url> --wait 2500
+                              --preset whatsapp-dark --size 1100x720 --url <loopback mock url> --wait 2500
 ```
 Run tests: `.venv/bin/python -m pytest -q tests`. Run the app: `QT_QPA_PLATFORM=offscreen` only (no display here: it's a
 tty session); use `shot.py` (it can also drive actions: extend it or write your own script using `main.build()` and
@@ -70,7 +70,6 @@ dict/list (QVariantMap/List) or models.
 | `Composer` | bridge/composer.py | composer agent | text/media/voice/poll/location/contact/sticker sending (calls `Messages.addPending/ackPending/failPending` for optimistic rows), reply/edit state `replyTo`, `startReply(messageId)`, `startEdit(messageId)`, `cancel()`, drafts, link-preview |
 | `Statuses` / `Channels` | bridge/statuses.py / channels.py | status-channels agent | their models/actions |
 | `Calls` | bridge/calls.py | calls agent | call state (`active`, history model), `start(chatId, "audio"|"video")`, accept/decline/hangup, media transport |
-| `BotAdmin` | bridge/botadmin.py | bot agent | triggers/cron/webhooks/docs/AI-assistant stores |
 | `System` | bridge/system.py | settings agent | settings-page backing, history sync/media, GTK palette (calls `services.theme.register_preset`) |
 | `Platform` | bridge/platform.py | platform agent | notifications, tray, single instance, popover/toggle mode |
 Chat files: `pages/chat/ChatPage.qml`, `sidebar/*`, `conversation/ConversationPane.qml`, `conversation/ChatHeader.qml`,

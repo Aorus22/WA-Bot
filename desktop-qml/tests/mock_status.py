@@ -89,7 +89,8 @@ def fixtures() -> list[dict]:
         ]),
         group(SARI, "Sari Wulandari", [entry("s1", SARI, "audio", "", 300, viewed=True)]),
         group(andi, "Andi", [entry("a1", andi, "text", "Status panjang " + "lorem ipsum dolor sit amet " * 12, 600)]),
-        group(dewi, None, [entry("d1", dewi, "text", "Tanpa nama", 60 * 25)]),
+        # Keep this old story live so the list test can cover the "Yesterday" time label.
+        group(dewi, None, [entry("d1", dewi, "text", "Tanpa nama", 60 * 25, expires_in_ms=60 * 60_000)]),
     ]
 
 
@@ -207,4 +208,4 @@ def install(mb) -> None:
 
     @mb.route("GET", r"/avatar/(?P<jid>.+)")
     def avatar(req):
-        return 404, {"error": "no avatar"}  # initials fallback (like a contact without picture)
+        return 200, gradient_png(64, 64), "image/png"

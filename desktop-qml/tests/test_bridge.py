@@ -1,5 +1,4 @@
-"""Bridge classes (REST + WebSocket + reconnect) against a real spawned backend,
-including two simultaneous clients on one backend."""
+"""Bridge classes (REST + WebSocket + reconnect) against one backend and three simultaneous clients."""
 import json
 import sys
 from pathlib import Path
@@ -22,13 +21,18 @@ def app():
 
 
 def wait_for(cond, ms=10000):
-    loop, t = QEventLoop(), QTimer()
-    t.setInterval(50)
-    t.timeout.connect(lambda: loop.quit() if cond() else None)
-    QTimer.singleShot(ms, loop.quit)
-    t.start()
+    loop = QEventLoop()
+    poll = QTimer(loop)
+    poll.setInterval(50)
+    poll.timeout.connect(lambda: loop.quit() if cond() else None)
+    timeout = QTimer(loop)
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    timeout.start(ms)
+    poll.start()
     loop.exec()
-    t.stop()
+    poll.stop()
+    timeout.stop()
     return cond()
 
 
@@ -44,12 +48,17 @@ def test_two_clients_one_backend(app, tmp_path, monkeypatch):
     assert wait_for(lambda: b.state == "ready")
     assert not b.owner and b.apiUrl == a.apiUrl
 
-    hubs = [EventHub(a), EventHub(b)]
+    c = BackendController([])  # a third frontend must attach to that same owner too
+    c.start()
+    assert wait_for(lambda: c.state == "ready")
+    assert not c.owner and c.apiUrl == a.apiUrl
+
+    hubs = [EventHub(a), EventHub(b), EventHub(c)]
     for h in hubs:
         h.start()
     assert wait_for(lambda: all(h.connected for h in hubs))
 
-    api = Api(b)
+    api = Api(c)
     got = []
     api.finished.connect(lambda tok, st, body: got.append((tok, st, json.loads(body))))
     api.request("GET", "/status", "", "s")
@@ -58,6 +67,7 @@ def test_two_clients_one_backend(app, tmp_path, monkeypatch):
 
     # attached client shutting down leaves the owner's backend alone
     b.shutdown()
+    c.shutdown()
     assert d.is_wabot_backend(d.loopback_port(a.apiUrl))
 
     for h in hubs:
@@ -83,3 +93,30 @@ def test_socket_follows_backend_restart(app, tmp_path, monkeypatch):
     hub.stop()
     a.shutdown()
     assert first  # url may legitimately differ (ephemeral port)
+
+
+def test_attached_client_takes_ownership_after_owner_exits(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("WABOT_HOME", str(tmp_path))
+    owner = BackendController([])
+    owner.start()
+    assert wait_for(lambda: owner.state == "ready")
+    assert owner.owner
+
+    attached = BackendController([])
+    attached.start()
+    assert wait_for(lambda: attached.state == "ready")
+    assert not attached.owner and attached.apiUrl == owner.apiUrl
+
+    hub = EventHub(attached)
+    hub.start()
+    assert wait_for(lambda: hub.connected)
+    try:
+        owner.shutdown()
+        # The disconnected socket triggers re-resolution; the survivor starts
+        # a replacement backend and owns it from then on.
+        assert wait_for(lambda: hub.connected and attached.owner, 20000)
+    finally:
+        hub.stop()
+        attached.shutdown()
+        owner.shutdown()
+    assert not d.core_file().exists()

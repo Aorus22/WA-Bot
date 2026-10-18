@@ -31,7 +31,7 @@ Item {
         return chars[0].toUpperCase();
     }
     readonly property string imageUrl: {
-        if (!root.showImage || (root.chatId === "" && root.avatar === "")) return "";
+        if (!root.showImage || !Backend.apiUrl || (root.chatId === "" && root.avatar === "")) return "";
         const a = (root.avatar || "").trim();
         if (a !== "" && a.indexOf("data:") !== 0) {
             if (a.indexOf("http://") === 0 || a.indexOf("https://") === 0) return a;

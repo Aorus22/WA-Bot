@@ -45,6 +45,13 @@ Rectangle {
                         else root.win.close()
                     }
                 }
+                ToolTipBubble {
+                    visible: ma.containsMouse
+                    text: modelData.act === "close" && Platform.trayAvailable ? "Hide to tray"
+                        : modelData.act === "close" ? "Quit" : modelData.act === "max" ? "Maximize or restore" : "Minimize"
+                    x: 0
+                    y: parent.height + 4
+                }
             }
         }
     }

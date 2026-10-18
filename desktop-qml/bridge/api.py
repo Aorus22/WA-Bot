@@ -35,6 +35,8 @@ class Api(QObject):
         if value.startswith(("http://", "https://")):
             return value
         api = self._backend.apiUrl
+        if not api:
+            return ""
         if value == "/api" or value.startswith("/api/"):
             return api.removesuffix("/api") + value
         return f"{api}{'' if value.startswith('/') else '/'}{value}"
@@ -53,7 +55,12 @@ class Api(QObject):
     def request(self, method: str, path: str, body: str, token: str) -> None:
         base = self._backend.apiUrl
         if not base:
-            self.finished.emit(token, 0, json.dumps({"error": "backend not ready"}))
+            payload = {"error": "backend not ready"}
+            cb = self._py.pop(token, None)
+            if cb:
+                cb(0, payload)
+            else:
+                self.finished.emit(token, 0, json.dumps(payload))
             return
         req = QNetworkRequest(QUrl(base + path))
         data = QByteArray()

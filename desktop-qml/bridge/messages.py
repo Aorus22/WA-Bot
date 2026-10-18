@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any, Callable
 
-from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
@@ -43,7 +43,7 @@ ROLES = [
     "selected", "viewOnce", "mentionsMe", "chips", "canEdit", "canDelete", "canReact",
 ]
 
-MEDIA_KINDS = ("image", "video", "gif")
+PREVIEW_KINDS = ("image", "sticker")
 
 
 def _now_ms() -> int:
@@ -95,12 +95,14 @@ class Messages(QObject):
     pinsChanged = Signal()
     highlightChanged = Signal()
     infoChanged = Signal()
+    viewerChanged = Signal()
     formatChanged = Signal()
     revealRequested = Signal(int, str)        # model index, message id — scroll there
     scrollToBottomRequested = Signal()
     newMessage = Signal(bool)                 # arrived at the tail; True = mine
     forwardFinished = Signal(bool)
     saved = Signal(str, bool)                 # label, ok
+    _saveFinished = Signal(str, bool)
 
     def __init__(self, services, parent: QObject | None = None):
         super().__init__(parent)
@@ -108,7 +110,9 @@ class Messages(QObject):
         self._api = services.api
         self._app = services.app
         self._settings = services.settings
-        self.model = MessageModel(ROLES, key="id", parent=self)
+        self._external_url_opener = QDesktopServices.openUrl
+        self._saveFinished.connect(self._saved, Qt.ConnectionType.QueuedConnection)
+        self._model = MessageModel(ROLES, key="id", parent=self)
         self._chat = ""
         self._gen = 0
         self._loading = False
@@ -121,12 +125,15 @@ class Messages(QObject):
         self._pin_ids: set[str] = set()
         self._highlight = ""
         self._fresh: dict[str, float] = {}
+        self._optimistic: set[str] = set()
         self._typers: dict[str, dict] = {}
         self._select = False
         self._confirm_delete = False
         self._info: dict = {}
         self._info_open = False
         self._info_loading = False
+        self._viewer_rows: list[dict] = []
+        self._viewer_index = -1
         self._seen_connected = False
         self._phone = ""
         self._nam = QNetworkAccessManager(self)
@@ -142,6 +149,7 @@ class Messages(QObject):
         self._pins_timer.start()
         self._app.activeChatChanged.connect(self._on_active_chat)
         self._app.windowVisibleChanged.connect(self._on_visible)
+        services.backend.apiUrlChanged.connect(self._on_backend)
         services.hub.event.connect(self._on_event)
         services.hub.connectedChanged.connect(self._on_connected)
         self._settings.changed.connect(self._on_setting)
@@ -149,6 +157,11 @@ class Messages(QObject):
             QTimer.singleShot(0, self._on_active_chat)
 
     # ------------------------------------------------------------------ properties
+    @Property(QObject, constant=True)
+    def model(self) -> QObject:
+        """Newest-first message model exposed to QML delegates."""
+        return self._model
+
     @Property(QObject, constant=True)
     def modelObject(self) -> QObject:  # alias, in case a binding wants the explicit name
         return self.model
@@ -168,6 +181,10 @@ class Messages(QObject):
     @Property(bool, notify=loadingChanged)
     def loadingMore(self) -> bool:
         return self._loading_more
+
+    @Property(bool, notify=loadingChanged)
+    def loadingNewer(self) -> bool:
+        return self._loading_newer
 
     @Property(bool, notify=pagingChanged)
     def hasMore(self) -> bool:
@@ -259,6 +276,24 @@ class Messages(QObject):
     def info(self) -> dict:
         return self._info
 
+    @Property(bool, notify=viewerChanged)
+    def viewerOpen(self) -> bool:
+        return 0 <= self._viewer_index < len(self._viewer_rows)
+
+    @Property(int, notify=viewerChanged)
+    def viewerIndex(self) -> int:
+        return self._viewer_index
+
+    @Property(int, notify=viewerChanged)
+    def viewerCount(self) -> int:
+        return len(self._viewer_rows)
+
+    @Property("QVariantMap", notify=viewerChanged)
+    def viewerItem(self) -> dict:
+        if not self.viewerOpen:
+            return {}
+        return dict(self._viewer_rows[self._viewer_index])
+
     # ------------------------------------------------------------------ helpers
     def _is_group(self) -> bool:
         if self._chat.endswith("@g.us"):
@@ -335,14 +370,20 @@ class Messages(QObject):
         if mine:
             ticks = {"read": "read", "delivered": "delivered", "failed": "failed"}.get(status, "sent")
         decoded = T.decode_content(raw["content"])
-        placeholder = not decoded.strip() or decoded in T.PLACEHOLDERS
         has_card = bool((kind == "poll" and extra.get("poll")) or (kind == "location" and extra.get("location"))
                         or (kind == "contact" and extra.get("contact")))
-        hide = (kind in ("document", "audio") or has_card
-                or (kind in ("image", "sticker", "video", "gif") and placeholder))
+        # Mirror MessageBubble's GPUI placeholder rules per media kind. Other
+        # bracketed text (for example [Voice Message] or [GIF]) is still body
+        # content in that renderer.
+        hide = (kind == "document" or has_card
+                or (kind == "image" and decoded in ("", "[Image]"))
+                or (kind == "sticker" and decoded in ("", "[Sticker]"))
+                or (kind == "video" and decoded in ("", "[Video]")))
         body, segments, markdown = T.body_segments(raw["content"], extra, self._participants(), self.formatEnabled)
         has_text = bool(decoded.strip()) and not hide
-        copyable = bool(decoded.strip()) and decoded not in T.PLACEHOLDERS
+        copyable = bool(decoded.strip()) and decoded not in {
+            "[Image]", "[Sticker]", "[Video]", "[Audio]", "[Document]",
+        }
         file_name = raw["content"].strip() if kind == "document" else ""
         if kind == "document" and not file_name:
             file_name = "Document"
@@ -384,12 +425,13 @@ class Messages(QObject):
             "viewOnce": ({"viewed": bool(vo.get("viewed")), "label": "video" if vo.get("mediaType") == "video" else "photo"}
                          if vo else None),
             "mentionsMe": bool(extra.get("mentionsMe")), "chips": chips,
-            "canEdit": mine and not raw["mediaUrl"] and not raw["revokedAt"] and not pending and kind in ("text",),
+            # Match GPUI's context menu predicate: own message, no attached media,
+            # and not already revoked. The source does not filter by message kind
+            # or pending state here.
+            "canEdit": mine and not raw["mediaUrl"] and not raw["revokedAt"],
             "canDelete": mine and not raw["revokedAt"] and not pending,
             "canReact": not pending,
         })
-        if keep and keep.get("viewOnce") and row["viewOnce"] and keep["viewOnce"].get("viewed"):
-            row["viewOnce"]["viewed"] = True
         return row
 
     def _flags(self, i: int, rows: list[dict] | None = None) -> dict:
@@ -461,6 +503,23 @@ class Messages(QObject):
         return rows
 
     # ------------------------------------------------------------------ loading
+    def _on_backend(self) -> None:
+        # A deep link or restored selection can arrive before backend discovery finishes.
+        # Reopen only when the selected chat itself changed; clearing the same chat
+        # can discard an in-flight optimistic send on an attach/restart signal.
+        chat = self._app.activeChatId
+        if not self._svc.backend.apiUrl or not chat:
+            return
+        if self._chat != chat:
+            self._on_active_chat()
+            return
+        if self._loading:
+            return
+        self.reload()
+        self._load_pins()
+        if chat.endswith("@g.us"):
+            self._load_group(chat)
+
     def _on_active_chat(self) -> None:
         chat = self._app.activeChatId
         self._gen += 1
@@ -469,11 +528,14 @@ class Messages(QObject):
         self._pins, self._pin_ids = [], set()
         self._typers.clear()
         self._fresh.clear()
+        self._optimistic.clear()
         self._highlight = ""
         self._select = False
         self._confirm_delete = False
         self._info_open = False
         self._info = {}
+        self._viewer_rows = []
+        self._viewer_index = -1
         self._has_more = self._has_more_next = False
         self._loading_more = self._loading_newer = False
         self.model.reset([])
@@ -484,6 +546,7 @@ class Messages(QObject):
         self.selectionChanged.emit()
         self.highlightChanged.emit()
         self.infoChanged.emit()
+        self.viewerChanged.emit()
         if not chat:
             self._loading = False
             self.loadingChanged.emit()
@@ -527,7 +590,18 @@ class Messages(QObject):
             if m["id"] not in seen:
                 seen.add(m["id"])
                 uniq.append(m)
-        rows = self._finish_rows([self._build(m) for m in reversed(uniq)])
+        # A server snapshot that includes an optimistic ID makes that row authoritative.
+        self._optimistic.difference_update(seen)
+        rows = [self._build(m) for m in reversed(uniq)]
+        # A refresh may have started before an optimistic upload/send. Keep its
+        # row through REST ack/rekey until a later history snapshot includes it.
+        for optimistic in self.model.rows():
+            mid = optimistic.get("id", "")
+            if mid in self._optimistic and optimistic.get("chatId") == self._chat and mid not in seen:
+                rows.append(optimistic)
+                seen.add(mid)
+        rows.sort(key=lambda row: row["ts"], reverse=True)
+        rows = self._finish_rows(rows)
         self.model.reset(rows)
         self._has_more, self._has_more_next = has_more, has_next
         self.pagingChanged.emit()
@@ -579,11 +653,13 @@ class Messages(QObject):
         newest = rows[0]["timestamp"]
         chat, gen = self._chat, self._gen
         self._loading_newer = True
+        self.loadingChanged.emit()
 
         def done(status: int, data: Any) -> None:
             if gen != self._gen:
                 return
             self._loading_newer = False
+            self.loadingChanged.emit()
             if status != 200 or not isinstance(data, list):
                 return
             if not data:
@@ -770,6 +846,7 @@ class Messages(QObject):
 
     def _ev_message_deleted(self, p: dict) -> None:
         if self._for_active(p) and p.get("id") in self.model._index:
+            self._optimistic.discard(str(p["id"]))
             i = self.model.row_of(p["id"])
             self.model.remove(p["id"])
             self._refresh_around(min(i, len(self.model.rows()) - 1))
@@ -808,6 +885,7 @@ class Messages(QObject):
     def _ev_chat_cleared(self, p: dict) -> None:
         if self._for_active(p):
             self._has_more = self._has_more_next = False
+            self._optimistic.clear()
             self.model.reset([])
             self.pagingChanged.emit()
 
@@ -892,6 +970,7 @@ class Messages(QObject):
         if not mid:
             return
         if self.model.contains(mid):
+            self._optimistic.discard(mid)
             cur = self.model.get_row(mid)
             i = self.model.row_of(mid)
             new = self._build(m, keep=cur)
@@ -905,6 +984,7 @@ class Messages(QObject):
             pi = self._find_pending(m)
             if pi >= 0:
                 cur = self.model.rows()[pi]
+                self._optimistic.discard(cur["id"])
                 new = self._build(m, keep=cur)
                 new.update({k: cur[k] for k in ("dayLabel", "showDay", "firstInGroup", "lastInGroup", "quote")})
                 self.model.replace_at(pi, new)
@@ -965,6 +1045,7 @@ class Messages(QObject):
             self.reload()  # own message: go back to the live end
         idx = self._insert_sorted(self._build(row))
         self._fresh[lid] = time.monotonic()
+        self._optimistic.add(lid)
         self.newMessage.emit(True)
         self.scrollToBottomRequested.emit()
         _ = idx
@@ -974,13 +1055,18 @@ class Messages(QObject):
         """The server accepted the send. The echo (`new_message`) may already have replaced the temp row."""
         if not self.model.contains(local_id):
             return
+        was_optimistic = local_id in self._optimistic
         if server_id and self.model.contains(server_id):
+            self._optimistic.discard(local_id)
             self.model.remove(local_id)
             self._refresh_around(0)
             return
         if server_id:
+            self._optimistic.discard(local_id)
             self.model.rekey(local_id, server_id, {"pending": False, "status": "sent", "ticks": "sent",
                                                    "errorText": "", "failed": False})
+            if was_optimistic:
+                self._optimistic.add(server_id)
             self._patch_raw(server_id, {"status": "sent"})
 
     @Slot(str, str)
@@ -991,6 +1077,7 @@ class Messages(QObject):
     @Slot(str)
     def discardPending(self, local_id: str) -> None:
         """Drop a failed bubble (the composer re-sends it itself)."""
+        self._optimistic.discard(local_id)
         if self.model.contains(local_id):
             self.model.remove(local_id)
             self._refresh_around(0)
@@ -1136,12 +1223,13 @@ class Messages(QObject):
 
     @Slot(str)
     def openUrl(self, url: str) -> None:
-        if url:
-            QDesktopServices.openUrl(QUrl(url))
+        qurl = QUrl(url)
+        if qurl.isValid() and qurl.scheme().lower() in {"http", "https"}:
+            self._external_url_opener(qurl)
 
-    @Slot(str, str, result=bool)
-    def forwardSend(self, chat_id: str, message_ids: Any, targets: Any = None) -> bool:  # type: ignore[override]
-        return False  # replaced below (QVariant overload)
+    @Slot(str, "QVariant", "QVariant")
+    def forwardSend(self, chat_id: str, message_ids: Any, targets: Any) -> None:
+        _forward_send(self, chat_id, message_ids, targets)
 
     # ------------------------------------------------------------------ forwarding
     def _forward_request(self, ids: list[str]) -> None:
@@ -1316,15 +1404,99 @@ class Messages(QObject):
         return out
 
     # ------------------------------------------------------------------ media: gallery / save / copy
+    @staticmethod
+    def _viewer_item(row: dict) -> dict:
+        mid = str(row.get("id") or "")
+        media_url = str(row.get("mediaUrl") or "")
+        return {
+            "id": mid,
+            "chatId": str(row.get("chatId") or ""),
+            "forwardable": True,
+            "kind": row.get("kind") or "",
+            "src": row.get("mediaSrc") or "",
+            "name": T.file_name_from_url(media_url, f"{mid}.bin"),
+            "mediaUrl": media_url,
+        }
+
+    @Slot(str)
+    def openViewer(self, message_id: str) -> None:
+        row = self._row(message_id)
+        if not row or not row.get("mediaSrc") or row.get("kind") not in PREVIEW_KINDS:
+            return
+        if row["kind"] == "image":
+            rows = self.gallery()
+            index = next((i for i, item in enumerate(rows) if item.get("id") == message_id), -1)
+            if index < 0:
+                return
+            self._viewer_rows = rows
+        else:
+            self._viewer_rows = [self._viewer_item(row)]
+            index = 0
+        self._viewer_index = index
+        self.viewerChanged.emit()
+
+    @Slot(str, "QVariantList", str)
+    def openViewerFromList(self, chat_id: str, messages: list, message_id: str) -> None:
+        """Open one Info-drawer image preview, including when its message is outside the current page."""
+        if not chat_id or chat_id != self._chat or not message_id:
+            return
+        self._viewer_rows = []
+        self._viewer_index = -1
+        indexed: list[tuple[int, dict]] = []
+        seen: set[str] = set()
+        for raw in messages or []:
+            if not isinstance(raw, dict):
+                continue
+            mid = str(raw.get("id") or "")
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            if raw.get("chatId") and raw.get("chatId") != chat_id:
+                continue
+            row = self._build(raw)
+            if row["kind"] != "image" or not row["mediaSrc"] or row["pending"]:
+                continue
+            item = self._viewer_item(row)
+            item["forwardable"] = False
+            indexed.append((row["ts"], item))
+        self._viewer_rows = [item for _, item in sorted(indexed, key=lambda entry: entry[0])]
+        index = next((i for i, row in enumerate(self._viewer_rows) if row.get("id") == message_id), -1)
+        if index < 0:
+            self._viewer_rows = []
+            return
+        item = self._viewer_rows[index]
+        # GPUI's Info drawer opens a standalone image preview (no gallery
+        # navigation); keep the drawer preview scoped to the selected item.
+        self._viewer_rows = [item]
+        self._viewer_index = 0
+        self.viewerChanged.emit()
+
+    @Slot()
+    def closeViewer(self) -> None:
+        if self._viewer_index >= 0:
+            self._viewer_index = -1
+            self.viewerChanged.emit()
+
+    @Slot(int)
+    def moveViewer(self, delta: int) -> None:
+        if not self.viewerOpen:
+            return
+        index = self._viewer_index + int(delta)
+        if not 0 <= index < len(self._viewer_rows):
+            return
+        self._viewer_index = index
+        self.viewerChanged.emit()
+
     @Slot(result="QVariantList")
     def gallery(self) -> list:
-        """Images and videos of the open chat, oldest first, for the viewer."""
+        """Images of the open chat, oldest first, for the GPUI image viewer."""
         out = []
         for r in reversed(self.model.rows()):
-            if r["kind"] in MEDIA_KINDS and r["mediaSrc"] and not r["pending"]:
-                out.append({"id": r["id"], "kind": r["kind"], "src": r["mediaSrc"],
+            if r["kind"] == "image" and r["mediaSrc"] and not r["pending"]:
+                out.append({"id": r["id"], "chatId": self._chat, "forwardable": True,
+                            "kind": r["kind"], "src": r["mediaSrc"],
                             "name": T.file_name_from_url(r["mediaUrl"], f"{r['id']}.bin"),
-                            "caption": r["body"] if r["hasText"] else ""})
+                            "mediaUrl": r["mediaUrl"]})
         return out
 
     @Slot(str, result=str)
@@ -1366,10 +1538,11 @@ class Messages(QObject):
                     good = True
                 except OSError:
                     good = False
-                QTimer.singleShot(0, lambda: self._saved(label, good))
+                self._saveFinished.emit(label, good)
             threading.Thread(target=write, daemon=True).start()
         reply.finished.connect(done)
 
+    @Slot(str, bool)
     def _saved(self, label: str, ok: bool) -> None:
         self._toast(f"{label} disimpan" if ok else f"Gagal menyimpan {label.lower()}", "success" if ok else "error")
         self.saved.emit(label, ok)
@@ -1379,6 +1552,11 @@ class Messages(QObject):
         r = self._row(message_id)
         if r and r["mediaSrc"]:
             self.saveUrl(r["mediaSrc"], dest, self.mediaLabel(message_id))
+            return
+        viewer = next((row for row in self._viewer_rows if row.get("id") == message_id), None)
+        if viewer and viewer.get("src"):
+            label = {"image": "Gambar", "video": "Video", "gif": "GIF"}.get(viewer.get("kind"), "File")
+            self.saveUrl(viewer["src"], dest, label)
 
     @Slot(str)
     def copyImage(self, url: str) -> None:
@@ -1415,14 +1593,6 @@ class Messages(QObject):
         self._api.fetch("POST", "/stickers/favorite", {"secret": "default-secret", "messageId": message_id,
                                                         "mediaUrl": r["mediaUrl"], "isAnimated": False}, done)
 
-    @Slot(str)
-    def markViewOnce(self, message_id: str) -> None:
-        """View-once media: shown as `Viewed` once opened (local state, like the web client)."""
-        r = self._row(message_id)
-        if r and r["viewOnce"] and not r["viewOnce"]["viewed"]:
-            self.model.patch(message_id, {"viewOnce": {**r["viewOnce"], "viewed": True}})
-
-
 # Real forwardSend: accepts ids as list or comma-separated string, targets as list. Defined after the class so
 # the QVariant signature is explicit.
 def _forward_send(self: Messages, chat_id: str, message_ids: Any, targets: Any) -> None:
@@ -1451,10 +1621,6 @@ def _forward_send(self: Messages, chat_id: str, message_ids: Any, targets: Any) 
         self._api.fetch("POST", f"/chats/{self._api.enc(chat_id)}/messages/{self._api.enc(mid)}/forward",
                         {"targets": tgts}, done)
     step()
-
-
-Messages.forwardSend = Slot(str, "QVariant", "QVariant")(  # type: ignore[assignment]
-    lambda self, chat_id, ids, targets: _forward_send(self, chat_id, ids, targets))
 
 
 def register(services) -> None:

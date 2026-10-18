@@ -1,5 +1,8 @@
 import json
+import subprocess
+import sys
 import urllib.request
+from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
 
@@ -34,3 +37,23 @@ def test_mock_serves_rest_and_ws():
         hub.stop()
     finally:
         mb.stop()
+
+
+def test_mock_serves_avatar_image():
+    mb = MockBackend().start()
+    try:
+        with urllib.request.urlopen(mb.url + "/avatar/628123456789%40s.whatsapp.net") as r:
+            assert r.status == 200
+            assert r.headers.get_content_type() == "image/png"
+            assert r.read().startswith(b"\x89PNG\r\n\x1a\n")
+    finally:
+        mb.stop()
+
+
+def test_screenshot_runner_refuses_backend_discovery(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "scripts" / "shot.py"
+    output = tmp_path / "must-not-exist.png"
+    result = subprocess.run([sys.executable, str(script), str(output)], text=True, capture_output=True)
+    assert result.returncode == 2
+    assert "refusing to discover a backend" in result.stderr
+    assert not output.exists()

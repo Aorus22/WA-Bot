@@ -14,6 +14,7 @@ Rectangle {
     property alias cursorPosition: input.cursorPosition
     property string leadingIcon
     property bool clearable: false
+    property var nextTabItem: null
     property real size: 0.875
     readonly property alias input: input
     readonly property bool focused: input.activeFocus
@@ -48,6 +49,12 @@ Rectangle {
                 selectByMouse: true
                 onAccepted: root.accepted()
                 onTextEdited: root.edited()
+                Keys.onTabPressed: event => {
+                    if (root.nextTabItem !== null) {
+                        root.nextTabItem.forceActiveFocus()
+                        event.accepted = true
+                    }
+                }
             }
             AppText { id: ph; anchors.verticalCenter: parent.verticalCenter; size: root.size; color: Theme.mutedForeground; visible: input.text === "" && !input.preeditText; width: parent.width; elide: Text.ElideRight }
         }

@@ -1,65 +1,47 @@
-# HANDOFF — QML desktop port (branch `qml`, dari `main`)
+# Handoff — desktop QML
 
-Ditulis saat sesi Claude kena rate limit (reset 20:40 WIB). Semua 9 sub-agen mati di tengah jalan; pekerjaan
-mereka tersimpan di working tree (di-commit sebagai WIP). Dokumen ini = cara melanjutkan.
-Spec: `../QML-DESKTOP-PLAN.md` (rencana asli, belum di-commit), aturan teknis: `CONVENTIONS.md` (WAJIB dibaca dulu).
+Target: native Qt Quick client alongside React and GPUI, using the same Go backend. Source plan: `../.planning/QML-DESKTOP-PLAN.md`; implementation rules: `CONVENTIONS.md`.
 
-## Status ringkas
-| Bagian | Status |
+## Current state
+
+| Area | Status |
 |---|---|
-| Phase 1: backend discovery/spawn/owner, REST (`Api`), WS (`EventHub`), tes | **selesai**, 18 tes hijau (butuh `wa-bot-backend` di repo root untuk 6 tes lifecycle) |
-| Fondasi: tema 83 preset, ikon Lucide, shell (titlebar, nav rail, router `PageHost`, toast), atom `qml/ui/*`, mock backend, `scripts/shot.py` | **selesai & di-commit** (`fbd41dc`, `+ mock fixtures`) |
-| 9 area fitur | **parsial, belum diverifikasi** — lihat tabel di bawah |
-| Integrasi, parity matrix lengkap, benchmark, packaging, README final | belum |
+| Runtime / backend discovery / async REST / JSON WS | QML implements validated backend attach/spawn, REST, JSON WebSocket reconnect, and lifecycle ownership; prior concurrent smoke records are historical and were not rerun after the scope correction |
+| Auth / QR | QML and mock tests implemented; real phone pairing not run |
+| Chat list / layout / message cards / viewer / search / info / starred / composer | First implementation is in place; Info Media/Docs/Links and the Add-member candidate filter follow GPUI source; right-side sheets now reserve the GPUI drawer column; X11/llvmpipe Info and Search captures were refreshed; other screenshot and failure-state comparisons remain open in `parity/*.md` |
+| Calls / status / channels | QML pages, bridges and mock tests exist; Go token route and H.264 Annex-B media bridge are implemented, but real device calls are unverified |
+| Triggers / Cron / Webhooks / Documentation | QML now mirrors the centered GPUI placeholders; React-only admin flows are outside this port scope |
+| Desktop platform | Notification policy, private-bus delivery, local single-instance IPC, tray and window actions implemented; actual tray host/Wayland behavior not verified |
+| Linux package | 642 MB PyInstaller onedir bundle builds on CachyOS x86_64; latest isolated smoke verifies H.264 via host GStreamer, QML, mock auth/chat REST, and JSON WebSocket; temporary-path user install/uninstall passes, clean-host behavior remains unverified |
+| Matched GPUI baseline / benchmark | Chat dark/light pairs at 1100×720 and 800×540 plus a collapsed-sidebar pair, Login QR/phone tabs, Calls history/detail, incoming/active overlays at 1100×720 and 800×540, Status, Channels, Settings; earlier QML direct/group Info and Message Info captures were rendered under X11/llvmpipe at 28% transparency, before the latest header, drawer, and receipt-spacing corrections; the group Info description is suppressed to match the GPUI baseline fixture and message bubbles remain visible beside drawers |
 
-Hasil tes terakhir pada kode parsial (tanpa `test_bridge.py`/`test_backend_lifecycle.py`): 43 lulus, 1 gagal
-(`tests/test_status_channels.py::test_status_list_rings_and_labels`: grup status "sendiri" belum terpisah → 3 ≠ 4).
-Tes lain di area itu belum dijalankan setelah `-x` berhenti — jalankan ulang tanpa `-x`.
+Historical verification before the current GPUI-parity corrections: the full QML suite passed **235 tests** with one GLib deprecation warning, and prior Go, Rust, React, and web checks passed. Those results predate removal of QML-only status/media behavior and other strict-scope corrections, so they do not verify the current worktree. No suite has run after those edits.
 
-## Cara kerja (singkat)
-- Python 3.14 + PySide6 6.11 sistem; venv: `python3 -m venv --system-site-packages .venv && .venv/bin/pip install pytest segno`.
-- **Jangan pakai `qmlRegister*`/QML `pragma Singleton`** — di build ini merusak item bersarang / singleton tak bisa baca context property.
-  Semua objek Python → QML lewat `services.expose("Nama", obj)` (context property). Tema = `Theme.*` (Python `bridge/theme.py`).
-- Modul fitur: `bridge/<nama>.py` dengan `register(services)`, daftar di `bridge/registry.py::FEATURE_MODULES`.
-- Halaman: `qml/pages/<area>/`, tabel route di `qml/shell/PageHost.qml`.
-- Tes tanpa akun WA: `tests/mock_backend.py` (+ `mock_<area>.py`, fixture bersama `mock_common.py`).
-- Tidak ada display (tty): pakai `QT_QPA_PLATFORM=offscreen`, `scripts/shot.py OUT.png --route chat --url <mock url>` lalu lihat PNG.
-- **Jangan sentuh data nyata**: backend AppImage user (`~/.wa-bot/run/core.json`), `~/.wa-bot`, `~/.config/wa-bot-desktop/settings.json`.
-  Jangan kill proses `wa-bot*` yang bukan milik sendiri. Tes real-backend pakai `WABOT_HOME=<tmp>`.
-- Referensi GPUI: `../desktop-gpui/crates/app/src` (+ `crates/backend-client` untuk REST/WS). Halaman bot (Triggers/Cron/Webhooks/Docs) di GPUI
-  hanya placeholder → spec-nya app React di `../web/src/pages`.
-- Panggilan: kode media call (protokol biner) hanya ada di branch `call` (`git show call:docs/CALL-MEDIA-PROTOCOL.md`,
-  `git show call:desktop-gpui/crates/app/src/call_media/...`); `main` hanya punya signaling REST/WS. Jangan checkout/merge branch lain di tree ini.
+After the last complete suite, I aligned the Info Media/Docs/Links content and group roster toward GPUI behavior, removing the temporary keyboard-only additions and QML-only group-management controls. A later full-suite run was interrupted and has no result. The earlier 19-test focused run covered an interim version and does not validate the current source; no new suite has been run after this parity correction.
 
-## Pembagian area & apa yang sudah ada (belum diverifikasi, baca sendiri kodenya)
-Tiap agen diminta menulis `parity/<area>.md` — **belum ada satupun** (`parity/` kosong). Prompt asli tiap area ada di bagian bawah ringkas.
+Historical checks from earlier revisions (not rerun after the strict GPUI parity corrections): `tests/test_messages_runtime.py` exercised paging, duplicate/out-of-order events, optimistic ack/failure, pending and acked optimistic-row preservation through history refresh, and backend-not-ready callback delivery; `tests/test_call_media_video.py` covers call-media token/WebSocket/keyframe/reconnect plus two independent clients exchanging PCM and Annex-B video through the isolated mock; `tests/test_calls.py` checks Calls history labels and actions; and `tests/test_settings.py` covers settings, history jobs, logout and restart callbacks with test-owned state. The sidebar drag was driven under Xvfb and reached 440 px, then clamped at 600 px and 280 px. GPUI/QML chat rows were compared at 1100×720 and 800×540; the QML header now shows the JID/profile action, while dark/light bubble fallback colors and rich-card actions follow GPUI more closely. Login QR and phone-tab views, Calls history/detail, incoming/active call overlays, Status, Channels, and Settings were also compared at 1100×720; incoming/active overlays were additionally compared at 800×540. Calls history, detail and overlay geometry align closely, Status details align closely, longer Channels labels wrap, and the login tabs align closely; Settings' sliders, mode button and switches now match closely, with 1–2 px row-position differences. Chat selection was clicked in X11 and its selected mark-read action reached the local mock; bridge tests cover read/archive/pin/mute endpoints.
 
-| Area | File yang sudah ada | Yang masih kurang (perkiraan) |
-|---|---|---|
-| auth | `bridge/auth.py`, `qml/pages/auth/*` (LoginPage, QrPanel, PhoneTab, StartupGate, …), `tests/mock_auth.py`; dep `segno` ditambah ke pyproject; ada `zxing_cpp*.whl` nyasar di `desktop-qml/` (di-.gitignore, hapus saja) | `tests/test_auth.py`, screenshot+verifikasi visual, `parity/auth.md`, hubungkan ke `Main.qml` (diedit agen) |
-| chat-list | `bridge/{chats,chatlist,chatfmt,listsync}.py`, `qml/ui/Avatar.qml`, `tests/mock_chats.py` | seluruh QML: `ChatPage`, `sidebar/*`, `ChatHeader`, `sheets/*`, `dialogs/*`, `ConversationPane` (masih stub), tes, parity |
-| chat-messages | `bridge/{messages,messages_text}.py`, `qml/pages/chat/messages/*` | `MessageList.qml` (stub), viewer, selection bar, tes, parity |
-| composer | `bridge/{composer,composer_upload,composer_util,composer_voice,upload}.py`, `tests/mock_composer.py` | seluruh QML `composer/*` (stub), tes, parity |
-| status+channels | `bridge/{statuses,channels}.py`, `tests/mock_{status,channels}.py`, `tests/test_status_channels.py` (1 gagal) | seluruh QML `pages/status`, `pages/channels` (stub), parity |
-| calls | `bridge/call_media/*` (mulai: permissions, audio) | `bridge/calls.py`, QML `CallsPage`/`CallOverlay` (stub), video, tes, parity |
-| bot admin | `bridge/{botadmin,mdblocks}.py`, `tests/mock_bot.py`, `tests/test_botadmin.py` | QML `pages/bot/*` (stub), parity |
-| settings | `bridge/{system,gtk_theme,history_text}.py`; edit di `bridge/settings.py`, `bridge/theme.py` | QML `SettingsPage` (stub, halaman terbesar), tes, parity |
-| platform | `bridge/platform_core.py`, `tests/platform_fakes/`; edit kecil di `bridge/backend.py`, `bridge/discovery.py`, `qml/Main.qml` | `bridge/platform.py` (modul yang di-load registry), tray, notifikasi, single-instance, install/bench scripts, `docs/QML-DESKTOP.md`, tes, parity |
+The refreshed **642 MB** Linux bundle was built with the current Go source (including `POST /api/calls/{id}/media-session`) and QML. Its isolated smoke passed H.264 encode/decode, QML load, mock auth/chat REST, and JSON WebSocket; the bundled backend SHA-256 matches the fresh Go build. Tray host was unavailable in offscreen mode. Clean-host GStreamer behavior and real-device calls remain unverified.
 
-Hampir semua area: **Python bridge sudah mulai, QML halaman belum** (kecuali auth). Prioritas yang disarankan:
-1. Rapikan & tes yang sudah ada (`pytest` tanpa `-x`, perbaiki yang merah).
-2. Chat inti dulu (chat-list → messages → composer) karena paling sering dipakai; lalu auth → settings → status/channels → bot → calls → platform.
-3. Setelah tiap area: screenshot offscreen, baca PNG, bandingkan dengan sumber GPUI; tulis `parity/<area>.md` jujur (done/partial/belum + alasan).
-4. Terakhir: integrasi penuh, `PARITY.md` di-update, benchmark (`scripts/bench.py`), `docs/QML-DESKTOP.md`, README.
+The local PNGs under `parity/screenshots/` are QML renders of mock fixtures; `parity/gpui-baselines/` contains matched GPUI references. These PNGs are ignored by Git and can be regenerated locally. Chat and Calls incoming/active overlays are paired at 1100×720 and 800×540, while Login QR/phone tabs, Calls history/detail, Status list, Channels list, Settings, and direct/group Info drawers are paired at 1100×720; QML direct/group Message Info captures also use X11/llvmpipe. The QML Info captures use X11/llvmpipe so masked avatar images render; drawer backgrounds are opaque like GPUI. The group description is omitted in that mock to match the GPUI baseline. Both use a 16 px inset and the chat-list width is 360 px; remaining vertical spacing, group-message scroll position, frame shadow, and component details still need comparison. Rich chat captures use the same fixture family but have a small scroll offset and timestamp differences. The ignored `dist/linux/wa-bot/` bundle is a host-built onedir artifact and is not a cross-distribution release. `PARITY.md` records current evidence and remaining gaps. Do not mark the project complete from screenshots alone.
 
-## Batasan yang HARUS dijujurkan di laporan akhir
-- Tidak ada display di sesi ini → belum ada verifikasi di jendela asli (Wayland/GNOME/COSMIC), hanya render offscreen.
-- Tidak ada screenshot baseline GPUI → "pixel parity" hanya berdasar angka di source, belum dibandingkan gambar.
-- Panggilan suara/video, mikrofon, kamera, notifikasi D-Bus, tray, layer-shell: tidak bisa diuji tanpa perangkat/akun.
-- Tidak ada klaim performa/RAM lebih rendah tanpa pengukuran (belum ada benchmark).
+## Run and verify
 
-## Melanjutkan sub-agen lama (opsional, setelah 20:40 WIB)
-Agen yang berhenti bisa dilanjutkan dengan `SendMessage` ke id-nya; tapi konteksnya hilang kalau sesi ini ditutup. Lebih aman mulai agen baru
-dengan prompt: "baca `desktop-qml/HANDOFF.md`, `CONVENTIONS.md`, lanjutkan area X dari kode yang sudah ada".
-Template prompt per area (dipakai sebelumnya) intinya: *area, file referensi GPUI, kontrak `Context property`, file yang dimiliki, tes via mock,
-screenshot offscreen, tulis `parity/<area>.md`, jangan jalankan git yang mengubah tree*.
+- QML/Python edits need no Rust/C++ build. Run with `./scripts/dev.sh`; use `--url` or `--port` for an explicit backend.
+- Use only `tests/mock_backend.py` for test sends, posts, logout, calls, file uploads, or other state changes. Never use the user's live WhatsApp account or real configuration paths during tests.
+- Tests: `.venv/bin/python -m pytest -q tests`.
+- Concurrent mock smoke: `.venv/bin/python scripts/concurrent-smoke.py`; temporary Go smoke: `WABOT_TEST_BACKEND="$PWD/build/pyinstaller/wa-bot-backend" .venv/bin/python scripts/concurrent-go-smoke.py`. The Go smoke uses an empty temporary home, creates no linked account, and never scans the QR.
+- Offscreen render: `QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/shot.py OUT.png --route chat --url <mock-url>`; use `--window-transparency 28` for the GPUI default. The shot helper flattens transparent QML pixels over Xvfb's black root for matched comparisons; `--preset default-light --theme-mode light` captures the light palette.
+- Linux bundle: `.venv/bin/pip install -e '.[build]' && ./scripts/package-linux.sh`; this builds and runs an isolated mock startup smoke.
+- The shot script accepts `--open-status`, `--click-status`, `--select-channel`, `--click-channel`, `--select-call`, `--calls-filter`, `--select-chat`, `--collapse-sidebar`, `--click-sidebar-toggle`, `--click-chat-profile`, `--open-media`, `--click-media`, `--click-video`, `--play-audio`, `--save-document MESSAGE_ID`, `--save-path PATH`, `--retry-media`, `--retry-viewer-media`, `--jump-message`, `--vote-poll MESSAGE_ID:OPTION`, `--open-contact MESSAGE_ID:JID`, `--file-dialog-file PATH`, `--voice-no-device`, `--voice-send-synthetic`, `--info-mute-mode`, `--info-disappearing`, `--select-message`, `--forward-message`, `--chat-sheet`, `--chat-layout`, `--chat-new-action` (`menu`, `direct`, `group`, `join`, `select`), `--message-context`, `--scroll-key`, `--focus-composer`, `--composer-text`, `--composer-key`, `--composer-markdown`, `--auth-tab`, `--theme-mode`, and composer/call preview flags. They only drive local mock UI state.
+
+## Constraints and open blockers
+
+- Do not run Git commands that modify the tree. Do not touch `~/.wa-bot`, the live backend, or `~/.config/wa-bot-desktop/settings.json` while testing.
+- Go now exposes `POST /api/calls/{id}/media-session` with the one-use token and WebSocket path. QML sends and decodes H.264 Annex-B access units using GStreamer/OpenH264. Real two-device calls, device switching, latency, and long-call behavior still need device testing.
+- History sync/media cancel handlers return `202 Accepted`; `System` now treats both 200 and 202 as accepted and updates its status. The Settings bridge tests use a queued API stub and temporary preference files.
+- Call video requires host GStreamer elements `openh264enc`, `openh264dec`, and `h264parse`; see `THIRD_PARTY_NOTICES.md`. The plugin is not copied into the bundle, so clean-host installation must provide the GStreamer/OpenH264 runtime.
+- GPUI now renders under Xvfb with Mesa llvmpipe and isolated mock data. Matched pairs cover chat and Calls incoming/active overlays at 1100×720 and 800×540, plus Login QR/phone tabs, Calls history/detail, Status list, Channels list and Settings at 1100×720. Other routes and remaining frame/component details still need comparison.
+- Real Linux desktop tray/notification host tests and real audio/video device tests remain open.
+- `--popover` uses the optional KDE LayerShellQt QPA plugin and QML module on supported Wayland sessions; otherwise it follows GPUI’s regular-window fallback. The runtime path requires `wayland-info` to report `zwlr_layer_shell_v1`; this GNOME session has no such global, and a forced QPA load aborts here. A supported compositor still needs a visual check.
+- Do not make RAM/performance claims without matched measurements. The Linux bundle was tested only on this CachyOS x86_64 host; clean-host behavior and another distribution were not tested.

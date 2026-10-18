@@ -23,13 +23,18 @@ def app():
 
 
 def wait_for(cond, ms=5000):
-    loop, t = QEventLoop(), QTimer()
-    t.setInterval(10)
-    t.timeout.connect(lambda: loop.quit() if cond() else None)
-    QTimer.singleShot(ms, loop.quit)
-    t.start()
+    loop = QEventLoop()
+    poll = QTimer(loop)
+    poll.setInterval(10)
+    poll.timeout.connect(lambda: loop.quit() if cond() else None)
+    timeout = QTimer(loop)
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    timeout.start(ms)
+    poll.start()
     loop.exec()
-    t.stop()
+    poll.stop()
+    timeout.stop()
     return cond()
 
 

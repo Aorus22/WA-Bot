@@ -1,8 +1,8 @@
 """The media WebSocket of one call — port of `call_media/net.rs` + `backend-client/src/media.rs`.
 
 `MediaNet` lives on the session's worker thread. It requests a single-use token
-(`POST /api/calls/{id}/media-session`), opens `ws(s)://host{ws_path}?token=..&video=jpeg`, hands
-incoming audio/pictures to the session and reconnects (with a fresh token) whenever the socket
+(`POST /api/calls/{id}/media-session`), opens `ws(s)://host{ws_path}?token=..`, hands incoming
+audio/H.264 access units to the session and reconnects (with a fresh token) whenever the socket
 drops. A dropped media socket never ends the call. Connect problems become a user-visible notice
 only after `ERROR_AFTER_FAILURES` consecutive failures (the first ones are normal while a call is
 still becoming active); retries slow down after `SLOW_AFTER_FAILURES`.
@@ -28,7 +28,7 @@ MAX_PENDING_BYTES = 8 * wire.AUDIO_FRAME_BYTES + 64 * 1024
 
 
 def media_ws_url(base_url: str, session: dict) -> str:
-    """Absolute ws(s) URL for a media session (JPEG video mode). `ws_path` is normally relative to
+    """Absolute ws(s) URL for a media session. `ws_path` is normally relative to
     the backend root; an absolute ws:// URL is accepted as is (tests, reverse proxies)."""
     path = str(session.get("ws_path") or "")
     if path.startswith(("ws://", "wss://")):
@@ -40,7 +40,7 @@ def media_ws_url(base_url: str, session: dict) -> str:
         if not path.startswith("/"):
             path = "/" + path
     sep = "&" if "?" in path else "?"
-    return f"{root}{path}{sep}token={quote(str(session.get('token', '')), safe='-_.~')}&video=jpeg"
+    return f"{root}{path}{sep}token={quote(str(session.get('token', '')), safe='-_.~')}"
 
 
 def describe_http(status: int, body: str) -> str:
@@ -62,7 +62,7 @@ class MediaNet(QObject):
     connectedChanged = Signal(bool)
     notice = Signal(str, str)              # source, message ("" clears)
     audioReceived = Signal(bytes)          # PCM s16le, normally 1920 bytes
-    videoReceived = Signal(bytes, int)     # one JPEG, clockwise quarter turns
+    videoReceived = Signal(bytes)          # one H.264 Annex-B access unit
     keyframeRequested = Signal()
 
     def __init__(self, call_id: str, base_url: Callable[[], str], retry_delay_ms: int = 1000,
@@ -223,9 +223,9 @@ class MediaNet(QObject):
             self.audioReceived.emit(f.payload)
         elif f.kind == wire.IN_VIDEO:
             self.stats["recv_video"] += 1
-            self.videoReceived.emit(f.payload, f.video_metadata()[1])
+            self.videoReceived.emit(f.payload)
         elif f.kind == wire.KEYFRAME_REQUEST:
-            self.keyframeRequested.emit()   # JPEG mode: nothing to do
+            self.keyframeRequested.emit()
         # unknown kinds are ignored
 
     def _send(self, data: bytes) -> bool:
@@ -245,6 +245,11 @@ class MediaNet(QObject):
             self.stats["sent_audio"] += 1
 
     @Slot(bytes)
-    def send_video(self, jpeg: bytes) -> None:
-        if len(jpeg) <= wire.MAX_FRAME_BYTES - 1024 and self._send(wire.outgoing_video(jpeg)):
+    def send_video(self, access_unit: bytes) -> None:
+        try:
+            frame = wire.outgoing_video(access_unit)
+        except wire.FrameError:
+            self.stats["dropped"] += 1
+            return
+        if self._send(frame):
             self.stats["sent_video"] += 1

@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot, QUrl
+from PySide6.QtNetwork import QNetworkAccessManager
 
 from . import chatfmt
 from .chatlist import ROLES, ChatFilterModel, derive, normalize, sort_key
@@ -52,6 +53,7 @@ class Chats(QObject):
     forwardRequested = Signal(str, str)    # chatId, messageId
     forwardManyRequested = Signal(str, list)
     sheetRequested = Signal(str, str)      # name ("info"|"search"|"starred"|"media"), chatId
+    addMembersRequested = Signal(str)       # group JID; opens the existing contact picker
     namesChanged = Signal()                # contact names re-resolved: refetch what is on screen
     chatsReloaded = Signal()
     starredVersionChanged = Signal()
@@ -60,6 +62,7 @@ class Chats(QObject):
     createGroupFinished = Signal(bool, str)
     joinGroupFinished = Signal(bool)
     addMembersFinished = Signal(bool)
+    groupInviteLinkReady = Signal(str, str)  # group JID, invite link
     forwardFinished = Signal(bool)
     exportFinished = Signal(bool, str)
     exportingChanged = Signal()
@@ -72,6 +75,7 @@ class Chats(QObject):
     def __init__(self, api, hub, app, toast=None, backend=None, settings=None, parent: QObject | None = None):
         super().__init__(parent)
         self._api, self._hub, self._app, self._toast, self._backend = api, hub, app, toast, backend
+        self._upload_nam = QNetworkAccessManager(self)
         self._settings = settings
         self.rows = DictListModel(ROLES, key="id", parent=self)
         self.view = ChatFilterModel(self.rows, self)
@@ -356,6 +360,7 @@ class Chats(QObject):
         if not self.rows.contains(jid):
             label = name.strip() or jid.split("@", 1)[0]
             self._put({"id": jid, "name": label, "isActive": True}, at_top=True)
+        self.view.archivedMode = False
         self._app.openChat(jid)
 
     # ------------------------------------------------------------------ chat actions
@@ -473,6 +478,11 @@ class Chats(QObject):
             self._app.openChat(chat_id)
         self.sheetRequested.emit(name, chat_id)
 
+    @Slot(str)
+    def requestAddMembers(self, group_id: str) -> None:
+        if group_id:
+            self.addMembersRequested.emit(group_id)
+
     @Slot(str, "QVariantList", "QVariantList")
     def forwardMessages(self, chat_id: str, message_ids: list, targets: list) -> None:
         """Forward each message (in order) to every target chat (`submit_forward`)."""
@@ -512,6 +522,116 @@ class Chats(QObject):
             self.groupChanged.emit()
 
         self._call("GET", f"/groups/{enc(jid)}", None, done)
+
+    @Slot(str, "QVariantMap")
+    def updateGroup(self, group_id: str, changes: dict) -> None:
+        """Patch group settings using the current Go GroupHandler contract."""
+        allowed = {"name", "description", "locked", "announce", "joinApproval", "memberAddMode"}
+        changes = {key: value for key, value in dict(changes or {}).items() if key in allowed}
+        if not group_id or not changes:
+            return
+
+        def done(st: int, body: Any) -> None:
+            if st == 200 and isinstance(body, dict):
+                resolved_id = body.get("jid") or group_id
+                self._groups[resolved_id] = body
+                if "name" in body:
+                    self._patch(resolved_id, {"name": body["name"]}, resort=False)
+                self.groupChanged.emit()
+                self._say("Group settings updated", "success")
+            else:
+                self._say(f"Failed to update group: {_err(body) or st}", "error")
+
+        self._call("PATCH", f"/groups/{enc(group_id)}", changes, done)
+
+    @Slot(str, str)
+    def setGroupPhoto(self, group_id: str, path: str) -> None:
+        """Upload a group image as multipart `file`, matching GroupHandler.SetGroupPhoto."""
+        if not group_id or not path:
+            return
+        local_path = QUrl(path).toLocalFile() if path.startswith("file:") else path
+        base = self._backend.apiUrl if self._backend is not None else ""
+        if not base or not local_path:
+            self._say("Failed to update group photo: backend not ready", "error")
+            return
+
+        from .upload import post_multipart
+
+        def done(st: int, body: Any) -> None:
+            if st == 200 and isinstance(body, dict):
+                self._groups[body.get("jid") or group_id] = body
+                self.groupChanged.emit()
+                self.reload()  # the chat row carries the refreshed WhatsApp avatar URL
+                self._say("Group photo updated", "success")
+            else:
+                self._say(f"Failed to update group photo: {_err(body) or st}", "error")
+
+        started = post_multipart(self._upload_nam, f"{base}/groups/{enc(group_id)}/photo", {},
+                                 "file", local_path, done, self)
+        if not started:
+            self._say("Failed to update group photo: could not read the file", "error")
+
+    @Slot(str)
+    def removeGroupPhoto(self, group_id: str) -> None:
+        """Remove the group image; Go treats an empty POST body as a nil photo."""
+        if not group_id:
+            return
+
+        def done(st: int, body: Any) -> None:
+            if st == 200 and isinstance(body, dict):
+                self._groups[body.get("jid") or group_id] = body
+                self.groupChanged.emit()
+                self.reload()
+                self._say("Group photo removed", "success")
+            else:
+                self._say(f"Failed to remove group photo: {_err(body) or st}", "error")
+
+        self._api.fetch("POST", f"/groups/{enc(group_id)}/photo", None, done)
+
+    @Slot(str, str, "QVariantList")
+    def updateGroupParticipants(self, group_id: str, action: str, jids: list) -> None:
+        """Add, remove, promote, or demote participants using the Go group route."""
+        action = str(action or "")
+        targets = [str(jid) for jid in (jids or []) if str(jid)]
+        if not group_id or action not in {"add", "remove", "promote", "demote"} or not targets:
+            return
+
+        def done(st: int, body: Any) -> None:
+            if st == 200 and isinstance(body, dict):
+                self._groups[body.get("jid") or group_id] = body
+                self.groupChanged.emit()
+                self._say("Group members updated", "success")
+            else:
+                self._say(f"Failed to update group members: {_err(body) or st}", "error")
+
+        self._call("POST", f"/groups/{enc(group_id)}/participants", {"action": action, "jids": targets}, done)
+
+    @Slot(str)
+    def getGroupInviteLink(self, group_id: str) -> None:
+        if not group_id:
+            return
+
+        def done(st: int, body: Any) -> None:
+            link = body.get("link") if isinstance(body, dict) else None
+            if st == 200 and isinstance(link, str) and link:
+                self.groupInviteLinkReady.emit(group_id, link)
+            else:
+                self._say(f"Failed to fetch invite link: {_err(body) or st}", "error")
+
+        self._call("GET", f"/groups/{enc(group_id)}/invite-link", None, done)
+
+    @Slot(str)
+    def resetGroupInviteLink(self, group_id: str) -> None:
+        if not group_id:
+            return
+
+        def done(st: int, body: Any) -> None:
+            if st == 200:
+                self._say("Previous invite link revoked", "success")
+            else:
+                self._say(f"Failed to reset invite link: {_err(body) or st}", "error")
+
+        self._call("POST", f"/groups/{enc(group_id)}/invite-link", None, done)
 
     @Slot(str, result="QVariant")
     def getGroup(self, jid: str):
@@ -890,11 +1010,11 @@ class Chats(QObject):
         self._say(msg if ok else "Gagal mengekspor chat", "success" if ok else "error")
 
     # ------------------------------------------------------------------ formatting helpers for QML
-    @Slot(int, result=str)
+    @Slot("QVariant", result=str)
     def fmtDate(self, ts: int) -> str:
         return chatfmt.format_search_date(ts)
 
-    @Slot(int, result=str)
+    @Slot("QVariant", result=str)
     def fmtTime(self, ts: int) -> str:
         return chatfmt.format_search_time(ts)
 

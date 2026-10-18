@@ -267,9 +267,16 @@ def backend_binary(extra_dirs: list[Path] | None = None) -> Path | None:
     dev locations (`<repo>/wa-bot-backend`)."""
     override = os.environ.get("WABOT_BACKEND")
     if override:
-        return Path(override)
+        # The child runs with the backend data directory as its cwd, so a
+        # relative override must be frozen against the caller's cwd first.
+        return Path(override).expanduser().resolve()
     name = f"wa-bot-backend{BACKEND_EXE_SUFFIX}"
-    here = Path(__file__).resolve().parent.parent  # desktop-qml/
+    if getattr(sys, "frozen", False):
+        # PyInstaller places the executable and bundled backend together in its
+        # contents directory (`_internal` for this onedir build).
+        here = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    else:
+        here = Path(__file__).resolve().parent.parent  # desktop-qml/
     dirs = [here, here / "be", here.parent, *(extra_dirs or [])]
     return next((d / name for d in dirs if (d / name).is_file()), None)
 

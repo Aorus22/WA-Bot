@@ -9,7 +9,12 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-        Titlebar { win: root.win; Layout.fillWidth: true }
+        Titlebar {
+            win: root.win
+            visible: !Platform.popoverMode
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? implicitHeight : 0
+        }
         RowLayout {
             Layout.fillWidth: true; Layout.fillHeight: true
             spacing: 0

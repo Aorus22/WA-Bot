@@ -1,37 +1,28 @@
-"""`Statuses` context property: status stories (list, viewer state, post, reply, viewed receipts).
+"""`Statuses` context property: status stories (list, viewer state, text post, reply, viewed receipts).
 
-Mirrors GPUI `views/status.rs` (+ the web StatusPage for media posting, auto-advance and `status_new`):
+Mirrors GPUI `views/status.rs`:
   GET  /statuses                      -> [StatusGroup]    (own group is named "Status Saya")
   POST /statuses/text {text,background}
-  POST /statuses/media (multipart: file, caption, type=image|video)
   POST /statuses/{id}/viewed          POST /statuses/{id}/reply {text} -> {id, chatId}
-  GET  /statuses/{id}/media           (status media; `mediaUrl` is used first when present)
-  WS   status_new {sender,id}  -> refresh the list (viewer keeps its place)
 
 QML sees: `model` (other people's groups, ring state in `allViewed`), `own`, viewer state
 (`viewerOpen/Index/Count/Entries/Entry/Name/Sender/IsOwn/Avatar`), `loading`, `posting`, `replying`.
 """
 from __future__ import annotations
 
-import json
-import time
 from typing import Any
 
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
-from PySide6.QtNetwork import QNetworkAccessManager
 
 from .listsync import (
-    avatar_color, error_text, initial, ok, status_time, sync_model, to_ms,
+    avatar_color, error_text, initial, ok, status_time, sync_model,
 )
 from .models import DictListModel
-from .upload import post_multipart
 
 OWN_NAMES = ("Status Saya", "My status")
 OWN_KEY = "__own__"
 DEFAULT_BG = 0xFF075E54
 BACKGROUNDS = [0xFF075E54, 0xFF128C7E, 0xFF777A77, 0xFF2C3E50, 0xFF6A3080, 0xFFC43E00, 0xFFD4A017, 0xFF0E5A8A]
-PRUNE_MS = 30_000
-STILL_MS = 5000  # auto-advance for text/image statuses (web + the official clients)
 
 ROLES = ["sender", "name", "displayName", "initial", "color", "avatar", "allViewed", "latestTime",
          "timeLabel", "count", "unviewed"]
@@ -55,7 +46,7 @@ class Statuses(QObject):
     unviewedChanged = Signal()
     # QML: open the "New status" composer (tapping an empty "Status Saya")
     composeRequested = Signal()
-    # chat id of the 1:1 chat a reply landed in (viewer offers "Open chat")
+    # Signals a successful reply so the QML field clears only after the request succeeds.
     replySent = Signal(str)
     posted = Signal()
 
@@ -63,7 +54,6 @@ class Statuses(QObject):
         super().__init__(parent)
         self._svc = services
         self._api = services.api
-        self._nam = QNetworkAccessManager(self)
         self._model = DictListModel(ROLES, key="sender", parent=self)
         self._groups: list[dict] = []
         self._own: dict = {}
@@ -77,16 +67,6 @@ class Statuses(QObject):
         self._unviewed = 0
         self._loaded_once = False
 
-        self._debounce = QTimer(self)
-        self._debounce.setSingleShot(True)
-        self._debounce.setInterval(250)
-        self._debounce.timeout.connect(self.refresh)
-        self._prune_timer = QTimer(self)
-        self._prune_timer.setInterval(PRUNE_MS)
-        self._prune_timer.timeout.connect(self._prune)
-        self._prune_timer.start()
-
-        services.hub.event.connect(self._on_event)
         services.app.authChanged.connect(self._on_auth)
         services.backend.apiUrlChanged.connect(self._on_backend)
         if services.backend.apiUrl:
@@ -199,7 +179,6 @@ class Statuses(QObject):
         self._loaded_once = True
         self._set_error("")
         self._groups = [self._normalise(g) for g in body if isinstance(g, dict)]
-        self._prune(emit=False)
         self._publish()
 
     def _normalise(self, g: dict) -> dict:
@@ -219,36 +198,13 @@ class Statuses(QObject):
         typ = e.get("type") or "text"
         sid = str(e.get("id", ""))
         media = e.get("mediaUrl") or ""
-        src = ""
-        if typ != "text":
-            src = self._api.mediaUrl(media) if media else self._api.mediaUrl(f"/statuses/{self._api.enc(sid)}/media")
+        src = self._api.mediaUrl(media) if media else ""
         content = (e.get("content") or "")
         caption = "" if (typ != "text" and content.startswith("[") and content.endswith("]")) else content
         out = dict(e)
         out.update({"id": sid, "type": typ, "src": src, "caption": caption, "content": content,
                     "viewed": bool(e.get("viewed")), "timeLabel": status_time(e.get("timestamp", 0))})
         return out
-
-    def _prune(self, emit: bool = True) -> None:
-        """Drop expired statuses (24 h) and refresh the relative time labels."""
-        now_ms = int(time.time() * 1000)
-        changed = False
-        for g in self._groups:
-            kept = [e for e in g["statuses"] if not e.get("expiresAt") or to_ms(e["expiresAt"]) > now_ms]
-            if len(kept) != len(g["statuses"]):
-                g["statuses"] = kept
-                changed = True
-        before = len(self._groups)
-        self._groups = [g for g in self._groups if g["statuses"] or is_own(g)]
-        changed = changed or len(self._groups) != before
-        for g in self._groups:
-            for e in g["statuses"]:
-                lab = status_time(e.get("timestamp", 0))
-                if lab != e["timeLabel"]:
-                    e["timeLabel"] = lab
-                    changed = True
-        if emit and changed:
-            self._publish()
 
     def _publish(self) -> None:
         """Recompute the derived rows (model, own, counters, viewer) from `_groups`."""
@@ -382,18 +338,12 @@ class Statuses(QObject):
 
         self._api.fetch("POST", f"/statuses/{self._api.enc(sid)}/reply", {"text": text}, done)
 
-    @Slot(str)
-    def openChat(self, chat_id: str) -> None:
-        """"Open chat" after a reply: the 1:1 chat with the poster."""
-        if chat_id:
-            self._svc.app.openChat(chat_id)
-
     # ---------------------------------------------------------------- posting
     def _set_posting(self, v: bool) -> None:
         self._posting = v
         self.postingChanged.emit()
 
-    @Slot(str, int)
+    @Slot(str, float)
     def postText(self, text: str, background: int = DEFAULT_BG) -> None:
         text = (text or "").strip()
         if not text or self._posting:
@@ -410,45 +360,6 @@ class Statuses(QObject):
                 self._svc.toast.error(f"Failed to post: {error_text(status, body)}")
 
         self._api.fetch("POST", "/statuses/text", {"text": text, "background": int(background) or DEFAULT_BG}, done)
-
-    @Slot(str, str)
-    def postMedia(self, path: str, caption: str = "") -> None:
-        """Image/video status from a local file (web `postStatusMedia`). `path` may be a file:// URL."""
-        if self._posting or not path:
-            return
-        from PySide6.QtCore import QUrl
-        local = QUrl(path).toLocalFile() if path.startswith("file:") else path
-        kind = "video" if local.lower().endswith((".mp4", ".mov", ".webm", ".mkv", ".avi", ".3gp", ".m4v")) else "image"
-        self._set_posting(True)
-
-        def done(status: int, body: Any) -> None:
-            self._set_posting(False)
-            if ok(status):
-                self._svc.toast.success("Status posted")
-                self.posted.emit()
-                self.refresh()
-            else:
-                self._svc.toast.error(f"Failed to post: {error_text(status, body)}")
-
-        base = self._svc.backend.apiUrl
-        started = bool(base) and post_multipart(
-            self._nam, f"{base}/statuses/media", {"type": kind, "caption": (caption or "").strip()},
-            "file", local, done, self)
-        if not started:
-            self._set_posting(False)
-            self._svc.toast.error("Failed to post: could not read the file")
-
-    @Slot(str, result=str)
-    def mediaKind(self, path: str) -> str:
-        """"video" or "image" for a chosen file (composer preview)."""
-        low = path.lower()
-        return "video" if low.endswith((".mp4", ".mov", ".webm", ".mkv", ".avi", ".3gp", ".m4v")) else "image"
-
-    # ---------------------------------------------------------------- WS
-    def _on_event(self, typ: str, payload: str) -> None:
-        if typ == "status_new":
-            self._debounce.start()  # the backend sends one per status; coalesce bursts
-
 
 def register(services) -> None:
     services.statuses = Statuses(services)

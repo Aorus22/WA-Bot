@@ -44,8 +44,17 @@ class EventHub(QObject):
     def stop(self) -> None:
         self._running = False
         self._retry.stop()
-        if self._sock:
-            self._sock.close()
+        sock, self._sock = self._sock, None
+        if sock is not None:
+            try:
+                sock.connected.disconnect()
+                sock.disconnected.disconnect()
+                sock.textMessageReceived.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            sock.abort()
+            sock.deleteLater()
+        self._set_connected(False)
 
     def _url_changed(self) -> None:
         # Backend moved: drop the old socket; the close handler reconnects.
@@ -59,22 +68,32 @@ class EventHub(QObject):
         if not url:
             self._retry.start(500)
             return
-        if self._sock:
-            self._sock.deleteLater()
-        sock = self._sock = QWebSocket()
-        sock.connected.connect(lambda: self._set_connected(True))
-        sock.disconnected.connect(self._on_disconnected)
+        old, self._sock = self._sock, None
+        if old is not None:
+            old.abort()
+            old.deleteLater()
+        sock = self._sock = QWebSocket(parent=self)
+        sock.connected.connect(lambda s=sock: self._on_connected(s))
+        sock.disconnected.connect(lambda s=sock: self._on_disconnected(s))
         sock.textMessageReceived.connect(self._on_text)
         sock.open(QUrl(url))
+
+    def _on_connected(self, sock: QWebSocket) -> None:
+        if sock is self._sock and self._running:
+            self._set_connected(True)
 
     def _set_connected(self, value: bool) -> None:
         if value != self._connected:
             self._connected = value
             self.connectedChanged.emit()
 
-    def _on_disconnected(self) -> None:
+    def _on_disconnected(self, sock: QWebSocket) -> None:
+        if sock is not self._sock:
+            return
+        self._sock = None
         self._set_connected(False)
         if self._running:
+            sock.deleteLater()
             self._backend.recheck()
             self._retry.start()
 

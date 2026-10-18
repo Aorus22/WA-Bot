@@ -78,12 +78,18 @@ def outgoing_audio(pcm_s16le: bytes) -> bytes:
     return encode_frame(OUT_AUDIO, b"", pcm_s16le)
 
 
-def outgoing_video(jpeg: bytes) -> bytes:
-    return encode_frame(OUT_VIDEO, b"", jpeg)
+def outgoing_video(access_unit: bytes) -> bytes:
+    """One outbound H.264 Annex-B access unit, matching CallVideo.SendVideo."""
+    if not is_h264_annexb(access_unit):
+        raise FrameError("video frames must be H.264 Annex-B access units")
+    if len(access_unit) > MAX_FRAME_BYTES - 3:
+        raise FrameError("video access unit exceeds the media WebSocket frame limit")
+    return encode_frame(OUT_VIDEO, b"", access_unit)
 
 
-def is_jpeg(data: bytes) -> bool:
-    return len(data) >= 4 and data[0] == 0xFF and data[1] == 0xD8
+def is_h264_annexb(data: bytes) -> bool:
+    """Whether a payload begins with an Annex-B three- or four-byte start code."""
+    return data.startswith((b"\x00\x00\x01", b"\x00\x00\x00\x01")) and len(data) >= 4
 
 
 # --- PCM helpers (little-endian signed 16 bit) ----------------------------------------

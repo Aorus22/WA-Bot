@@ -473,7 +473,7 @@ class System(QObject):
             return
 
         def done(status: int, body: Any) -> None:
-            if status == 200 and isinstance(body, dict):
+            if status in (200, 202) and isinstance(body, dict):
                 self._sync_status = body
                 if not self._sync_timer.isActive():
                     self._sync_timer.start()
@@ -614,7 +614,7 @@ class System(QObject):
             return
 
         def done(status: int, body: Any) -> None:
-            if status == 200 and isinstance(body, dict):
+            if status in (200, 202) and isinstance(body, dict):
                 self._media_status = body
                 if not self._media_timer.isActive():
                     self._media_timer.start()

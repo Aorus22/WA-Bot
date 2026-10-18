@@ -1,5 +1,4 @@
-"""Everything that belongs to one call's media: the network task, the microphone and speaker, the
-JPEG encode/decode — running on one worker QThread. Mirrors `call_media/session.rs`.
+"""Everything that belongs to one call's media: network, audio and H.264 video on one worker QThread.
 
 `MediaSession` is created on the UI thread, moved to a QThread by `SessionHandle`, and driven by
 queued signals. Pictures cross threads through "latest value" slots (like GPUI's `FrameSlots`) so a
@@ -43,6 +42,11 @@ class MediaSession(QObject):
         self.net: MediaNet | None = None
         self.mic: Microphone | None = None
         self.speaker: Speaker | None = None
+        self._encoder: video.H264Encoder | None = None
+        self._decoder: video.H264Decoder | None = None
+        self._keyframe_needed = True
+        self._encoder_failed = False
+        self._decoder_failed = False
         self._lock = threading.Lock()
         self._remote: QImage | None = None
         self._remote_pending = False
@@ -50,7 +54,7 @@ class MediaSession(QObject):
         self._out_pending = False
         self._muted_mic = False
         self._muted_spk = False
-        self.stats = {"encoded": 0, "decoded": 0, "bad_pictures": 0}
+        self.stats = {"encoded": 0, "decoded": 0, "bad_video": 0}
         self.requestStop.connect(self.stop)
 
     # -- lifecycle (worker thread) ---------------------------------------------------------
@@ -61,6 +65,7 @@ class MediaSession(QObject):
         net.connectedChanged.connect(self._on_net_connected)
         net.audioReceived.connect(self._on_audio)
         net.videoReceived.connect(self._on_video)
+        net.keyframeRequested.connect(self._request_keyframe)
         if self._devices:
             mic = self.mic = Microphone(self._mic_id, self)
             mic.set_muted(self._muted_mic)
@@ -82,6 +87,12 @@ class MediaSession(QObject):
         for part in (self.net, self.mic, self.speaker):
             if part is not None:
                 part.stop()
+        if self._encoder is not None:
+            self._encoder.close()
+            self._encoder = None
+        if self._decoder is not None:
+            self._decoder.close()
+            self._decoder = None
         self.stopped.emit()
 
     @Slot(bool)
@@ -95,11 +106,27 @@ class MediaSession(QObject):
     def _on_audio(self, pcm: bytes) -> None:
         self.jitter.push(pcm)
 
-    @Slot(bytes, int)
-    def _on_video(self, jpeg: bytes, turns: int) -> None:
-        img = video.decode_jpeg(jpeg, turns)
+    @Slot(bytes)
+    def _on_video(self, access_unit: bytes) -> None:
+        if self._decoder_failed:
+            return
+        if self._decoder is None:
+            try:
+                self._decoder = video.H264Decoder()
+            except Exception as exc:
+                self._decoder_failed = True
+                self.notice.emit("network", f"H.264 decoder unavailable: {exc}")
+                self.stats["bad_video"] += 1
+                return
+        try:
+            img = self._decoder.decode(access_unit)
+        except Exception as exc:
+            self._decoder_failed = True
+            self.notice.emit("network", f"H.264 decoding failed: {exc}")
+            self.stats["bad_video"] += 1
+            return
         if img is None:
-            self.stats["bad_pictures"] += 1
+            self.stats["bad_video"] += 1
             return
         self.stats["decoded"] += 1
         with self._lock:
@@ -117,7 +144,7 @@ class MediaSession(QObject):
 
     # -- outgoing video ---------------------------------------------------------------------------
     def offer_video(self, image: QImage) -> None:
-        """Any thread: queue the newest camera frame for scaling + JPEG + send (older ones are dropped)."""
+        """Any thread: queue only the newest image for H.264 encoding; older frames are dropped."""
         with self._lock:
             self._out = image
             wake = not self._out_pending
@@ -131,10 +158,35 @@ class MediaSession(QObject):
             img, self._out, self._out_pending = self._out, None, False
         if img is None or self.net is None:
             return
-        jpeg = video.encode_jpeg(img)
-        if jpeg is not None:
+        if self._encoder_failed:
+            return
+        if self._encoder is None:
+            try:
+                self._encoder = video.H264Encoder()
+                if self._keyframe_needed:
+                    self._encoder.request_keyframe()
+                    self._keyframe_needed = False
+            except Exception as exc:
+                self._encoder_failed = True
+                self.notice.emit("camera", f"H.264 encoder unavailable: {exc}")
+                return
+        try:
+            access_unit = self._encoder.encode(img)
+        except Exception as exc:
+            self._encoder_failed = True
+            self.notice.emit("camera", f"H.264 encoding failed: {exc}")
+            self.stats["bad_video"] += 1
+            return
+        if access_unit is not None:
             self.stats["encoded"] += 1
-            self.net.send_video(jpeg)
+            self.net.send_video(access_unit)
+
+    @Slot()
+    def _request_keyframe(self) -> None:
+        if self._encoder is None:
+            self._keyframe_needed = True
+        else:
+            self._encoder.request_keyframe()
 
     # -- test hooks ------------------------------------------------------------------------------
     @property

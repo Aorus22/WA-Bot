@@ -85,8 +85,13 @@ def install(mb) -> None:
                      "Koordinasi proyek WA Bot. Harap tetap sopan.", admins=(ME, SARI)),
         KELUARGA: _group(KELUARGA, "Keluarga Besar", [(ME, "You"), (DEWI, "Dewi"), (RINA, "Rina Marlina")]),
     }
+    st["group_invite_links"] = {jid: f"https://chat.whatsapp.com/mock-{index}" for index, jid in enumerate(st["groups"], 1)}
+    st["group_photo_uploads"] = []
     st["contacts"] = [{"id": c["id"], "name": c["name"], "jid": c["id"], "avatar": ""} for c in st["chats"] if not c["isGroup"]]
     st["starred_extra"] = []
+    st["message_pins"] = {}
+    st["message_receipts"] = {}
+    st["message_receipts"] = {}
 
     def find(chat_id):
         return next((c for c in st["chats"] if c["id"] == chat_id), None)
@@ -98,6 +103,39 @@ def install(mb) -> None:
     @mb.route("GET", "/chats")
     def chats(req):
         return 200, st["chats"]
+
+    @mb.route("GET", r"/chats/(?P<id>[^/]+)/messages")
+    def messages(req):
+        rows = list(st["messages"].get(req.params["id"], []))
+        before = int(req.q("before", "0") or 0)
+        after = int(req.q("after", "0") or 0)
+        if before:
+            rows = [m for m in rows if int(m.get("timestamp") or 0) < before]
+            rows.sort(key=lambda m: int(m.get("timestamp") or 0), reverse=True)
+        elif after:
+            rows = [m for m in rows if int(m.get("timestamp") or 0) > after]
+            rows.sort(key=lambda m: int(m.get("timestamp") or 0))
+        else:
+            rows.sort(key=lambda m: int(m.get("timestamp") or 0), reverse=True)
+        limit = max(1, min(int(req.q("limit", "100") or 100), 500))
+        return 200, rows[:limit]
+
+    @mb.route("GET", r"/chats/(?P<chat>[^/]+)/messages/(?P<message>[^/]+)/receipts")
+    def message_receipts(req):
+        info = st["message_receipts"].get((req.params["chat"], req.params["message"]), {})
+        receipts = list(info.get("receipts") or [])
+        recipients = list(info.get("recipients") or [])
+        return 200, {"receipts": receipts, "total": int(info.get("total", len(recipients))),
+                     "recipients": recipients}
+
+    @mb.route("GET", r"/chats/(?P<chat>[^/]+)/messages/(?P<message>[^/]+)/receipts")
+    def message_receipts(req):
+        key = (req.params["chat"], req.params["message"])
+        info = st["message_receipts"].get(key, {})
+        receipts = list(info.get("receipts") or [])
+        recipients = list(info.get("recipients") or [])
+        return 200, {"receipts": receipts, "total": int(info.get("total", len(recipients))),
+                     "recipients": recipients}
 
     @mb.route("POST", r"/chats/(?P<id>[^/]+)/read")
     def read(req):
@@ -153,6 +191,10 @@ def install(mb) -> None:
         rows = [m for m in st["messages"].get(req.params["id"], []) if q and q in m["content"].lower()]
         return 200, rows
 
+    @mb.route("GET", r"/chats/(?P<id>[^/]+)/pins")
+    def message_pins(req):
+        return 200, st["message_pins"].get(req.params["id"], [])
+
     def typed(kind):
         def h(req):
             msgs = st["messages"].get(req.params["id"], [])
@@ -187,6 +229,38 @@ def install(mb) -> None:
                 m["starred"] = bool(req.json().get("starred"))
         return 200, {"status": "ok", "starred": bool(req.json().get("starred"))}
 
+    @mb.route("POST", r"/chats/(?P<cid>[^/]+)/messages/(?P<mid>[^/]+)/pin")
+    def pin_message(req):
+        message = next((m for m in st["messages"].get(req.params["cid"], [])
+                        if m["id"] == req.params["mid"]), None)
+        if message is None:
+            return 404, {"error": "message not found"}
+        body = req.json() or {}
+        pins = st["message_pins"].setdefault(req.params["cid"], [])
+        pins[:] = [pin for pin in pins if pin.get("messageId") != req.params["mid"]]
+        if body.get("pinned"):
+            now = int(time.time() * 1000)
+            pins.insert(0, {"messageId": req.params["mid"], "pinnedBy": "me", "pinnedAt": now,
+                            "expiresAt": now + int(body.get("duration") or 0) * 1000, "message": dict(message)})
+        st.setdefault("message_pin_calls", []).append((req.params["cid"], req.params["mid"], body))
+        return 200, {"status": "ok", "pinned": bool(body.get("pinned"))}
+
+    @mb.route("POST", r"/chats/(?P<cid>[^/]+)/messages/(?P<mid>[^/]+)/react")
+    def react_message(req):
+        body = req.json() or {}
+        st.setdefault("message_reactions", []).append((req.params["cid"], req.params["mid"], body))
+        return 200, {"status": "ok"}
+
+    @mb.route("POST", r"/chats/(?P<cid>[^/]+)/messages/(?P<mid>[^/]+)/delete")
+    def delete_message(req):
+        message = next((m for m in st["messages"].get(req.params["cid"], [])
+                        if m["id"] == req.params["mid"]), None)
+        if message is None:
+            return 404, {"error": "message not found"}
+        message["revokedAt"] = int(time.time() * 1000)
+        st.setdefault("message_deletions", []).append((req.params["cid"], req.params["mid"]))
+        return 200, {"status": "ok", "revokedAt": message["revokedAt"]}
+
     @mb.route("POST", r"/chats/(?P<cid>[^/]+)/messages/(?P<mid>[^/]+)/forward")
     def forward(req):
         st.setdefault("forwards", []).append((req.params["cid"], req.params["mid"], req.json().get("targets")))
@@ -201,18 +275,61 @@ def install(mb) -> None:
         g = st["groups"].get(req.params["id"])
         return (200, g) if g else (404, {"error": "group not found"})
 
+    @mb.route("PATCH", r"/groups/(?P<id>[^/]+)")
+    def update_group(req):
+        g = st["groups"].get(req.params["id"])
+        if not g:
+            return 404, {"error": "group not found"}
+        g.update(req.json() or {})
+        return 200, g
+
+    @mb.route("POST", r"/groups/(?P<id>[^/]+)/photo")
+    def group_photo(req):
+        g = st["groups"].get(req.params["id"])
+        if not g:
+            return 404, {"error": "group not found"}
+        st["group_photo_uploads"].append({
+            "jid": req.params["id"],
+            "content_type": req.headers.get("Content-Type", ""),
+            "body": req.body,
+        })
+        return 200, g
+
     @mb.route("POST", r"/groups/(?P<id>[^/]+)/participants")
     def participants(req):
         g = st["groups"].get(req.params["id"])
         if not g:
             return 404, {"error": "group not found"}
         body = req.json()
-        if body.get("action") == "add":
+        action = body.get("action")
+        targets = set(body.get("jids", []))
+        if action == "add":
+            known = {p["jid"] for p in g["participants"]}
             for jid in body.get("jids", []):
+                if jid in known:
+                    continue
                 c = find(jid)
                 g["participants"].append({"jid": jid, "name": c["name"] if c else None, "isAdmin": False})
-            g["participantCount"] = len(g["participants"])
+        elif action == "remove":
+            g["participants"] = [p for p in g["participants"] if p["jid"] not in targets or p.get("isSuperAdmin")]
+        elif action in ("promote", "demote"):
+            for participant in g["participants"]:
+                if participant["jid"] in targets and not participant.get("isSuperAdmin"):
+                    participant["isAdmin"] = action == "promote"
+        g["participantCount"] = len(g["participants"])
         return 200, g
+
+    @mb.route("GET", r"/groups/(?P<id>[^/]+)/invite-link")
+    def get_group_invite(req):
+        link = st["group_invite_links"].get(req.params["id"])
+        return (200, {"status": "success", "link": link}) if link else (404, {"error": "group not found"})
+
+    @mb.route("POST", r"/groups/(?P<id>[^/]+)/invite-link")
+    def reset_group_invite(req):
+        if req.params["id"] not in st["groups"]:
+            return 404, {"error": "group not found"}
+        st["group_invite_links"][req.params["id"]] = f"https://chat.whatsapp.com/reset-{int(time.time() * 1000)}"
+        return 200, {"status": "success", "link": st["group_invite_links"][req.params["id"]]}
 
     @mb.route("POST", "/groups/create")
     def create(req):
@@ -246,8 +363,13 @@ def install(mb) -> None:
     def avatar(req):
         if req.params["id"] == PNG_AVATAR_CHAT:
             return 200, jpeg_placeholder((200, 90, 120), 96), "image/png"
-        return 404, {"error": "no avatar"}
+        return 200, jpeg_placeholder((90, 120, 150), 64), "image/png"
 
     @mb.route("GET", r"/media/(?P<name>.+)")
     def media(req):
+        failures = mb.state.setdefault("media_failures", {})
+        remaining = int(failures.get(req.params["name"], 0))
+        if remaining > 0:
+            failures[req.params["name"]] = remaining - 1
+            return 503, {"error": "temporary media failure"}
         return 200, jpeg_placeholder((60, 130, 200), 96), "image/png"

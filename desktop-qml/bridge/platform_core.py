@@ -4,6 +4,7 @@ without a display or a bus; `bridge/platform.py` wires it to Qt."""
 from __future__ import annotations
 
 import base64
+import math
 import os
 import re
 import tempfile
@@ -344,6 +345,31 @@ def card_margins(p: Placement) -> tuple[tuple[str, ...], tuple[int, int, int, in
     if p.edge == "right":
         return ("top", "right"), (y, PANEL_GAP, 0, 0)
     return ("top", "left"), (PANEL_GAP, 0, 0, x)
+
+
+def popover_pointer_path() -> Path:
+    """Shared pointer cache used by GPUI and QML popover sessions."""
+    cache = os.environ.get("XDG_CACHE_HOME")
+    root = Path(cache) if cache else Path.home() / ".cache"
+    return root / "wabot-popover-pointer"
+
+
+def load_popover_pointer() -> tuple[float, float] | None:
+    try:
+        values = popover_pointer_path().read_text().split()
+        x, y = float(values[0]), float(values[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return (x, y) if math.isfinite(x) and math.isfinite(y) else None
+
+
+def save_popover_pointer(pointer: tuple[float, float]) -> None:
+    path = popover_pointer_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{pointer[0]} {pointer[1]}\n")
+    except OSError:
+        pass
 
 
 # --- misc -------------------------------------------------------------------------------

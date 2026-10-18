@@ -255,7 +255,7 @@ class Channels(QObject):
 
     @Slot()
     def loadMore(self) -> None:
-        if self._loading_more or self._posts_loading or not self._selected or not self._posts.rows():
+        if self._loading_more or self._posts_loading or not self._has_more or not self._selected or not self._posts.rows():
             return
         oldest = self._posts.rows()[0]["serverId"]
         jid, seq = self._selected, self._posts_seq
