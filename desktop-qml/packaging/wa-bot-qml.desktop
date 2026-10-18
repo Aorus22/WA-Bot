@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=WA Bot Desktop (QML)
+Comment=WA Bot native Qt Quick desktop client
+Exec=wa-bot
+Icon=wa-bot-qml
+Terminal=false
+Categories=Network;InstantMessaging;
+StartupWMClass=wa-bot-qml

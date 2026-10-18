@@ -47,7 +47,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/smoke.py     # read-only chec
 .venv/bin/python scripts/concurrent-smoke.py # React + GPUI + QML against one isolated mock; needs Firefox, Xvfb, and a GPUI debug binary
 WABOT_TEST_BACKEND="$PWD/build/pyinstaller/wa-bot-backend" .venv/bin/python scripts/concurrent-go-smoke.py # actual Go server, temporary empty home, no QR scan
 ```
-## Linux bundle
+## QML Linux onedir bundle
 ```bash
 .venv/bin/pip install -e '.[build]'
 ./scripts/package-linux.sh  # builds current Go source, then runs isolated codec/QML/REST/WS smokes
@@ -64,6 +64,23 @@ cross-distribution packaging or real desktop integration.
 
 User-level install/uninstall steps and the current Linux capability notes are in [`docs/QML-DESKTOP.md`](../docs/QML-DESKTOP.md).
 Codec runtime requirements and third-party notices are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+## QML AppImage
+
+The AppImage has a separate build command, staging directory, helper-tool cache, desktop identity, and output directory:
+
+```bash
+./scripts/build-appimage.sh
+# Output: dist/appimage/wa-bot-qml_<version>_x86_64.AppImage
+./scripts/build-appimage.sh --clean  # remove only the QML AppImage staging files
+```
+
+This does not invoke or modify the GPUI AppImage command at `../desktop-gpui/scripts/build-appimage.sh`.
+The QML AppImage build uses `build/appimage/` and `~/.cache/wa-bot-qml-appimage/`, separate from the
+QML onedir build and the GPUI AppImage build. It targets x86_64. The host still provides GStreamer
+with OpenH264 plugins, display/GPU drivers, and session D-Bus. To package call media before the
+`call` branch is integrated into the current Go source, set `WABOT_BUNDLE_BACKEND` to a backend
+binary built from that branch.
 
 Platform scope: Linux first. The app requests Freedesktop notifications over the session D-Bus with the installed wa-bot-qml desktop-entry identity, and uses
 Qt's system tray when a host is available. Unit/mock coverage includes notification policy, a private test

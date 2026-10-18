@@ -34,7 +34,7 @@ The mock server prints its chosen URL. `scripts/shot.py` requires a loopback `--
 - QML pages live under `qml/pages/`; reusable visual types live under `qml/ui/`.
 - Keep API shapes aligned with `desktop-gpui/crates/backend-client` and Go handlers. Keep user preferences in `Settings` and server-owned settings in `/api/settings`.
 
-## Linux bundle
+## Linux onedir bundle
 
 Build from `desktop-qml/` with `.venv/bin/pip install -e '.[build]'` and the Go toolchain, then run
 `./scripts/package-linux.sh`. The build creates `dist/linux/wa-bot/` as a PyInstaller onedir package
@@ -43,6 +43,21 @@ and confirms the packaged app reaches auth/chat REST and the JSON WebSocket. The
 built on CachyOS x86_64 from current Go backend source with the media-session route; the frozen codec smoke
 verifies H.264 Annex-B encode/decode. Its copy-to-user-directory, desktop-entry, smoke, and uninstall steps passed
 under temporary paths on this host; a clean host and another distribution have not been checked.
+
+## QML AppImage
+
+Build a separate QML AppImage from `desktop-qml/` with:
+
+```sh
+./scripts/build-appimage.sh
+```
+
+It writes `dist/appimage/wa-bot-qml_<version>_x86_64.AppImage`; `./scripts/build-appimage.sh --clean`
+removes only its staged files under `build/appimage/`. Its AppDir, PyInstaller workspace, helper cache,
+desktop ID, and output are isolated from both the QML onedir package and the GPUI AppImage command
+at `desktop-gpui/scripts/build-appimage.sh`. The current script supports x86_64 and still relies on
+host GStreamer/OpenH264, display/GPU drivers, and session D-Bus. Use `WABOT_BUNDLE_BACKEND` with a
+backend built from branch `call` to include the media-session route before that branch is integrated.
 
 User-level install after building:
 

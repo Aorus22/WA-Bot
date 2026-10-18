@@ -158,7 +158,7 @@ Keep business logic in Go. Make QML declarative and the Python bridge small, tes
 - [x] Create the route/area traceability matrix and identify GPUI features QML intentionally omits. Matched screenshots and interaction walkthroughs for every route remain open below.
 - [ ] Compare at least cold start, warm start, idle CPU, PSS/RSS, scrolling FPS, image-heavy history, memory after extended idle; compare GPUI and QML under same backend and conditions. No speculative claims of lower RAM.
 - [ ] Regression tests: React and GPUI unchanged; shared backend with simultaneous connections, owner exit, reconnect, error handling.
-- [x] Implement the Linux PyInstaller onedir package and current-host install/uninstall flow. Clean-host/cross-distro validation and a Windows artifact remain open.
+- [x] Implement separate Linux PyInstaller onedir and QML AppImage commands, plus the current-host onedir install/uninstall flow. Clean-host/cross-distro validation and a Windows artifact remain open.
 - [x] Document run/develop/debug/install/uninstall, media system dependencies, platform scope, and known gaps in `desktop-qml/README.md`, `docs/QML-DESKTOP.md`, and `desktop-qml/THIRD_PARTY_NOTICES.md`.
 - [ ] Obtain screenshots and test logs from actual runtime; report tested vs inferred honestly.
 - [x] Rebuild the 642 MB Linux onedir bundle after the latest QML work; isolated frozen-app smoke passed H.264 encode/decode, QML load, mock auth/chat REST, and JSON WebSocket. Clean-host behavior remains open.

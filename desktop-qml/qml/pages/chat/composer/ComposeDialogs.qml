@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import "../../../ui"
 
@@ -227,21 +228,25 @@ Item {
                 onClicked: if (pollOptions.count < 12) pollOptions.append({ text: "" })
             }
         }
-        RowLayout {
-            id: multi
-            property bool checked: false
-            Layout.fillWidth: true
-            spacing: 8
-            Rectangle {
-                Layout.preferredWidth: 18
-                Layout.preferredHeight: 18
-                radius: Theme.rem * 0.25
-                color: multi.checked ? Theme.primary : "transparent"
-                border.width: 1
-                border.color: multi.checked ? Theme.primary : Theme.border
-                Icon { visible: multi.checked; anchors.centerIn: parent; name: "check"; size: 11; color: "#ffffff" }
+        Item {
+            width: parent.width
+            implicitHeight: multi.implicitHeight
+            RowLayout {
+                id: multi
+                anchors.fill: parent
+                property bool checked: false
+                spacing: 8
+                Rectangle {
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 18
+                    radius: Theme.rem * 0.25
+                    color: multi.checked ? Theme.primary : "transparent"
+                    border.width: 1
+                    border.color: multi.checked ? Theme.primary : Theme.border
+                    Icon { visible: multi.checked; anchors.centerIn: parent; name: "check"; size: 11; color: "#ffffff" }
+                }
+                AppText { Layout.fillWidth: true; text: "Izinkan jawaban ganda"; size: 0.875 }
             }
-            AppText { Layout.fillWidth: true; text: "Izinkan jawaban ganda"; size: 0.875 }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -282,21 +287,25 @@ Item {
         }
         AppTextField { id: placeName; width: parent.width; placeholder: "Nama tempat (opsional)" }
         AppTextField { id: address; width: parent.width; placeholder: "Alamat (opsional)" }
-        RowLayout {
-            id: live
-            property bool checked: false
+        Item {
             width: parent.width
-            spacing: 8
-            Rectangle {
-                Layout.preferredWidth: 18
-                Layout.preferredHeight: 18
-                radius: Theme.rem * 0.25
-                color: live.checked ? Theme.primary : "transparent"
-                border.width: 1
-                border.color: live.checked ? Theme.primary : Theme.border
-                Icon { visible: live.checked; anchors.centerIn: parent; name: "check"; size: 11; color: "#ffffff" }
+            implicitHeight: live.implicitHeight
+            RowLayout {
+                id: live
+                anchors.fill: parent
+                property bool checked: false
+                spacing: 8
+                Rectangle {
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 18
+                    radius: Theme.rem * 0.25
+                    color: live.checked ? Theme.primary : "transparent"
+                    border.width: 1
+                    border.color: live.checked ? Theme.primary : Theme.border
+                    Icon { visible: live.checked; anchors.centerIn: parent; name: "check"; size: 11; color: "#ffffff" }
+                }
+                AppText { Layout.fillWidth: true; text: "Bagikan lokasi live"; size: 0.875 }
             }
-            AppText { Layout.fillWidth: true; text: "Bagikan lokasi live"; size: 0.875 }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor

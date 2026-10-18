@@ -130,8 +130,8 @@ def main(argv: list[str]) -> int:
     popover_supported, layer_shell_import_path = _layer_shell_runtime()
     QQuickStyle.setStyle("Basic")  # unstyled controls: every look comes from our theme
     app = QApplication(argv)
-    app.setApplicationName("wa-bot")
-    app.setDesktopFileName("wa-bot")
+    app.setApplicationName("wa-bot-qml")
+    app.setDesktopFileName("wa-bot-qml")
     for font in (QML / "assets" / "fonts").glob("*.ttf"):
         QFontDatabase.addApplicationFont(str(font))
 
