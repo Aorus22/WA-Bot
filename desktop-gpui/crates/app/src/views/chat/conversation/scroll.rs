@@ -4,13 +4,10 @@ impl ChatView {
     /// Centered date pill, shared by the in-flow day separators and the
     /// sticky header at the top of the message list.
     pub(crate) fn day_pill(label: String, bg: Hsla, border_color: Hsla, text: Hsla) -> AnyElement {
-        // Day pills share a width, so "16 OCTOBER 2026" and "18 OCTOBER 2026"
-        // match; a longer label only grows it.
+        // The original small pill. Digits have one width ("tnum"), so
+        // "16 OCTOBER 2026" and "18 OCTOBER 2026" come out the same size.
         div()
-            .min_w(px(164.0))
             .px_3()
-            .flex()
-            .justify_center()
             .py_1()
             .rounded_full()
             .bg(bg)
@@ -18,6 +15,7 @@ impl ChatView {
             .border_color(border_color)
             .text_xs()
             .font_weight(FontWeight::MEDIUM)
+            .font_features(FontFeatures(std::sync::Arc::new(vec![("tnum".to_string(), 1)])))
             .text_color(text)
             .child(label)
             .into_any_element()
