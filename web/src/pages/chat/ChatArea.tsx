@@ -1163,7 +1163,7 @@ const handleReplyMessage = (message: Message) => {
                             {Object.entries(groupedMessages).map(([dateKey, msgs]) => (
                                 <div key={dateKey}>
                                     <div className="flex justify-center sticky top-0 z-20 pointer-events-none py-2">
-                                        <span className="w-[200px] text-center text-[10px] font-bold text-muted-foreground/80 bg-background/60 backdrop-blur-md py-1 rounded-full border border-border/40 uppercase tracking-widest shadow-sm">
+                                        <span className="min-w-[164px] px-3 text-center text-[10px] font-bold text-muted-foreground/80 bg-background/60 backdrop-blur-md py-1 rounded-full border border-border/40 uppercase tracking-widest shadow-sm">
                                             {dateKey}
                                         </span>
                                     </div>

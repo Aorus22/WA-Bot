@@ -62,7 +62,7 @@ These exist because of the platform, not by accident. Keep this list short.
   explicit "Mark as read" (`POST /chats/{id}/read?explicit=1`) does.
 - Typing indicators need the account online. Opening any chat, group or private, calls
   `presence-subscribe`.
-- Day separators ('TODAY', '28 SEPTEMBER 2026') are pills of one fixed width.
+- Day separators ('TODAY', '28 SEPTEMBER 2026') are pills of one minimum width, so dates of different digits match.
 - Day separators ('TODAY', '28 SEPTEMBER 2026') are pills of one fixed width.
 - The window controls sit over the top right corner of the chat page in gpui, so anything
   full-width up there (image viewer, video viewer, sheet headers) leaves `controls_room` free.

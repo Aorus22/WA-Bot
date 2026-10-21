@@ -577,7 +577,8 @@ impl Render for ChatView {
 
                 // The pages layout has no column to spare: the info page covers the window.
                 if pages {
-                    Some(div().absolute().inset_0().child(self.render_info_sheet(window, cx, &chat, true)).into_any_element())
+                    // `occlude`: without it a click on the sheet's close button also reached the header's buttons underneath.
+                    Some(div().absolute().inset_0().occlude().child(self.render_info_sheet(window, cx, &chat, true)).into_any_element())
                 } else {
                     Some(self.render_info_sheet(window, cx, &chat, false))
                 }
@@ -606,7 +607,7 @@ impl Render for ChatView {
             // The chat list page has no column to spare for a drawer, so the
             // starred messages cover it instead.
             .children((starred_overlay && (self.is_starred_sheet_open || self.starred_sheet_closing)).then(|| {
-                div().absolute().inset_0().child(self.render_starred_sheet(true, cx))
+                div().absolute().inset_0().occlude().child(self.render_starred_sheet(true, cx))
             }))
             // ====================================================
             // CONTEXT MENU POPOVER (RIGHT-CLICK ON BUBBLE)
