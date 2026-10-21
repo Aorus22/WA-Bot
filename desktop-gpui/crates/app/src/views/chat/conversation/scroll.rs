@@ -4,8 +4,11 @@ impl ChatView {
     /// Centered date pill, shared by the in-flow day separators and the
     /// sticky header at the top of the message list.
     pub(crate) fn day_pill(label: String, bg: Hsla, border_color: Hsla, text: Hsla) -> AnyElement {
+        // One width for every label ("TODAY" and "28 SEPTEMBER 2026" alike).
         div()
-            .px_3()
+            .w(px(188.0))
+            .flex()
+            .justify_center()
             .py_1()
             .rounded_full()
             .bg(bg)

@@ -115,7 +115,7 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 		: null
 
 	return (
-		<div className="px-4 py-4 space-y-3">
+		<div className="px-4 py-4 space-y-4">
 			<div className="flex items-start justify-between gap-4">
 				<div className="flex items-start gap-3">
 					<ImageIcon className="h-4 w-4 mt-0.5 text-muted-foreground" />
@@ -171,42 +171,44 @@ export function HistoryMediaSection({ isConnected }: { isConnected: boolean }) {
 					? 'Choose at least one kind of media.'
 					: `${chosenCount} files to download. Videos and documents can be large, so they are off by default.`}
 			</p>
-			<div className="flex items-start gap-3">
-				<Switch id="history_media_phone" checked={askPhone} onCheckedChange={setAskPhone} disabled={active} />
+			<div className="flex items-center justify-between gap-4">
 				<div className="flex flex-col gap-0.5">
 					<Label htmlFor="history_media_phone" className="text-xs font-medium">Ask my phone for media that expired</Label>
 					<span className="text-xs text-muted-foreground">
-						Your phone must be online with WhatsApp open. Only files still stored on the phone can be recovered; this can take a while.
+						Your phone must be online with WhatsApp open. Only files still on the phone can be recovered.
 					</span>
 				</div>
+				<Switch id="history_media_phone" checked={askPhone} onCheckedChange={setAskPhone} disabled={active} />
 			</div>
-			<div className="flex items-start gap-3">
-				<Switch id="history_media_retry" checked={retryUnavailable} onCheckedChange={setRetryUnavailable} disabled={active} />
+			<div className="flex items-center justify-between gap-4">
 				<div className="flex flex-col gap-0.5">
-					<Label htmlFor="history_media_retry" className="text-xs font-medium">Also retry media that was no longer available</Label>
+					<Label htmlFor="history_media_retry" className="text-xs font-medium">Retry media that was no longer available</Label>
 					<span className="text-xs text-muted-foreground">
-						WhatsApp deletes old media from its servers; files found to be gone are skipped unless this is on.
+						WhatsApp deletes old media from its servers; files found gone are skipped unless this is on.
 					</span>
 				</div>
+				<Switch id="history_media_retry" checked={retryUnavailable} onCheckedChange={setRetryUnavailable} disabled={active} />
 			</div>
 			{shown && status && progress && (
-				<div className="space-y-1.5 text-xs text-muted-foreground">
-					<div className="font-medium text-foreground">{mediaHeadline(status)}</div>
-					{(active || status.total > 0) && (
-						<div
-							role="progressbar"
-							aria-valuemin={0}
-							aria-valuemax={status.total}
-							aria-valuenow={status.done + status.unavailable + status.failed + status.missing}
-							className="flex h-2 rounded-full bg-muted overflow-hidden"
-						>
-							<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.round(progress.done * 1000) / 10}%` }} />
-							<div className="h-full bg-muted-foreground/40 transition-all" style={{ width: `${Math.round(progress.unavailable * 1000) / 10}%` }} />
-							<div className="h-full bg-destructive/70 transition-all" style={{ width: `${Math.round(progress.failed * 1000) / 10}%` }} />
-						</div>
-					)}
-					{timing && <div>{timing}</div>}
-					{active && status.current > 0 && <div>Now: downloading {status.current} files at once</div>}
+				<div className="space-y-1.5 border-t pt-3 text-xs text-muted-foreground">
+					{active ? (
+						<>
+							<div className="font-medium text-foreground">{mediaHeadline(status)}</div>
+							<div
+								role="progressbar"
+								aria-valuemin={0}
+								aria-valuemax={status.total}
+								aria-valuenow={status.done + status.unavailable + status.failed + status.missing}
+								className="flex h-1.5 rounded-full bg-muted overflow-hidden"
+							>
+								<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.round(progress.done * 1000) / 10}%` }} />
+								<div className="h-full bg-muted-foreground/40 transition-all" style={{ width: `${Math.round(progress.unavailable * 1000) / 10}%` }} />
+								<div className="h-full bg-destructive/70 transition-all" style={{ width: `${Math.round(progress.failed * 1000) / 10}%` }} />
+							</div>
+							{timing && <div>{timing}</div>}
+							{status.current > 0 && <div>Now: downloading {status.current} files at once</div>}
+						</>
+					) : null}
 					{paused && <p className="text-amber-600 dark:text-amber-400">{paused}</p>}
 					<div>{mediaResultText(status)}</div>
 					{error && <p className="text-destructive">{error}</p>}

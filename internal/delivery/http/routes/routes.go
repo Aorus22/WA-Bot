@@ -84,6 +84,11 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/send-bulk-same-message", messageHandler.BulkSendSame).Methods("POST", "OPTIONS")
 	api.HandleFunc("/send-bulk-different-messages", messageHandler.BulkSendDifferent).Methods("POST", "OPTIONS")
 
+	backupHandler := handlers.NewBackupHandler(r.handler)
+	api.HandleFunc("/backup/run", backupHandler.Run).Methods("POST", "OPTIONS")
+	api.HandleFunc("/backup/status", backupHandler.Status).Methods("GET")
+	api.HandleFunc("/backup/list", backupHandler.List).Methods("GET")
+
 	api.HandleFunc("/chats", chatHandler.GetChats).Methods("GET")
 	api.HandleFunc("/chats/{id}/messages", chatHandler.GetMessages).Methods("GET")
 	api.HandleFunc("/chats/{id}/search", chatHandler.SearchMessages).Methods("GET")

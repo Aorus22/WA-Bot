@@ -306,8 +306,9 @@ impl ChatView {
                     // Header Title row
                     .child(
                         h_flex()
-                            .px_4()
-                            .py_3()
+                            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                            .pl_4()
+                            .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
                             .justify_between()
                             .items_center()
                             .child(

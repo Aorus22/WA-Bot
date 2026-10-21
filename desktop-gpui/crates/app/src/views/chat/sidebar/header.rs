@@ -5,23 +5,27 @@ impl ChatView {
     pub(crate) fn render_sidebar_header(
         &mut self,
         cx: &mut Context<Self>,
-        _pages: bool,
+        pages: bool,
         _has_selection: bool,
     ) -> AnyElement {
         let theme = *cx.app_theme();
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
+        // The chat list page fills the window, so the window controls sit over
+        // the right end of its header.
+        let controls_room = if pages { crate::components::titlebar::controls_room(cx) } else { 0.0 };
         if self.chat_select_mode {
-            return self.render_chat_selection_bar(cx);
+            return self.render_chat_selection_bar(cx, pages);
         }
         if self.archived_mode {
             return v_flex()
                 .px_4()
-                .pt_4()
                 .pb_2()
                 .gap_3()
                 .child(
                     h_flex()
+                        .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                        .pr(px(controls_room))
                         .items_center()
                         .gap_4()
                         .child(
@@ -63,11 +67,14 @@ impl ChatView {
                 .into_any_element();
         }
         v_flex()
-            .p_4()
+            .px_4()
+            .pb_3()
             .gap_3()
             // Top Row: Title + Action Icons
             .child(
                 h_flex()
+                    .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                    .pr(px(controls_room))
                     .justify_between()
                     .items_center()
                     .child(
@@ -82,6 +89,8 @@ impl ChatView {
                                     .child("Messages"),
                             ),
                     )
+                    // Free space: drag the window from here.
+                    .child(crate::components::titlebar::drag_area())
                     // Action buttons: New Group, Join Group (matching Web)
                     .child(
                         h_flex()

@@ -23,9 +23,12 @@ impl ChatView {
         let chat_name = active_chat.name.clone();
         let chat_jid = active_chat.id.clone();
         let disappearing_secs = active_chat.disappearing_secs;
+        let controls_room = if self.controls_over_conversation() { crate::components::titlebar::controls_room(cx) } else { 12.0 };
         h_flex()
-            .px_5()
-            .py_1p5()
+            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+            .flex_shrink_0()
+            .pl_5()
+            .pr(px(controls_room))
             .border_b_1()
             .border_color(border_color.opacity(0.4))
             .bg(window_material::glass_fill(
@@ -76,7 +79,7 @@ impl ChatView {
             .child(
                 h_flex()
                     .id("chat-header-profile")
-                    .flex_1()
+                    .flex_shrink(1.0)
                     .min_w(px(0.0))
                     .overflow_hidden()
                     .items_center()
@@ -89,8 +92,32 @@ impl ChatView {
                     .tooltip(move |window, cx| {
                         Tooltip::new("Click for contact info").build(window, cx)
                     })
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                        this.toggle_info_sheet(cx);
+                    // Press and release opens the info; press and drag moves the window,
+                    // so a narrow window with no empty header space can still be moved.
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _, _| {
+                        this.header_press = Some(ev.position);
+                    }))
+                    .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
+                        let Some(start) = this.header_press else { return };
+                        if ev.pressed_button != Some(MouseButton::Left) {
+                            this.header_press = None;
+                            return;
+                        }
+                        let (dx, dy) = (f32::from(ev.position.x - start.x), f32::from(ev.position.y - start.y));
+                        if dx * dx + dy * dy > 36.0 {
+                            this.header_press = None;
+                            gpui_base::GlobalState::suppress_text_selection(cx);
+                            window.defer(cx, |window, cx| gpui_base::TextSelection::clear(window, cx));
+                            window.start_window_move();
+                        }
+                    }))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        if this.header_press.take().is_some() {
+                            this.toggle_info_sheet(cx);
+                        }
+                    }))
+                    .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, _| {
+                        this.header_press = None;
                     }))
                     .child(render_avatar(&active_chat.id, &active_chat.name, &active_chat.avatar, active_chat.is_group, 40.0, &base_url, &theme))
                     .child(
@@ -130,6 +157,8 @@ impl ChatView {
                             ),
                     ),
             )
+            // Free space: drag the window from here.
+            .child(crate::components::titlebar::drag_area())
             // Header Action Icons matching Web: Phone, Video, Search, More
             .child({
                 let is_group_chat = active_chat.is_group;

@@ -129,19 +129,16 @@ export const ChatSidebar = memo(({
         }
     }, [chatUpdate, selectedChatId, chats, upsertChat])
 
-    // Clear unread when chat is selected
+    // Clear unread when chat is selected. With read receipts off the backend
+    // keeps the chat unread, and so does the list.
     useEffect(() => {
-        if (selectedChatId) {
-            setChats(
-                chats.map(chat =>
-                    chat.id === selectedChatId
-                        ? { ...chat, unread: 0 }
-                        : chat
-                )
-            )
-            // Mark as read in API (local DB update only)
-            api.markAsRead(selectedChatId).catch(console.error)
-        }
+        if (!selectedChatId) return
+        api.markAsRead(selectedChatId)
+            .then((res) => {
+                if (res.cleared === false) return
+                setChats(chats.map(chat => (chat.id === selectedChatId ? { ...chat, unread: 0 } : chat)))
+            })
+            .catch(console.error)
     }, [selectedChatId])
 
     const loadChats = async () => {

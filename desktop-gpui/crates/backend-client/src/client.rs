@@ -152,10 +152,22 @@ impl HttpClient {
         Ok(chats.into_iter().filter(|c| !c.id.is_empty()).collect())
     }
 
+    /// The chat was opened or is being read. With read receipts off the backend
+    /// leaves the unread state alone; see `mark_as_read_explicit`.
     pub async fn mark_as_read(&self, chat_id: &str) -> Result<StatusResult> {
         let resp = self
             .client
             .post(format!("{}/chats/{}/read", self.base_url, urlencoding(chat_id)))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
+    /// The user asked to mark the chat as read: cleared even with read receipts off.
+    pub async fn mark_as_read_explicit(&self, chat_id: &str) -> Result<StatusResult> {
+        let resp = self
+            .client
+            .post(format!("{}/chats/{}/read?explicit=1", self.base_url, urlencoding(chat_id)))
             .send()
             .await?;
         Self::handle_response(resp).await
@@ -728,6 +740,28 @@ impl HttpClient {
             return Ok(HistoryMediaStart::AlreadyRunning(resp.json::<HistoryMediaStatus>().await?));
         }
         Ok(HistoryMediaStart::Started(Self::handle_response(resp).await?))
+    }
+
+    /// Starts a backup of every account into `request.target`, in the background.
+    pub async fn start_backup(&self, request: &BackupRequest) -> Result<StatusResult> {
+        let resp = self.client.post(format!("{}/backup/run", self.base_url)).json(request).send().await?;
+        Self::handle_response(resp).await
+    }
+
+    pub async fn get_backup_status(&self) -> Result<BackupStatus> {
+        let resp = self.client.get(format!("{}/backup/status", self.base_url)).send().await?;
+        Self::handle_response(resp).await
+    }
+
+    /// The backups found in `target`.
+    pub async fn list_backups(&self, target: &str) -> Result<Vec<BackupEntry>> {
+        let resp = self
+            .client
+            .get(format!("{}/backup/list", self.base_url))
+            .query(&[("target", target)])
+            .send()
+            .await?;
+        Self::handle_response(resp).await
     }
 
     /// Stops the running media download after the files being fetched.

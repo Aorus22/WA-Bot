@@ -208,6 +208,14 @@ func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	chatID := vars["id"]
 
+	// With read receipts off, opening a chat must not clear the unread state
+	// here either; only an explicit "mark as read" does.
+	receipts := ch.handler.ReadReceiptsEnabled(r.Context())
+	if !receipts && r.URL.Query().Get("explicit") != "1" {
+		ch.handler.sendSuccess(w, map[string]interface{}{"cleared": false})
+		return
+	}
+
 	err := ch.handler.msgRepo.MarkAsRead(chatID)
 	if err != nil {
 		ch.handler.sendError(w, http.StatusInternalServerError, err.Error())
@@ -220,7 +228,7 @@ func (ch *ChatHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// When the read-receipts toggle is on, tell WhatsApp we read the chat.
-	if ch.handler.client != nil && ch.handler.ReadReceiptsEnabled(r.Context()) {
+	if receipts && ch.handler.client != nil {
 		if targets, terr := ch.handler.msgRepo.GetRecentIncoming(chatID, 100); terr == nil && len(targets) > 0 {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

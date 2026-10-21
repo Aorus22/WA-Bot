@@ -159,6 +159,10 @@ pub struct DesktopSettings {
     #[serde(default = "default_format_messages")]
     pub format_messages: bool,
 
+    /// Folder the Backup section writes to; unset until the user picks one.
+    #[serde(default)]
+    pub backup_folder: Option<String>,
+
     #[serde(skip)]
     pub custom_base: Option<PathBuf>,
 }
@@ -179,6 +183,7 @@ impl Default for DesktopSettings {
             chat_font_scale: default_font_scale(),
             notifications_enabled: default_notifications_enabled(),
             format_messages: default_format_messages(),
+            backup_folder: None,
             custom_base: None,
         }
     }

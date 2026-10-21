@@ -11,6 +11,7 @@ use crate::icons::*;
 use crate::router::{AppRoute, Router};
 use crate::state::auth::AuthState;
 use crate::state::call::CallManager;
+use crate::views::chat::render_avatar;
 use crate::theme::manager::{AppThemeExt, ThemeManager};
 use crate::window_material;
 use crate::TOKIO_RT;
@@ -42,22 +43,23 @@ fn is_missed(log: &CallLog) -> bool {
 }
 
 fn display_name(log: &CallLog) -> String {
+    if !log.peer_name.trim().is_empty() {
+        return log.peer_name.trim().to_string();
+    }
     if let Some(ref grp) = log.group_jid {
         return grp.clone();
     }
-    let target = &log.target;
-    target.split('@').next().unwrap_or(target).to_string()
+    // No name known: the number, without the device ("123:75@lid" is 123).
+    let user = log.target.split('@').next().unwrap_or(&log.target);
+    user.split(':').next().unwrap_or(user).to_string()
 }
 
-fn initials(log: &CallLog) -> String {
-    let name = display_name(log);
-    let mut chars = name.chars().filter(|c| c.is_alphanumeric());
-    let first = chars.next().map(|c| c.to_ascii_uppercase()).unwrap_or('?');
-    let second = chars.next().map(|c| c.to_ascii_uppercase()).unwrap_or(' ');
-    if second != ' ' {
-        format!("{}{}", first, second)
+/// The chat id the avatar is fetched under.
+fn avatar_id(log: &CallLog) -> &str {
+    if !log.peer_id.is_empty() {
+        &log.peer_id
     } else {
-        format!("{}", first)
+        log.group_jid.as_deref().unwrap_or(&log.target)
     }
 }
 
@@ -374,8 +376,12 @@ impl Render for CallsView {
             grouped.push((label, vec![log.clone()]));
         }
 
-        let total_count = self.logs.len();
         let selected_id = self.selected_log.as_ref().map(|l| l.id.clone());
+        let avatar_base = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
 
         h_flex()
             .id("calls-view")
@@ -415,12 +421,7 @@ impl Render for CallsView {
                                                     .text_color(text_color)
                                                     .child("Calls"),
                                             )
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .text_color(muted_text)
-                                                    .child(format!("{total_count}")),
-                                            ),
+
                                     )
                                     .child(
                                         div()
@@ -592,51 +593,47 @@ impl Render for CallsView {
                                                     .relative()
                                                     .w(px(42.0))
                                                     .h(px(42.0))
-                                                    .rounded_full()
                                                     .flex_shrink_0()
-                                                    .bg(if missed {
-                                                        theme.destructive.opacity(0.12)
-                                                    } else {
-                                                        theme.muted.opacity(0.6)
-                                                    })
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
+                                                    .child(render_avatar(
+                                                        avatar_id(&log),
+                                                        &name,
+                                                        "",
+                                                        log.group_jid.is_some(),
+                                                        42.0,
+                                                        &avatar_base,
+                                                        &theme,
+                                                    ))
+                                                    // Which way it went, small at the corner.
                                                     .child(
-                                                        svg()
-                                                            .data(if missed {
-                                                                PHONE_MISSED_SVG
-                                                            } else if log.direction == CallDirection::Incoming {
-                                                                ARROW_DOWN_LEFT_SVG
-                                                            } else {
-                                                                ARROW_UP_RIGHT_SVG
-                                                            })
+                                                        div()
+                                                            .absolute()
+                                                            .bottom(px(-3.0))
+                                                            .right(px(-3.0))
                                                             .size(px(18.0))
-                                                            .text_color(if missed {
-                                                                theme.destructive
+                                                            .rounded_full()
+                                                            .border_2()
+                                                            .border_color(bg_color)
+                                                            .bg(if missed {
+                                                                theme.destructive.opacity(0.9)
                                                             } else {
                                                                 theme.primary
-                                                            }),
-                                                    )
-                                                    .children(if is_video && !missed {
-                                                        Some(
-                                                            div()
-                                                                .absolute()
-                                                                .bottom(px(-2.0))
-                                                                .right(px(-2.0))
-                                                                .p_0p5()
-                                                                .rounded_full()
-                                                                .bg(bg_color)
-                                                                .child(
-                                                                    svg()
-                                                                        .data(VIDEO_SVG)
-                                                                        .size(px(12.0))
-                                                                        .text_color(muted_text),
-                                                                ),
-                                                        )
-                                                    } else {
-                                                        None
-                                                    }),
+                                                            })
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .child(
+                                                                svg()
+                                                                    .data(if missed {
+                                                                        PHONE_MISSED_SVG
+                                                                    } else if log.direction == CallDirection::Incoming {
+                                                                        ARROW_DOWN_LEFT_SVG
+                                                                    } else {
+                                                                        ARROW_UP_RIGHT_SVG
+                                                                    })
+                                                                    .size(px(10.0))
+                                                                    .text_color(rgb(0xffffff)),
+                                                            ),
+                                                    ),
                                             )
                                             // Contact Name + Meta
                                             .child(
@@ -794,23 +791,15 @@ impl Render for CallsView {
                                         .gap_3()
                                         // Large Hero Avatar
                                         .child(
-                                            div()
-                                                .w(px(68.0))
-                                                .h(px(68.0))
-                                                .rounded_full()
-                                                .bg(if missed {
-                                                    theme.destructive.opacity(0.12)
-                                                } else {
-                                                    theme.primary.opacity(0.12)
-                                                })
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .child(if missed {
-                                                    svg().data(PHONE_MISSED_SVG).size(px(32.0)).text_color(theme.destructive).into_any_element()
-                                                } else {
-                                                    div().text_xl().font_weight(FontWeight::BOLD).text_color(theme.primary).child(initials(&log)).into_any_element()
-                                                }),
+                                            div().w(px(68.0)).h(px(68.0)).flex_shrink_0().child(render_avatar(
+                                                avatar_id(&log),
+                                                &name,
+                                                "",
+                                                log.group_jid.is_some(),
+                                                68.0,
+                                                &avatar_base,
+                                                &theme,
+                                            )),
                                         )
                                         // Name & Subtitle
                                         .child(

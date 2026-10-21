@@ -16,6 +16,10 @@ type SettingsHandler struct {
 // managedSettingsKeys are the only keys the settings API may read/write.
 var managedSettingsKeys = []string{
 	"gemini_api_key",
+	"ai_provider",
+	"ai_base_url",
+	"ai_api_key",
+	"ai_model",
 	"ai_server_url",
 	"call_tts_provider",
 	"call_tts_default_voice",
@@ -29,6 +33,7 @@ var managedSettingsKeys = []string{
 // secretSettingsKeys are masked in API responses so raw secrets never leak.
 var secretSettingsKeys = map[string]bool{
 	"gemini_api_key":          true,
+	"ai_api_key":              true,
 	"call_tts_fish_audio_key": true,
 }
 
@@ -42,14 +47,18 @@ func (sh *SettingsHandler) maskedSettings(all map[string]string) map[string]inte
 	result := map[string]string{}
 	hasGeminiKey := false
 	hasFishKey := false
+	hasAIKey := false
 	for _, key := range managedSettingsKeys {
 		val := all[key]
 		if secretSettingsKeys[key] {
 			if val != "" {
 				result[key] = "••••••••"
-				if key == "gemini_api_key" {
+				switch key {
+				case "gemini_api_key":
 					hasGeminiKey = true
-				} else {
+				case "ai_api_key":
+					hasAIKey = true
+				default:
 					hasFishKey = true
 				}
 			} else {
@@ -63,6 +72,7 @@ func (sh *SettingsHandler) maskedSettings(all map[string]string) map[string]inte
 		"settings":     result,
 		"hasGeminiKey": hasGeminiKey,
 		"hasFishKey":   hasFishKey,
+		"hasAiKey":     hasAIKey,
 	}
 }
 
@@ -124,6 +134,15 @@ func (sh *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		case "", "fish", "edge":
 		default:
 			sh.handler.sendError(w, http.StatusBadRequest, "call_tts_provider must be one of: '', 'fish', 'edge'")
+			return
+		}
+	}
+
+	if provider, ok := updates["ai_provider"]; ok {
+		switch provider {
+		case "", "gemini", "openai", "claude":
+		default:
+			sh.handler.sendError(w, http.StatusBadRequest, "ai_provider must be one of: 'gemini', 'openai', 'claude'")
 			return
 		}
 	}

@@ -9,6 +9,8 @@ pub struct SettingsResponse {
     #[serde(default)]
     pub has_fish_key: Option<bool>,
     #[serde(default)]
+    pub has_ai_key: Option<bool>,
+    #[serde(default)]
     pub settings: HashMap<String, String>,
 }
 
@@ -19,6 +21,22 @@ impl SettingsResponse {
 
     pub fn ai_server_url(&self) -> &str {
         self.get("ai_server_url").unwrap_or("http://localhost:8981")
+    }
+
+    /// "gemini", "openai" or "claude".
+    pub fn ai_provider(&self) -> &str {
+        match self.get("ai_provider") {
+            Some(p @ ("openai" | "claude")) => p,
+            _ => "gemini",
+        }
+    }
+
+    pub fn ai_base_url(&self) -> &str {
+        self.get("ai_base_url").unwrap_or("")
+    }
+
+    pub fn ai_model(&self) -> &str {
+        self.get("ai_model").unwrap_or("")
     }
 
     pub fn call_tts_provider(&self) -> &str {

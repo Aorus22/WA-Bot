@@ -32,6 +32,7 @@ type LuaService struct {
 	stateRepo   repository.UserStateRepository
 	storage     repository.StorageRepository
 	gemini      *ai.GeminiService
+	text        *ai.TextRouter
 	mediaDown   *media.MediaDownloader
 	redis       *storage.RedisService
 }
@@ -1093,22 +1094,28 @@ func (s *LuaService) luaGetParticipants(L *lua.LState) int {
 	return 1
 }
 
+// SetTextRouter lets scripts reach any configured AI provider for plain text.
+func (s *LuaService) SetTextRouter(t *ai.TextRouter) { s.text = t }
+
 func (s *LuaService) luaGeminiChat(L *lua.LState) int {
 	prompt := L.CheckString(1)
 	modelName := L.OptString(2, "gemma-3-27b-it")
 	filePath := L.OptString(3, "")
-	if s.gemini == nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString("Gemini service not available"))
-		return 2
-	}
 	ctx := context.Background()
 	var res string
 	var err error
 	if filePath != "" {
+		// Files go through Gemini's upload API only.
+		if s.gemini == nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString("Gemini service not available"))
+			return 2
+		}
 		res, err = s.gemini.GenerateWithFile(ctx, modelName, prompt, filePath)
+	} else if s.text != nil {
+		res, err = s.text.GenerateText(ctx, modelName, prompt)
 	} else {
-		res, err = s.gemini.GenerateText(ctx, modelName, prompt)
+		err = fmt.Errorf("AI service not available")
 	}
 	if err != nil {
 		L.Push(lua.LNil)

@@ -263,8 +263,9 @@ impl ChatView {
             .flex_shrink_0()
             .child(
                 h_flex()
-                    .px_4()
-                    .py_3()
+                    .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                    .pl_4()
+                    .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
                     .gap_3()
                     .items_center()
                     .border_b_1()

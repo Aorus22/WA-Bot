@@ -186,14 +186,14 @@ const buildMentionPayload = (text: string, members: GroupParticipantInfo[]) => {
 	const [dismissedLinks, setDismissedLinks] = useState<string[]>([])
 	const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null)
 
-	// Typing indicator + availability for the open 1:1 chat. The typing line
+	// Typing indicator + availability for the open chat. The typing line
 	// auto-clears if no renewal arrives (WhatsApp repeats composing ~every 2.5s).
 	useEffect(() => {
 		if (!chat) return
 		setHeaderStatus("")
-		if (!chat.isGroup) {
-			api.subscribeChatPresence(chat.id).catch(() => {})
-		}
+		// WhatsApp only sends typing while the account is online; the backend
+		// goes online on subscribe, for groups too.
+		api.subscribeChatPresence(chat.id).catch(() => {})
 		let clearTimer: ReturnType<typeof setTimeout> | undefined
 		const armClear = (ms: number) => {
 			if (clearTimer) clearTimeout(clearTimer)
@@ -1038,16 +1038,18 @@ const handleReplyMessage = (message: Message) => {
 
     return (
         <div className={cn("flex-1 flex flex-col bg-background relative overflow-x-hidden", className)}>
-            <header
-                className="h-16 flex items-center justify-between px-4 border-b border-border/40 bg-background/80 backdrop-blur-xl z-20 sticky top-0 cursor-pointer hover:bg-muted/30 transition-colors group"
-                onClick={() => setIsMediaSheetOpen(true)}
-            >
+            <header className="h-16 flex items-center justify-between px-4 border-b border-border/40 bg-background/80 backdrop-blur-xl z-20 sticky top-0">
                 <div className="flex items-center gap-3">
                     {onBack && (
                         <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onBack(); }} className="md:hidden -ml-2 rounded-full">
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                     )}
+                    {/* Only the avatar and name open the info sheet; the rest of the header does nothing. */}
+                    <div
+                        className="group flex items-center gap-3 cursor-pointer rounded-xl px-2 py-1 hover:bg-muted/40 transition-colors"
+                        onClick={() => setIsMediaSheetOpen(true)}
+                    >
                     <div className="relative">
                         <Avatar className="h-10 w-10 border-2 border-background shadow-sm group-hover:scale-105 transition-transform">
                             <AvatarImage src={getAvatarUrl(chat)} />
@@ -1068,6 +1070,7 @@ const handleReplyMessage = (message: Message) => {
                         <p className={cn("text-[11px] font-medium truncate max-w-[180px] md:max-w-[250px]", headerStatus && chat.isGroup === false ? "text-primary" : "text-muted-foreground")}>
                             {headerStatus || chat.id}
                         </p>
+                    </div>
                     </div>
                 </div>
 
@@ -1160,7 +1163,7 @@ const handleReplyMessage = (message: Message) => {
                             {Object.entries(groupedMessages).map(([dateKey, msgs]) => (
                                 <div key={dateKey}>
                                     <div className="flex justify-center sticky top-0 z-20 pointer-events-none py-2">
-                                        <span className="text-[10px] font-bold text-muted-foreground/80 bg-background/60 backdrop-blur-md px-3 py-1 rounded-full border border-border/40 uppercase tracking-widest shadow-sm">
+                                        <span className="w-[200px] text-center text-[10px] font-bold text-muted-foreground/80 bg-background/60 backdrop-blur-md py-1 rounded-full border border-border/40 uppercase tracking-widest shadow-sm">
                                             {dateKey}
                                         </span>
                                     </div>

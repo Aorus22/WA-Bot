@@ -55,6 +55,10 @@ func (s *HTTPServer) SetAccountController(a handlers.AccountController) {
 	s.handler.SetAccountController(a)
 }
 
+func (s *HTTPServer) SetBackupService(b handlers.BackupService) {
+	s.handler.SetBackupService(b)
+}
+
 func (s *HTTPServer) SetLuaService(lua LuaService) {
 	s.handler.SetLuaService(lua)
 }
@@ -83,6 +87,10 @@ func (s *HTTPServer) SetWebhookLogRepo(repo repository.WebhookLogRepository) {
 func (s *HTTPServer) SetCronScheduler(cs *cron.CronScheduler) {
 	s.cronScheduler = cs
 	s.handler.SetCronScheduler(cs)
+}
+
+func (s *HTTPServer) SetTextRouter(t *ai.TextRouter) {
+	s.handler.SetTextRouter(t)
 }
 
 func (s *HTTPServer) SetGeminiService(gemini *ai.GeminiService) {

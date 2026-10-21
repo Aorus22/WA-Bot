@@ -1,4 +1,4 @@
-import { Check, Paintbrush, LogOut, LogIn, Wifi, WifiOff, AlertCircle, Sparkles, Mic, Loader2, History } from 'lucide-react'
+import { Check, Palette, LogOut, LogIn, Wifi, WifiOff, AlertCircle, Bot, Mic, Loader2, History, ChevronRight } from 'lucide-react'
 import { themes } from '@/data/themes'
 import { useAppTheme, setAppTheme } from '@/components/AppThemeProvider'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,7 @@ import {
 } from '@/lib/historySync'
 import { useChatStore } from '@/stores/chatStore'
 import { HistoryMediaSection } from './HistoryMediaSection'
+import { BackupSection } from './BackupSection'
 import { isMessageFormattingEnabled, setMessageFormattingEnabled } from '@/pages/chat/renderMd'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -26,6 +27,13 @@ import {
 	SelectValue,
 } from '@/components/ui/select'
 import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from '@/components/ui/dialog'
+import {
 	AlertDialog,
 	AlertDialogAction,
 	AlertDialogCancel,
@@ -37,6 +45,18 @@ import {
 } from '@/components/ui/alert-dialog'
 
 type ThemeMode = 'all' | 'dark' | 'light'
+type AiProvider = 'gemini' | 'openai' | 'claude'
+
+const AI_PROVIDERS: { id: AiProvider; label: string }[] = [
+	{ id: 'gemini', label: 'Gemini' },
+	{ id: 'openai', label: 'OpenAI-compatible API' },
+	{ id: 'claude', label: 'Claude-compatible API' },
+]
+
+const AI_BASE_DEFAULTS: Record<Exclude<AiProvider, 'gemini'>, string> = {
+	openai: 'https://api.openai.com/v1',
+	claude: 'https://api.anthropic.com',
+}
 
 function getLuminance(hex: string) {
 	const r = parseInt(hex.slice(1, 3), 16) / 255
@@ -53,6 +73,7 @@ export function SettingsPage() {
 		return (stored === 'all' || stored === 'dark' || stored === 'light') ? stored : 'dark'
 	})
 	const [logoutOpen, setLogoutOpen] = useState(false)
+	const [themeOpen, setThemeOpen] = useState(false)
 	const navigate = useNavigate()
 	const { isLoggedIn, isConnected, logout } = useAuth()
 
@@ -63,6 +84,11 @@ export function SettingsPage() {
 
 	const [geminiApiKey, setGeminiApiKey] = useState('')
 	const [aiServerUrl, setAiServerUrl] = useState('')
+	const [aiProvider, setAiProvider] = useState<AiProvider>('gemini')
+	const [aiBaseUrl, setAiBaseUrl] = useState('')
+	const [aiModel, setAiModel] = useState('')
+	const [aiApiKey, setAiApiKey] = useState('')
+	const [hasAiKey, setHasAiKey] = useState(false)
 	const [savingAi, setSavingAi] = useState(false)
 	const [readReceipts, setReadReceipts] = useState(true)
 	const [savingReceipts, setSavingReceipts] = useState(false)
@@ -156,6 +182,10 @@ export function SettingsPage() {
 				setHasGeminiKey(Boolean(res.hasGeminiKey))
 				setHasFishKey(Boolean(res.hasFishKey))
 				setAiServerUrl(res.ai_server_url ?? '')
+				setHasAiKey(Boolean(res.hasAiKey))
+				setAiProvider(res.ai_provider === 'openai' || res.ai_provider === 'claude' ? res.ai_provider : 'gemini')
+				setAiBaseUrl(res.ai_base_url ?? '')
+				setAiModel(res.ai_model ?? '')
 				setTtsProvider(res.call_tts_provider ?? '')
 				setTtsDefaultVoice(res.call_tts_default_voice ?? '')
 				setFishAudioModel(res.call_tts_fish_audio_model ?? '')
@@ -177,13 +207,21 @@ export function SettingsPage() {
 	const saveAiSettings = async () => {
 		setSavingAi(true)
 		try {
-			const data: SettingsMap = { ai_server_url: aiServerUrl.trim() }
-			// Only send the secret if the user typed a new value — blank keeps the stored one.
+			const data: SettingsMap = {
+				ai_server_url: aiServerUrl.trim(),
+				ai_provider: aiProvider,
+				ai_base_url: aiBaseUrl.trim(),
+				ai_model: aiModel.trim(),
+			}
+			// Only send the secrets if the user typed a new value: blank keeps the stored one.
 			if (geminiApiKey.trim()) data.gemini_api_key = geminiApiKey.trim()
+			if (aiApiKey.trim()) data.ai_api_key = aiApiKey.trim()
 			const res = await api.updateSettings(data)
 			setHasGeminiKey(Boolean(res.hasGeminiKey))
+			setHasAiKey(Boolean(res.hasAiKey))
 			setAiServerUrl(res.ai_server_url ?? '')
 			setGeminiApiKey('')
+			setAiApiKey('')
 			toast.success('AI configuration saved')
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : 'Failed to save AI configuration')
@@ -293,6 +331,8 @@ export function SettingsPage() {
 		}
 	}, [mode, current])
 
+	const activeTheme = themes.find((t) => t.name === current) ?? themes[0]
+
 	return (
 		<>
 			<div className="flex flex-col items-center justify-start min-h-full p-4 md:p-8 overflow-y-auto pt-12">
@@ -302,71 +342,30 @@ export function SettingsPage() {
 					<div className="space-y-4">
 						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Appearance</h2>
 						<div className="bg-card rounded-lg border divide-y overflow-hidden">
-							<div className="flex items-center justify-between px-4 py-3">
+							<button
+								type="button"
+								onClick={() => setThemeOpen(true)}
+								className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+							>
 								<div className="flex items-center gap-3">
-									<Paintbrush className="h-4 w-4 text-muted-foreground" />
+									<Palette className="h-4 w-4 text-muted-foreground" />
 									<div className="flex flex-col">
-										<span className="text-sm font-medium">Theme Mode</span>
-										<span className="text-xs text-muted-foreground">Filter by dark or light appearance</span>
+										<span className="text-sm font-medium">Color theme</span>
+										<span className="text-xs text-muted-foreground">{activeTheme.label}</span>
 									</div>
 								</div>
-								<Select value={mode} onValueChange={(v) => setMode(v as ThemeMode)}>
-									<SelectTrigger className="w-[110px] h-8 text-xs">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="all">All themes</SelectItem>
-										<SelectItem value="dark">Dark</SelectItem>
-										<SelectItem value="light">Light</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-
-							<div className="px-4 py-4 space-y-4">
-								<div className="flex flex-col gap-0.5">
-									<span className="text-sm font-medium">Color Theme</span>
-									<span className="text-xs text-muted-foreground">{filtered.length} themes available</span>
+								<div className="flex items-center gap-2">
+									<div
+										className="h-8 w-[72px] rounded-md border flex items-center gap-1 px-2"
+										style={{ backgroundColor: activeTheme.colors.background }}
+									>
+										<div className="h-2 w-2 rounded-full" style={{ backgroundColor: activeTheme.colors.primary }} />
+										<div className="h-2 w-2 rounded-full" style={{ backgroundColor: activeTheme.colors.accent }} />
+										<div className="h-2 w-2 rounded-full" style={{ backgroundColor: activeTheme.colors.destructive }} />
+									</div>
+									<ChevronRight className="h-4 w-4 text-muted-foreground" />
 								</div>
-								<div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-									{filtered.map((theme) => {
-										const isActive = current === theme.name
-										const c = theme.colors
-										return (
-											<button
-												key={theme.name}
-												onClick={() => handleSelect(theme.name)}
-												className={cn(
-													"group relative flex flex-col gap-2 p-2 rounded-lg border-2 transition-all text-left",
-													isActive
-														? "border-primary/40 bg-accent"
-														: "border-border/50 bg-secondary hover:bg-secondary/80"
-												)}
-											>
-												<div
-													className="h-14 w-full rounded-md flex flex-col p-2 gap-1 overflow-hidden"
-													style={{ backgroundColor: c.background }}
-												>
-													<div className="flex gap-1">
-														<div className="h-2 w-2 rounded-full" style={{ backgroundColor: c.primary }} />
-														<div className="h-2 w-2 rounded-full" style={{ backgroundColor: c.accent }} />
-														<div className="h-2 w-2 rounded-full" style={{ backgroundColor: c.destructive }} />
-													</div>
-													<div className="flex-1 flex items-end gap-1">
-														<div className="w-2/3 h-1 rounded-sm" style={{ backgroundColor: c.foreground }} />
-														<div className="w-1/4 h-1 rounded-sm" style={{ backgroundColor: c.mutedForeground }} />
-													</div>
-												</div>
-												<span className="text-xs font-medium truncate px-1 text-muted-foreground group-hover:text-foreground">
-													{theme.label}
-												</span>
-												{isActive && (
-													<Check className="absolute top-2 right-2 h-3.5 w-3.5 text-primary" />
-												)}
-											</button>
-										)
-									})}
-								</div>
-							</div>
+							</button>
 						</div>
 					</div>
 
@@ -407,7 +406,7 @@ export function SettingsPage() {
 									</button>
 								)}
 							</div>
-							<div className="px-4 py-4 space-y-3">
+							<div className="px-4 py-4 space-y-4">
 								<div className="flex items-start justify-between gap-4">
 									<div className="flex items-start gap-3">
 										<History className="h-4 w-4 mt-0.5 text-muted-foreground" />
@@ -418,16 +417,16 @@ export function SettingsPage() {
 											</span>
 										</div>
 									</div>
-									{historyStatus && isActive(historyStatus.state) ? (
+									{historyActive ? (
 										<Button
 											size="sm"
 											variant="outline"
 											className="text-destructive"
 											onClick={cancelHistorySync}
-											disabled={historyStatus.state === 'cancelling'}
+											disabled={historyStatus?.state === 'cancelling'}
 										>
-											{historyStatus.state === 'cancelling' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-											{historyStatus.state === 'cancelling' ? 'Stopping…' : 'Stop sync'}
+											{historyStatus?.state === 'cancelling' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+											{historyStatus?.state === 'cancelling' ? 'Stopping…' : 'Stop sync'}
 										</Button>
 									) : historyStatus?.resumable ? (
 										<div className="flex gap-2">
@@ -444,38 +443,35 @@ export function SettingsPage() {
 										</Button>
 									)}
 								</div>
-								<div className="flex flex-wrap gap-1.5">
-									{SYNC_DEPTHS.map((depth) => (
-										<button
-											key={depth.id}
-											type="button"
-											disabled={!!historyStatus && isActive(historyStatus.state)}
-											onClick={() => setHistoryDepth(depth.id)}
-											className={`text-xs px-2.5 py-1 rounded-md border transition-colors disabled:opacity-60 ${
-												historyDepth === depth.id ? 'border-primary text-primary bg-muted' : 'hover:bg-muted'
-											}`}
-										>
-											{depth.label}
-										</button>
-									))}
+								<div className="flex items-center justify-between gap-4">
+									<div className="flex flex-col gap-0.5">
+										<span className="text-xs font-medium">How much to load</span>
+										<span className="text-xs text-muted-foreground">{SYNC_DEPTHS.find((d) => d.id === historyDepth)?.hint}</span>
+									</div>
+									<Select value={historyDepth} onValueChange={(v) => setHistoryDepth(v as SyncDepthId)} disabled={historyActive}>
+										<SelectTrigger className="w-[168px] h-8 text-xs shrink-0">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{SYNC_DEPTHS.map((depth) => (
+												<SelectItem key={depth.id} value={depth.id}>{depth.label}</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
 								</div>
-								<p className="text-xs text-muted-foreground">{SYNC_DEPTHS.find((d) => d.id === historyDepth)?.hint}</p>
-								<div className="flex items-start gap-3">
+								<div className="flex items-center justify-between gap-4">
+									<div className="flex flex-col gap-0.5">
+										<Label htmlFor="history_retry_finished" className="text-xs font-medium">Retry synced chats</Label>
+										<span className="text-xs text-muted-foreground">{finishedChatsText(historyStatus)}</span>
+									</div>
 									<Switch
 										id="history_retry_finished"
 										checked={retryFinished}
 										onCheckedChange={setRetryFinished}
-										disabled={!!historyStatus && isActive(historyStatus.state)}
+										disabled={historyActive}
 									/>
-									<div className="flex flex-col gap-0.5">
-										<Label htmlFor="history_retry_finished" className="text-xs font-medium">
-											Also retry chats that are already synced
-										</Label>
-										<span className="text-xs text-muted-foreground">{finishedChatsText(historyStatus)}</span>
-									</div>
 								</div>
-								{historyStatus && (historyStatus.startedAt != null || isActive(historyStatus.state)) && (() => {
-									const active = isActive(historyStatus.state)
+								{historyStatus && (historyStatus.startedAt != null || historyActive) && (() => {
 									const done = Math.round(progressFraction(historyStatus) * 1000) / 10
 									const working = Math.round(inProgressFraction(historyStatus) * 1000) / 10
 									const headline = [stateLabel(historyStatus.state), chatsText(historyStatus)].filter(Boolean).join(' · ')
@@ -484,25 +480,27 @@ export function SettingsPage() {
 									const staged = stagedText(historyStatus)
 									const error = errorText(historyStatus)
 									return (
-										<div className="space-y-1.5 text-xs text-muted-foreground">
-											<div className="font-medium text-foreground">{headline}</div>
-											{(active || historyStatus.chatsTotal > 0) && (
-												<div
-													role="progressbar"
-													aria-valuemin={0}
-													aria-valuemax={historyStatus.chatsTotal}
-													aria-valuenow={historyStatus.chatsProcessed}
-													className="flex h-2 rounded-full bg-muted overflow-hidden"
-												>
-													<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.max(active && done === 0 ? 1 : 0, done)}%` }} />
-													<div className="h-full bg-[#00a884]/40 animate-pulse transition-all" style={{ width: `${working}%` }} />
-												</div>
-											)}
-											{timing && <div>{timing}</div>}
-											{active && historyStatus.current.slice(0, 3).map((c) => (
-												<div key={c.chatId}>Now: {currentText(c)}</div>
-											))}
-											{active && historyStatus.current.length === 0 && historyStatus.chatsTotal > 0 && <div>Now: picking the next chat…</div>}
+										<div className="space-y-1.5 border-t pt-3 text-xs text-muted-foreground">
+											{historyActive ? (
+												<>
+													<div className="font-medium text-foreground">{headline}</div>
+													<div
+														role="progressbar"
+														aria-valuemin={0}
+														aria-valuemax={historyStatus.chatsTotal}
+														aria-valuenow={historyStatus.chatsProcessed}
+														className="flex h-1.5 rounded-full bg-muted overflow-hidden"
+													>
+														<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.max(done === 0 ? 1 : 0, done)}%` }} />
+														<div className="h-full bg-[#00a884]/40 animate-pulse transition-all" style={{ width: `${working}%` }} />
+													</div>
+													{timing && <div>{timing}</div>}
+													{historyStatus.current.slice(0, 3).map((c) => (
+														<div key={c.chatId}>Now: {currentText(c)}</div>
+													))}
+													{historyStatus.current.length === 0 && historyStatus.chatsTotal > 0 && <div>Now: picking the next chat…</div>}
+												</>
+											) : null}
 											{paused && <p className="text-amber-600 dark:text-amber-400">{paused}</p>}
 											<div>{resultText(historyStatus)}</div>
 											{staged && <div>{staged}</div>}
@@ -512,35 +510,87 @@ export function SettingsPage() {
 								})()}
 							</div>
 							<HistoryMediaSection isConnected={isConnected} />
+							<BackupSection />
 						</div>
 					</div>
 
 					<div className="space-y-4">
-						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">AI Configuration</h2>
+						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">AI</h2>
 						<div className="bg-card rounded-lg border divide-y overflow-hidden">
-							<div className="flex items-center gap-3 px-4 py-3">
-								<Sparkles className="h-4 w-4 text-muted-foreground" />
-								<div className="flex flex-col">
-									<span className="text-sm font-medium">Gemini + AI Server</span>
-									<span className="text-xs text-muted-foreground">Connect the bot to Gemini and your AI backend</span>
+							<div className="flex items-center justify-between gap-4 px-4 py-3">
+								<div className="flex items-center gap-3">
+									<Bot className="h-4 w-4 text-muted-foreground" />
+									<div className="flex flex-col">
+										<span className="text-sm font-medium">AI provider</span>
+										<span className="text-xs text-muted-foreground">Used by scripts and the script assistant</span>
+									</div>
 								</div>
+								<Select value={aiProvider} onValueChange={(v) => setAiProvider(v as AiProvider)} disabled={settingsLoading}>
+									<SelectTrigger className="w-[200px] h-8 text-xs">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{AI_PROVIDERS.map((p) => (
+											<SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							</div>
 							<div className="px-4 py-4 space-y-4">
+								{aiProvider === 'gemini' ? (
+									<div className="flex flex-col gap-1.5">
+										<Label htmlFor="gemini_api_key" className="text-xs font-medium">Gemini API key</Label>
+										<Input
+											id="gemini_api_key"
+											type="password"
+											value={geminiApiKey}
+											onChange={(e) => setGeminiApiKey(e.target.value)}
+											placeholder={hasGeminiKey ? '••••••••' : 'Enter your Gemini API key'}
+											autoComplete="new-password"
+											disabled={settingsLoading}
+										/>
+										<p className="text-xs text-muted-foreground">Stored securely, leave blank to keep</p>
+									</div>
+								) : (
+									<>
+										<div className="flex flex-col gap-1.5">
+											<Label htmlFor="ai_base_url" className="text-xs font-medium">API base URL</Label>
+											<Input
+												id="ai_base_url"
+												type="url"
+												value={aiBaseUrl}
+												onChange={(e) => setAiBaseUrl(e.target.value)}
+												placeholder={`${AI_BASE_DEFAULTS[aiProvider]} (default)`}
+												disabled={settingsLoading}
+											/>
+										</div>
+										<div className="flex flex-col gap-1.5">
+											<Label htmlFor="ai_api_key" className="text-xs font-medium">API key</Label>
+											<Input
+												id="ai_api_key"
+												type="password"
+												value={aiApiKey}
+												onChange={(e) => setAiApiKey(e.target.value)}
+												placeholder={hasAiKey ? '••••••••' : 'Enter the API key'}
+												autoComplete="new-password"
+												disabled={settingsLoading}
+											/>
+											<p className="text-xs text-muted-foreground">Stored securely, leave blank to keep</p>
+										</div>
+										<div className="flex flex-col gap-1.5">
+											<Label htmlFor="ai_model" className="text-xs font-medium">Model</Label>
+											<Input
+												id="ai_model"
+												value={aiModel}
+												onChange={(e) => setAiModel(e.target.value)}
+												placeholder="Model name, as the provider spells it"
+												disabled={settingsLoading}
+											/>
+										</div>
+									</>
+								)}
 								<div className="flex flex-col gap-1.5">
-									<Label htmlFor="gemini_api_key" className="text-xs font-medium">Gemini API Key</Label>
-									<Input
-										id="gemini_api_key"
-										type="password"
-										value={geminiApiKey}
-										onChange={(e) => setGeminiApiKey(e.target.value)}
-										placeholder={hasGeminiKey ? '••••••••' : 'Enter your Gemini API key'}
-										autoComplete="new-password"
-										disabled={settingsLoading}
-									/>
-									<p className="text-xs text-muted-foreground">Stored securely, leave blank to keep</p>
-								</div>
-								<div className="flex flex-col gap-1.5">
-									<Label htmlFor="ai_server_url" className="text-xs font-medium">AI Server URL</Label>
+									<Label htmlFor="ai_server_url" className="text-xs font-medium">AI server URL</Label>
 									<Input
 										id="ai_server_url"
 										type="url"
@@ -699,6 +749,74 @@ export function SettingsPage() {
 					</div>
 				</div>
 			</div>
+
+			<Dialog open={themeOpen} onOpenChange={setThemeOpen}>
+				<DialogContent className="max-w-3xl max-h-[85vh] flex flex-col gap-4">
+					<DialogHeader>
+						<div className="flex items-start justify-between gap-4 pr-8">
+							<div className="flex flex-col gap-1">
+								<DialogTitle>Choose a theme</DialogTitle>
+								<DialogDescription>{filtered.length} themes</DialogDescription>
+							</div>
+							<div className="flex gap-1.5">
+								{(['all', 'dark', 'light'] as const).map((m) => (
+									<button
+										key={m}
+										type="button"
+										onClick={() => setMode(m)}
+										className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+											mode === m ? 'border-primary text-primary bg-muted' : 'hover:bg-muted'
+										}`}
+									>
+										{m === 'all' ? 'All' : m === 'dark' ? 'Dark' : 'Light'}
+									</button>
+								))}
+							</div>
+						</div>
+					</DialogHeader>
+					<div className="overflow-y-auto min-h-0">
+						<div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+							{filtered.map((theme) => {
+								const isActive = current === theme.name
+								const c = theme.colors
+								return (
+									<button
+										key={theme.name}
+										onClick={() => handleSelect(theme.name)}
+										className={cn(
+											"group relative flex flex-col gap-2 p-2 rounded-lg border-2 transition-all text-left",
+											isActive
+												? "border-primary/40 bg-accent"
+												: "border-border/50 bg-secondary hover:bg-secondary/80"
+										)}
+									>
+										<div
+											className="h-14 w-full rounded-md flex flex-col p-2 gap-1 overflow-hidden"
+											style={{ backgroundColor: c.background }}
+										>
+											<div className="flex gap-1">
+												<div className="h-2 w-2 rounded-full" style={{ backgroundColor: c.primary }} />
+												<div className="h-2 w-2 rounded-full" style={{ backgroundColor: c.accent }} />
+												<div className="h-2 w-2 rounded-full" style={{ backgroundColor: c.destructive }} />
+											</div>
+											<div className="flex-1 flex items-end gap-1">
+												<div className="w-2/3 h-1 rounded-sm" style={{ backgroundColor: c.foreground }} />
+												<div className="w-1/4 h-1 rounded-sm" style={{ backgroundColor: c.mutedForeground }} />
+											</div>
+										</div>
+										<span className="text-xs font-medium truncate px-1 text-muted-foreground group-hover:text-foreground">
+											{theme.label}
+										</span>
+										{isActive && (
+											<Check className="absolute top-2 right-2 h-3.5 w-3.5 text-primary" />
+										)}
+									</button>
+								)
+							})}
+						</div>
+					</div>
+				</DialogContent>
+			</Dialog>
 
 			<AlertDialog open={logoutOpen} onOpenChange={setLogoutOpen}>
 				<AlertDialogContent>

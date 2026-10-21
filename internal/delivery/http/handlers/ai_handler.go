@@ -35,8 +35,8 @@ func (ah *AIHandler) ChatAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gemini := ah.handler.GetGeminiService()
-	if gemini == nil {
+	text := ah.handler.text
+	if text == nil {
 		ah.handler.sendError(w, http.StatusServiceUnavailable, "AI Service not available")
 		return
 	}
@@ -68,7 +68,7 @@ AGENT GUIDELINES:
 		model = "gemma-3-27b-it"
 	}
 
-	answer, err := gemini.GenerateText(context.Background(), model, fullPrompt)
+	answer, err := text.GenerateText(context.Background(), model, fullPrompt)
 	if err != nil {
 		ah.handler.sendError(w, http.StatusInternalServerError, err.Error())
 		return

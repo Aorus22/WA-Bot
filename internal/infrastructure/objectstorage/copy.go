@@ -132,3 +132,21 @@ func copyOne(ctx context.Context, src, dst Store, ref ObjectRef, rep *CopyReport
 	rep.Bytes += got.Size
 	return nil
 }
+
+// ListScopes returns every account + bucket pair the store holds objects in.
+func (s *SQLiteStore) ListScopes(ctx context.Context) ([]ObjectScope, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT account_id, bucket FROM objects ORDER BY account_id, bucket`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []ObjectScope
+	for rows.Next() {
+		var sc ObjectScope
+		if err := rows.Scan(&sc.AccountID, &sc.Bucket); err != nil {
+			return nil, mapErr(err)
+		}
+		out = append(out, sc)
+	}
+	return out, mapErr(rows.Err())
+}

@@ -29,9 +29,12 @@ impl ChatView {
             button
         };
 
+        let controls_room = if self.controls_over_conversation() { crate::components::titlebar::controls_room(cx) } else { 12.0 };
         h_flex()
-            .px_4()
-            .py_2()
+            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+            .flex_shrink_0()
+            .pl_4()
+            .pr(px(controls_room))
             .gap_2()
             .items_center()
             .border_b_1()

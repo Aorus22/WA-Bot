@@ -39,6 +39,7 @@ type Handler struct {
 	cronScheduler  *cron.CronScheduler
 	lua            LuaService
 	gemini         *ai.GeminiService
+	text           *ai.TextRouter
 	hub            any
 	callService    *call.CallService
 	apiKeyRepo     repository.APIKeyRepository
@@ -47,6 +48,7 @@ type Handler struct {
 	historySync    HistorySyncService
 	historyMedia   HistoryMediaService
 	accounts       AccountController
+	backup         BackupService
 }
 
 // AccountController owns the logout -> new QR flow and per-account data.
@@ -121,6 +123,8 @@ func (h *Handler) GetCronScheduler() *cron.CronScheduler {
 func (h *Handler) GetLuaService() LuaService {
 	return h.lua
 }
+
+func (h *Handler) SetTextRouter(t *ai.TextRouter) { h.text = t }
 
 func (h *Handler) GetGeminiService() *ai.GeminiService {
 	return h.gemini

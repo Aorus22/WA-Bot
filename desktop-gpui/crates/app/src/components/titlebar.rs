@@ -96,6 +96,121 @@ pub fn toggle_maximize(window: &mut Window) -> bool {
     !was_max
 }
 
+/// Height of the chat headers that carry the window controls.
+pub const HEADER_HEIGHT: f32 = 52.0;
+const MINIMIZE_WIDTH: f32 = 34.0;
+const MAXIMIZE_WIDTH: f32 = 34.0;
+const CLOSE_WIDTH: f32 = 36.0;
+/// Room the window controls take at the right edge, with their separator.
+pub const CONTROLS_WIDTH: f32 = MINIMIZE_WIDTH + MAXIMIZE_WIDTH + CLOSE_WIDTH + 1.0;
+
+/// Width the window controls take over a header: none in a panel popover,
+/// which has no window chrome.
+pub fn controls_room(cx: &App) -> f32 {
+    if crate::popover::is_popover(cx) {
+        0.0
+    } else {
+        CONTROLS_WIDTH
+    }
+}
+
+/// Empty space that moves the window when dragged.
+pub fn drag_area() -> gpui::Div {
+    div()
+        .flex_1()
+        .h_full()
+        .window_control_area(WindowControlArea::Drag)
+        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+            // The compositor takes over the drag and swallows the release, so a
+            // selection begun by this press would stay armed and grow with the
+            // pointer afterwards.
+            gpui_base::GlobalState::suppress_text_selection(cx);
+            window.defer(cx, |window, cx| gpui_base::TextSelection::clear(window, cx));
+            window.start_window_move();
+        })
+}
+
+/// Minimize, maximize/restore and close.
+fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
+    let theme = cx.app_theme();
+    let is_max = is_window_maximized(window);
+    let framed = window_material::is_framed_window(window);
+    h_flex()
+        .items_center()
+        .h_full()
+        .child(
+            div()
+                .id("btn-min")
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(MINIMIZE_WIDTH))
+                .h_full()
+                .cursor_pointer()
+                .hover(|s| s.bg(theme.muted))
+                .child(svg().data(MINIMIZE_SVG).size(px(12.0)).text_color(theme.foreground))
+                .on_mouse_down(MouseButton::Left, |_, window, _| {
+                    window.minimize_window();
+                }),
+        )
+        .child(
+            div()
+                .id("btn-max")
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(MAXIMIZE_WIDTH))
+                .h_full()
+                .cursor_pointer()
+                .hover(|s| s.bg(theme.muted))
+                .child(
+                    svg()
+                        .data(if is_max { RESTORE_SVG } else { MAXIMIZE_SVG })
+                        .size(px(12.0))
+                        .text_color(theme.foreground),
+                )
+                .on_mouse_down(MouseButton::Left, |_, window, _| {
+                    toggle_maximize(window);
+                }),
+        )
+        .child(
+            div()
+                .id("btn-close")
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(CLOSE_WIDTH))
+                .h_full()
+                .cursor_pointer()
+                .when(framed, |s| s.rounded_tr(px(window_material::WINDOW_CORNER_RADIUS)))
+                .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
+                .child(svg().data(X_SVG).size(px(13.0)).text_color(theme.foreground))
+                .on_mouse_down(MouseButton::Left, |_, window, _| {
+                    window.remove_window();
+                }),
+        )
+}
+
+/// The window controls, set into the top right corner over the page, after a
+/// thin separator. The page's own header leaves `CONTROLS_WIDTH` free there.
+pub fn controls_overlay(window: &Window, cx: &App) -> gpui::AnyElement {
+    if crate::popover::is_popover(cx) {
+        return div().into_any_element();
+    }
+    let theme = cx.app_theme();
+    h_flex()
+        .absolute()
+        .top_0()
+        .right_0()
+        .h(px(HEADER_HEIGHT))
+        .w(px(CONTROLS_WIDTH))
+        .items_center()
+        .occlude()
+        .child(div().w(px(1.0)).h(px(24.0)).bg(theme.border.opacity(0.7)))
+        .child(control_buttons(window, cx))
+        .into_any_element()
+}
+
 #[derive(Default, IntoElement)]
 pub struct AppTitleBar;
 
@@ -113,7 +228,6 @@ impl RenderOnce for AppTitleBar {
         }
         let theme = cx.app_theme();
         let window_transparency = ThemeManager::global(cx).window_transparency;
-        let is_max = is_window_maximized(window);
         let framed = window_material::is_framed_window(window);
 
         h_flex()
@@ -132,104 +246,18 @@ impl RenderOnce for AppTitleBar {
                     .rounded_tr(px(window_material::WINDOW_CORNER_RADIUS))
             })
             // NOTE: Do not set window_control_area(Drag) here so children remain interactive!
-            // Left app label
             .child(
-                h_flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(theme.foreground)
-                            .opacity(0.7)
-                            .child("WA Bot"),
-                    ),
+                h_flex().items_center().gap_2().child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(theme.foreground)
+                        .opacity(0.7)
+                        .child("WA Bot"),
+                ),
             )
-            // Middle drag spacer
-            .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                        // The compositor takes over the drag and swallows the
-                        // release, so a selection begun by this press would
-                        // stay armed and grow with the pointer afterwards.
-                        gpui_base::GlobalState::suppress_text_selection(cx);
-                        window.defer(cx, |window, cx| gpui_base::TextSelection::clear(window, cx));
-                        window.start_window_move();
-                    }),
-            )
-            // Right window controls matching webterm exactly
-            .child(
-                h_flex()
-                    .items_center()
-                    .h_full()
-                    // Minimize button
-                    .child(
-                        div()
-                            .id("btn-min")
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(44.0))
-                            .h_full()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme.muted))
-                            .child(
-                                svg()
-                                    .data(MINIMIZE_SVG)
-                                    .size(px(12.0))
-                                    .text_color(theme.foreground),
-                            )
-                            .on_mouse_down(MouseButton::Left, |_, window, _| {
-                                window.minimize_window();
-                            }),
-                    )
-                    // Maximize/Restore button
-                    .child(
-                        div()
-                            .id("btn-max")
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(44.0))
-                            .h_full()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme.muted))
-                            .child(
-                                svg()
-                                    .data(if is_max { RESTORE_SVG } else { MAXIMIZE_SVG })
-                                    .size(px(12.0))
-                                    .text_color(theme.foreground),
-                            )
-                            .on_mouse_down(MouseButton::Left, |_, window, _| {
-                                toggle_maximize(window);
-                            }),
-                    )
-                    // Close button
-                    .child(
-                        div()
-                            .id("btn-close")
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(46.0))
-                            .h_full()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
-                            .child(
-                                svg()
-                                    .data(X_SVG)
-                                    .size(px(13.0))
-                                    .text_color(theme.foreground),
-                            )
-                            .on_mouse_down(MouseButton::Left, |_, window, _| {
-                                window.remove_window();
-                            }),
-                    ),
-            )
+            .child(drag_area())
+            .child(control_buttons(window, cx))
             .into_any_element()
     }
 }

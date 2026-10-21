@@ -101,6 +101,12 @@ func (p *PerAccountStore) existing(account string) (*SQLiteStore, error) {
 	return p.store(account)
 }
 
+// Existing returns the store of an account, or nil when the account has no
+// database yet. Backups read through it.
+func (p *PerAccountStore) Existing(account string) (*SQLiteStore, error) {
+	return p.existing(account)
+}
+
 // DropAccount closes and deletes an account's database. The "_pending"
 // namespace is cleared this way on every QR phase.
 func (p *PerAccountStore) DropAccount(account string) error {

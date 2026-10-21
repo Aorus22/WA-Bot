@@ -202,7 +202,7 @@ impl ChatView {
         cx.spawn(move |_this: WeakEntity<Self>, _cx: &mut AsyncApp| async move {
             let client = HttpClient::new(&base_url);
             let _ = TOKIO_RT
-                .spawn(async move { client.mark_as_read(&target).await })
+                .spawn(async move { client.mark_as_read_explicit(&target).await })
                 .await;
         })
         .detach();

@@ -106,6 +106,19 @@ func checkDatabase(ctx context.Context, path string, sample int) (objects, verif
 	return objects, verified, nil
 }
 
+// IntegrityCheck runs PRAGMA integrity_check on the live database. It only
+// reads, so it is safe while the store serves requests.
+func (s *SQLiteStore) IntegrityCheck(ctx context.Context) error {
+	var verdict string
+	if err := s.db.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&verdict); err != nil {
+		return mapErr(err)
+	}
+	if verdict != "ok" {
+		return fmt.Errorf("%w: integrity_check: %s", ErrCorruptData, verdict)
+	}
+	return nil
+}
+
 // Check verifies the database file at path without modifying it: integrity and
 // a sample of object checksums.
 func Check(ctx context.Context, path string, sample int) (objects, verified int, err error) {

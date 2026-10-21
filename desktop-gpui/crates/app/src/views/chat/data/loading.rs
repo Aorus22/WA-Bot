@@ -41,9 +41,10 @@ impl ChatView {
     /// Select a chat, mark as read, and load its messages
     pub fn select_chat(&mut self, chat_id: String, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_chat_id = Some(chat_id.clone());
-        // One-to-one typing indicators only arrive for chats we subscribed to;
-        // groups send them anyway.
-        if !chat_id.ends_with("@g.us") {
+        // WhatsApp only sends typing indicators while the account is online, and
+        // one-to-one chats also need a subscription. The backend handles both,
+        // groups just need the online part.
+        {
             let (base_url, target) = (Self::compose_base_url(cx), chat_id.clone());
             // WhatsApp expires the subscription and the backend goes offline again
             // after a while, so renew both while the chat stays open.
@@ -110,10 +111,10 @@ impl ChatView {
         if cx.has_global::<ChatStore>() {
             let store = ChatStore::global_mut(cx);
             store.active_chat_id = Some(chat_id.clone());
-            store.mark_chat_read(&chat_id);
         }
 
-        // Mark as read in backend
+        // Mark as read in the backend; its chat_update clears the badge, unless
+        // read receipts are off, which keeps the chat unread.
         let base_url = if cx.has_global::<AuthState>() {
             AuthState::global(cx).base_url.clone()
         } else {

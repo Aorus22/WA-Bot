@@ -192,7 +192,8 @@ fn main() {
                 } else {
                     WindowOptions {
                         window_bounds: Some(window_bounds),
-                        window_min_size: Some(size(px(800.0), px(540.0))),
+                        // Small enough for GNOME to tile the window to half of a laptop screen.
+                        window_min_size: Some(size(px(480.0), px(420.0))),
                         app_id: Some("wa-bot".to_string()),
                         window_background: window_material::background_appearance(
                             ThemeManager::global(cx).window_blur_enabled,

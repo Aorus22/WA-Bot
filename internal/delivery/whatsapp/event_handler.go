@@ -19,6 +19,7 @@ import (
 	waTypes "go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
@@ -1109,9 +1110,10 @@ func (h *WhatsAppEventHandler) handleMessage(evt *events.Message) {
 		evt.Message.GetContactMessage() != nil ||
 		evt.Message.GetContactsArrayMessage() != nil ||
 		evt.Message.GetViewOnceMessage().GetMessage() != nil ||
-		evt.Message.GetViewOnceMessageV2().GetMessage() != nil
+		evt.Message.GetViewOnceMessageV2().GetMessage() != nil ||
+		evt.Message.GetViewOnceMessageV2Extension().GetMessage() != nil
 	if messageText == "" && !hasPayload {
-		fmt.Printf("[DEBUG] Skipping empty message: %s (chat=%s)\n", evt.Info.ID, evt.Info.Chat.String())
+		fmt.Printf("[DEBUG] Skipping empty message: %s (chat=%s) fields=%s\n", evt.Info.ID, evt.Info.Chat.String(), messageFieldNames(evt.Message))
 		return
 	}
 
@@ -1220,6 +1222,9 @@ func (h *WhatsAppEventHandler) showMessage(evt *events.Message, senderJID waType
 		// regular media branches below handle the inner image/video.
 		payload := evt.Message
 		if inner := payload.GetViewOnceMessageV2().GetMessage(); inner != nil {
+			payload = inner
+			extra.ViewOnce = &repository.ViewOnceMeta{MediaType: "image", Viewed: false}
+		} else if inner := payload.GetViewOnceMessageV2Extension().GetMessage(); inner != nil {
 			payload = inner
 			extra.ViewOnce = &repository.ViewOnceMeta{MediaType: "image", Viewed: false}
 		} else if inner := payload.GetViewOnceMessage().GetMessage(); inner != nil {
@@ -1923,6 +1928,29 @@ func (h *WhatsAppEventHandler) handleChannelLiveUpdate(evt *events.NewsletterLiv
 	})
 }
 
+// lidToPhone maps a @lid JID to the phone JID the app files the chat under.
+func (h *WhatsAppEventHandler) lidToPhone(jid string) string {
+	if !strings.HasSuffix(jid, "@lid") || h.waClient == nil {
+		return jid
+	}
+	core := h.waClient.CoreClient()
+	if core == nil || core.Store == nil || core.Store.LIDs == nil {
+		return jid
+	}
+	parsed, err := waTypes.ParseJID(jid)
+	if err != nil {
+		return jid
+	}
+	phone, err := core.Store.LIDs.GetPNForLID(context.Background(), parsed)
+	if err != nil || phone.IsEmpty() {
+		return jid
+	}
+	if h.msgStore != nil {
+		_ = h.msgStore.SaveLIDMapping(parsed.ToNonAD().String(), phone.ToNonAD().String())
+	}
+	return phone.ToNonAD().String()
+}
+
 // handleChatPresence broadcasts incoming typing/recording indicators.
 func (h *WhatsAppEventHandler) handleChatPresence(evt *events.ChatPresence) {
 	if h.httpServer == nil {
@@ -1945,9 +1973,13 @@ func (h *WhatsAppEventHandler) handleChatPresence(evt *events.ChatPresence) {
 	senderName := ""
 	if h.msgStore != nil {
 		chatID = h.msgStore.ResolveChatID(chatID)
-		if sender != "" {
-			senderName, _ = h.msgStore.GetContactName(sender)
-		}
+		sender = h.msgStore.ResolveChatID(sender)
+	}
+	// The app's own LID table can lag behind WhatsApp's; its store is authoritative.
+	chatID = h.lidToPhone(chatID)
+	sender = h.lidToPhone(sender)
+	if h.msgStore != nil && sender != "" {
+		senderName, _ = h.msgStore.GetContactName(sender)
 	}
 	h.httpServer.BroadcastMessage("chat_presence", map[string]interface{}{
 		"chatId":     chatID,
@@ -2093,4 +2125,15 @@ func (h *WhatsAppEventHandler) restoreVideoThumbnail(messageID string, video *wa
 	}
 	extra.Thumbnail = "/media/" + name
 	_ = h.msgStore.UpdateMessageExtra(messageID, extra)
+}
+
+// messageFieldNames lists which top-level fields a message carries, so skipped
+// messages can be told apart in the log.
+func messageFieldNames(msg *waProto.Message) string {
+	var names []string
+	msg.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+		names = append(names, string(fd.Name()))
+		return true
+	})
+	return strings.Join(names, ",")
 }

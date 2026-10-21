@@ -86,6 +86,12 @@ pub struct ChatView {
     pub chat_context_menu: Option<ChatContextMenu>,
     /// Dropdown opened from a header button.
     pub header_menu: Option<HeaderMenu>,
+    /// Where the pointer went down on the header's avatar and name: a click
+    /// there opens the info sheet, a drag moves the window.
+    pub(crate) header_press: Option<Point<Pixels>>,
+    /// The header menu a click outside it just closed, and when. The button that
+    /// opened it sees that same click right after, and must not reopen it.
+    pub(crate) header_menu_dismissed: Option<(HeaderMenuKind, std::time::Instant)>,
     /// When set, the contact picker adds members to this group instead of creating one.
     pub add_members_for: Option<String>,
     pub is_exporting_chat: bool,
@@ -281,6 +287,8 @@ impl ChatView {
             is_forwarding: false,
             chat_context_menu: None,
             header_menu: None,
+            header_press: None,
+            header_menu_dismissed: None,
             add_members_for: None,
             is_exporting_chat: false,
             select_mode: false,
@@ -466,7 +474,7 @@ impl Render for ChatView {
             });
 
         // Layout: pages (list OR conversation) or sidebar (list beside it).
-        let layout = layout_pref::effective(cx);
+        let layout = layout_pref::effective_for_width(cx, f32::from(window.viewport_size().width), self.sidebar_width);
         let pages = layout == LayoutKind::Pages;
         let has_selection = selected_chat.is_some();
         let show_list = if pages {

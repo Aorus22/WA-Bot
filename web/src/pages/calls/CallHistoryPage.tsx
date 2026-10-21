@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import {
 	Phone,
-	Video,
 	PhoneMissed,
 	PhoneOff,
 	ArrowDownLeft,
@@ -21,7 +20,7 @@ import { subscribeWS } from "@/lib/ws-bus"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
 	Drawer,
 	DrawerContent,
@@ -52,10 +51,20 @@ function isMissed(log: CallLog): boolean {
 }
 
 function displayName(log: CallLog): string {
+	if (log.peer_name?.trim()) return log.peer_name.trim()
 	if (log.group_jid) return log.group_jid
 	const target = log.target || "Unknown"
-	// Strip the @s.whatsapp.net / @g.us suffix for a cleaner label
-	return target.split("@")[0] || target
+	// No name known: the number, without the @server suffix or the device ("123:75@lid" is 123).
+	return (target.split("@")[0] || target).split(":")[0]
+}
+
+/** The chat id the avatar is fetched under. */
+function avatarId(log: CallLog): string {
+	return log.peer_id || log.group_jid || log.target || ""
+}
+
+function avatarUrl(log: CallLog): string {
+	return api.mediaURL(`/avatar/${encodeURIComponent(avatarId(log))}`) ?? ""
 }
 
 function initials(log: CallLog): string {
@@ -163,28 +172,12 @@ function CallDetail({
 		<div className="flex flex-col h-full">
 			{/* Hero */}
 			<div className="flex flex-col items-center gap-3 pt-6 pb-5 px-6 text-center">
-				<div
-					className={cn(
-						"relative flex items-center justify-center rounded-full",
-						missed ? "bg-destructive/10" : "bg-primary/10",
-						isVideo ? "h-20 w-20" : "h-16 w-16"
-					)}
-				>
-					{missed ? (
-						<PhoneMissed className="h-8 w-8 text-destructive" />
-					) : (
-						<Avatar className="h-16 w-16">
-							<AvatarFallback className="bg-primary/10 text-primary font-bold text-xl">
-								{initials(log)}
-							</AvatarFallback>
-						</Avatar>
-					)}
-					{isVideo && !missed && (
-						<div className="absolute -bottom-1 -right-1 bg-primary text-primary-foreground rounded-full p-1.5 ring-2 ring-background">
-							<Video className="h-3.5 w-3.5" />
-						</div>
-					)}
-				</div>
+				<Avatar className="h-16 w-16">
+					<AvatarImage src={avatarUrl(log)} />
+					<AvatarFallback className="bg-primary/10 text-primary font-bold text-xl">
+						{initials(log)}
+					</AvatarFallback>
+				</Avatar>
 
 				<div className="space-y-1">
 					<h3 className="text-lg font-bold tracking-tight">{displayName(log)}</h3>
@@ -262,26 +255,26 @@ function CallRow({
 				<div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r-full" />
 			)}
 
-			{/* Direction / missed indicator */}
-			<div
-				className={cn(
-					"relative flex-shrink-0 flex items-center justify-center rounded-full",
-					missed ? "bg-destructive/10" : "bg-muted",
-					isVideo ? "h-12 w-12" : "h-11 w-11"
-				)}
-			>
-				{missed ? (
-					<PhoneMissed className="h-5 w-5 text-destructive" />
-				) : log.direction === "incoming" ? (
-					<ArrowDownLeft className="h-5 w-5 text-primary" />
-				) : (
-					<ArrowUpRight className="h-5 w-5 text-primary" />
-				)}
-				{isVideo && !missed && (
-					<div className="absolute -bottom-0.5 -right-0.5 bg-background rounded-full p-0.5 ring-1 ring-border/40">
-						<Video className="h-3 w-3 text-muted-foreground" />
-					</div>
-				)}
+			{/* Who it was with, with the way the call went at the corner */}
+			<div className="relative flex-shrink-0 h-11 w-11">
+				<Avatar className="h-11 w-11">
+					<AvatarImage src={avatarUrl(log)} />
+					<AvatarFallback className="bg-muted font-bold text-sm">{initials(log)}</AvatarFallback>
+				</Avatar>
+				<div
+					className={cn(
+						"absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full ring-2 ring-background text-white",
+						missed ? "bg-destructive" : "bg-primary"
+					)}
+				>
+					{missed ? (
+						<PhoneMissed className="h-2.5 w-2.5" />
+					) : log.direction === "incoming" ? (
+						<ArrowDownLeft className="h-2.5 w-2.5" />
+					) : (
+						<ArrowUpRight className="h-2.5 w-2.5" />
+					)}
+				</div>
 			</div>
 
 			{/* Name + meta */}
@@ -453,8 +446,6 @@ export function CallHistoryPage() {
 		return Array.from(map.entries())
 	}, [visibleLogs])
 
-	const totalCount = logs.length
-
 	return (
 		<div className="flex flex-col h-full max-h-full bg-background overflow-hidden">
 			{/* Header */}
@@ -462,7 +453,6 @@ export function CallHistoryPage() {
 				<div className="flex items-center justify-between">
 					<div className="flex items-baseline gap-2.5">
 						<h2 className="text-2xl font-bold tracking-tight">Calls</h2>
-						<span className="text-sm text-muted-foreground">{totalCount}</span>
 					</div>
 					{error && (
 						<Button variant="ghost" size="sm" onClick={() => load(true)}>

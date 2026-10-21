@@ -158,6 +158,9 @@ impl CallManager {
             ended_at: Some(now),
             duration_ms: Some(duration_ms),
             created_at: now,
+            // The history list fills these in from the backend.
+            peer_id: String::new(),
+            peer_name: String::new(),
         };
 
         self.call_history.insert(0, log.clone());

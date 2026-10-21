@@ -31,7 +31,7 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_component::switch::Switch;
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::{
-    HistoryMediaRequest, HistoryMediaStart, HistoryMediaStatus, HistorySyncRequest, HistorySyncStart, HistorySyncStatus,
+    BackupEntry, BackupStatus, HistoryMediaRequest, HistoryMediaStart, HistoryMediaStatus, HistorySyncRequest, HistorySyncStart, HistorySyncStatus,
     StorageUsage,
 };
 use wabot_backend_client::ClientError;
@@ -73,6 +73,9 @@ pub enum UpdateStatus {
 pub enum EditField {
     GeminiApiKey,
     AiServerUrl,
+    AiBaseUrl,
+    AiApiKey,
+    AiModel,
     TtsDefaultVoice,
     FishAudioKey,
     FishAudioModel,
@@ -92,6 +95,8 @@ pub struct EditModalState {
 pub struct SettingsView {
     pub theme_mode_filter: String,
     pub show_theme_mode_picker: bool,
+    pub show_theme_modal: bool,
+    pub show_history_depth_picker: bool,
     window_transparency_slider: Entity<SliderState>,
     _window_transparency_subscription: Subscription,
     ui_font_scale_slider: Entity<SliderState>,
@@ -107,6 +112,13 @@ pub struct SettingsView {
     pub has_fish_key: bool,
     pub gemini_api_key_input: String,
     pub ai_server_url: String,
+    /// "gemini", "openai" (OpenAI-compatible) or "claude" (Claude-compatible).
+    pub ai_provider: String,
+    pub show_ai_provider_picker: bool,
+    pub ai_base_url: String,
+    pub ai_model: String,
+    pub ai_api_key_input: String,
+    pub has_ai_key: bool,
     pub read_receipts: bool,
     pub contact_name_mode: String,
 
@@ -139,6 +151,13 @@ pub struct SettingsView {
     /// Sizes of the chat and media databases.
     pub storage_usage: Option<StorageUsage>,
     pub is_restarting_backend: bool,
+
+    // Backup
+    pub backup_folder: Option<String>,
+    pub backup_status: Option<BackupStatus>,
+    pub backups: Vec<BackupEntry>,
+    pub is_backing_up: bool,
+    pub backup_polling: bool,
 
     // App updates (GitHub Releases)
     pub update_status: UpdateStatus,
@@ -243,6 +262,8 @@ impl SettingsView {
         let mut view = Self {
             theme_mode_filter,
             show_theme_mode_picker: false,
+            show_theme_modal: false,
+            show_history_depth_picker: false,
             window_transparency_slider,
             _window_transparency_subscription: transparency_subscription,
             ui_font_scale_slider,
@@ -257,6 +278,12 @@ impl SettingsView {
             has_fish_key: false,
             gemini_api_key_input: String::new(),
             ai_server_url: "http://localhost:8981".to_string(),
+            ai_provider: "gemini".to_string(),
+            show_ai_provider_picker: false,
+            ai_base_url: String::new(),
+            ai_model: String::new(),
+            ai_api_key_input: String::new(),
+            has_ai_key: false,
             read_receipts: true,
             contact_name_mode: "profile".to_string(),
 
@@ -281,6 +308,12 @@ impl SettingsView {
             storage_usage: None,
             is_restarting_backend: false,
 
+            backup_folder: None,
+            backup_status: None,
+            backups: Vec::new(),
+            is_backing_up: false,
+            backup_polling: false,
+
             update_status: UpdateStatus::Idle,
             update_progress: Arc::new((AtomicU64::new(0), AtomicU64::new(0))),
 
@@ -297,6 +330,7 @@ impl SettingsView {
         view.load_history_status(cx);
         view.load_media_status(cx);
         view.load_storage_usage(cx);
+        view.load_backup(cx);
 
         view
     }
@@ -328,6 +362,10 @@ impl SettingsView {
                                 this.has_gemini_key = settings_resp.has_gemini_key.unwrap_or(false);
                                 this.has_fish_key = settings_resp.has_fish_key.unwrap_or(false);
                                 this.ai_server_url = settings_resp.ai_server_url().to_string();
+                                this.has_ai_key = settings_resp.has_ai_key.unwrap_or(false);
+                                this.ai_provider = settings_resp.ai_provider().to_string();
+                                this.ai_base_url = settings_resp.ai_base_url().to_string();
+                                this.ai_model = settings_resp.ai_model().to_string();
                                 this.read_receipts = settings_resp.read_receipts();
                                 this.contact_name_mode = settings_resp.contact_name_mode().to_string();
                                 this.tts_provider = settings_resp.call_tts_provider().to_string();
@@ -378,7 +416,7 @@ impl SettingsView {
         .detach();
     }
 
-    fn backend_base_url(cx: &App) -> String {
+    pub(crate) fn backend_base_url(cx: &App) -> String {
         if cx.has_global::<AuthState>() {
             AuthState::global(cx).base_url.clone()
         } else {
@@ -801,15 +839,18 @@ impl SettingsView {
                 .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child(label))
         };
 
+        // A beta follows the rolling beta release; the stable updater would only
+        // offer to swap it for the stable build.
+        let is_beta = updater::CURRENT_VERSION.contains("-beta");
         let busy = matches!(status, UpdateStatus::Checking | UpdateStatus::Downloading(_));
         let mut actions = h_flex().gap_2();
-        if !busy && !matches!(status, UpdateStatus::ReadyToRestart) {
+        if !is_beta && !busy && !matches!(status, UpdateStatus::ReadyToRestart) {
             actions = actions.child(
                 button("update-check", "Check for updates")
                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.check_for_updates(cx))),
             );
         }
-        if let UpdateStatus::Available(info) = &status {
+        if let (false, UpdateStatus::Available(info)) = (is_beta, &status) {
             if appimage && info.appimage_url.is_some() && info.sums_url.is_some() {
                 let i = info.clone();
                 actions = actions.child(button("update-install", "Update now").on_mouse_down(
@@ -839,7 +880,9 @@ impl SettingsView {
                 .text_color(text_color)
                 .child(format!("Version {}", updater::CURRENT_VERSION)),
         );
-        if !line.is_empty() {
+        if is_beta {
+            text = text.child(div().text_xs().text_color(muted_text).child("Beta build. Install a newer beta to update."));
+        } else if !line.is_empty() {
             let color = if is_error { gpui::red() } else { muted_text };
             text = text.child(div().text_xs().text_color(color).child(line));
         }
@@ -1061,6 +1104,12 @@ impl SettingsView {
 
         let mut data = HashMap::new();
         data.insert("ai_server_url".to_string(), self.ai_server_url.trim().to_string());
+        data.insert("ai_provider".to_string(), self.ai_provider.clone());
+        data.insert("ai_base_url".to_string(), self.ai_base_url.trim().to_string());
+        data.insert("ai_model".to_string(), self.ai_model.trim().to_string());
+        if !self.ai_api_key_input.trim().is_empty() {
+            data.insert("ai_api_key".to_string(), self.ai_api_key_input.trim().to_string());
+        }
         if !self.gemini_api_key_input.trim().is_empty() {
             data.insert("gemini_api_key".to_string(), self.gemini_api_key_input.trim().to_string());
         }
@@ -1079,7 +1128,9 @@ impl SettingsView {
                             match res {
                                 Ok(Ok(resp)) => {
                                     this.has_gemini_key = resp.has_gemini_key.unwrap_or(this.has_gemini_key);
+                                    this.has_ai_key = resp.has_ai_key.unwrap_or(this.has_ai_key);
                                     this.gemini_api_key_input.clear();
+                                    this.ai_api_key_input.clear();
                                     toast::success("AI configuration saved", cx);
                                 }
                                 _ => {
@@ -1252,6 +1303,35 @@ impl SettingsView {
                 false,
                 vec![("Default Local", "http://localhost:8981")],
             ),
+            EditField::AiBaseUrl => (
+                "API base URL".to_string(),
+                "Where requests go. Leave blank for the provider's own address.".to_string(),
+                self.ai_base_url.clone(),
+                false,
+                if self.ai_provider == "claude" {
+                    vec![("Anthropic", "https://api.anthropic.com")]
+                } else {
+                    vec![
+                        ("OpenAI", "https://api.openai.com/v1"),
+                        ("OpenRouter", "https://openrouter.ai/api/v1"),
+                        ("Ollama (local)", "http://localhost:11434/v1"),
+                    ]
+                },
+            ),
+            EditField::AiApiKey => (
+                "API key".to_string(),
+                "Stored in the backend database. Leave blank to keep the existing key.".to_string(),
+                self.ai_api_key_input.clone(),
+                true,
+                vec![],
+            ),
+            EditField::AiModel => (
+                "Model".to_string(),
+                "Model name sent with every request, as the provider spells it.".to_string(),
+                self.ai_model.clone(),
+                false,
+                vec![],
+            ),
             EditField::TtsDefaultVoice => (
                 "Default Voice".to_string(),
                 "Voice name used for incoming call speech synthesis.".to_string(),
@@ -1323,6 +1403,9 @@ impl SettingsView {
             match modal.field {
                 EditField::GeminiApiKey => self.gemini_api_key_input = modal.value,
                 EditField::AiServerUrl => self.ai_server_url = modal.value,
+                EditField::AiBaseUrl => self.ai_base_url = modal.value,
+                EditField::AiApiKey => self.ai_api_key_input = modal.value,
+                EditField::AiModel => self.ai_model = modal.value,
                 EditField::TtsDefaultVoice => self.tts_default_voice = modal.value,
                 EditField::FishAudioKey => self.fish_audio_key_input = modal.value,
                 EditField::FishAudioModel => self.fish_audio_model = modal.value,
@@ -1372,559 +1455,6 @@ impl SettingsView {
     }
 }
 
-impl SettingsView {
-    #[allow(clippy::too_many_arguments)]
-    fn render_history_card(
-        &mut self,
-        cx: &mut Context<Self>,
-        text_color: Hsla,
-        muted_text: Hsla,
-        primary_color: Hsla,
-        secondary_bg: Hsla,
-        tag_bg: Hsla,
-        border_color: Hsla,
-    ) -> Div {
-        let state = self.history_status.as_ref().map(|st| st.state.clone()).unwrap_or_default();
-        let active = history_sync::is_active(&state) || self.is_syncing_history;
-        let stopping = state == "cancelling";
-        let resumable = !active && self.history_status.as_ref().is_some_and(|st| st.resumable);
-        let depth = self.history_depth;
-        let retry_finished = self.history_retry_finished;
-
-        // The depth choices.
-        let chips = SyncDepth::ALL.into_iter().map(|choice| {
-            let selected = choice == depth;
-            div()
-                .px_2p5()
-                .py_1()
-                .rounded_md()
-                .border_1()
-                .border_color(if selected { primary_color } else { border_color })
-                .bg(if selected { tag_bg } else { gpui::transparent_black() })
-                .text_xs()
-                .text_color(if selected { primary_color } else { text_color })
-                .when(!active, |d| d.cursor_pointer().hover(|s| s.bg(secondary_bg)))
-                .child(choice.label())
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                    if !this.is_syncing_history {
-                        this.history_depth = choice;
-                        cx.notify();
-                    }
-                }))
-        });
-
-        // Start, or stop while one runs; a stopped one can be resumed.
-        let button = |label: &'static str, primary: bool| {
-            div()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .bg(if primary { primary_color } else { tag_bg })
-                .border_1()
-                .border_color(if primary { primary_color } else { border_color })
-                .cursor_pointer()
-                .hover(|s| s.opacity(0.85))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(if primary { rgb(0xffffff).into() } else { text_color })
-                        .child(label),
-                )
-        };
-        let action = if active {
-            div()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .border_1()
-                .border_color(rgba(0xef444460))
-                .when(!stopping, |d| d.cursor_pointer().hover(|s| s.bg(rgba(0xef444440))))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(0xef4444))
-                        .child(if stopping { "Stopping…" } else { "Stop sync" }),
-                )
-                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                    this.cancel_history_sync(cx);
-                }))
-        } else if resumable {
-            div()
-                .flex()
-                .flex_row()
-                .gap_2()
-                .child(button("Start over", false).on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                    this.start_history_sync(false, cx);
-                })))
-                .child(button("Resume", true).on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                    this.start_history_sync(true, cx);
-                })))
-        } else {
-            div().child(button("Sync history", false).on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                this.start_history_sync(false, cx);
-            })))
-        };
-
-        let mut card = div()
-            .px_4()
-            .py_4()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_start()
-                    .justify_between()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(text_color)
-                                    .child("Chat history"),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted_text)
-                                    .child("Load older messages from your phone. Existing messages are never removed."),
-                            ),
-                    )
-                    .child(div().flex_none().child(action)),
-            )
-            .child(div().flex().flex_row().flex_wrap().gap_1p5().children(chips))
-            .child(div().text_xs().text_color(muted_text).child(depth.hint()))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_start()
-                    .gap_2()
-                    .when(!active, |d| d.cursor_pointer())
-                    .child(
-                        div()
-                            .mt_0p5()
-                            .size(px(14.0))
-                            .flex_none()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(if retry_finished { primary_color } else { border_color })
-                            .bg(if retry_finished { primary_color } else { gpui::transparent_black() })
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when(retry_finished, |d| {
-                                d.child(div().text_color(rgb(0xffffff)).text_size(px(10.0)).child("✓"))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(text_color)
-                                    .child("Also retry chats that are already synced"),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted_text)
-                                    .child(history_sync::finished_chats_text(self.history_status.as_ref())),
-                            ),
-                    )
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                        if !this.is_syncing_history {
-                            this.history_retry_finished = !this.history_retry_finished;
-                            cx.notify();
-                        }
-                    })),
-            );
-
-        let Some(st) = self.history_status.clone() else {
-            return card;
-        };
-        let ran = st.started_at.is_some();
-        if !active && !ran {
-            return card;
-        }
-
-        // Headline: state and chats done; then a bar with the chats being worked
-        // on drawn after the finished ones; then how long it ran and how long is left.
-        let fraction = history_sync::progress_fraction(&st);
-        let working = history_sync::in_progress_fraction(&st);
-        let mut headline = vec![history_sync::state_label(&st.state).to_string()];
-        headline.extend(history_sync::chats_text(&st));
-        let timing: Vec<String> = history_sync::elapsed_text(&st)
-            .into_iter()
-            .chain(history_sync::eta_text(&st))
-            .collect();
-
-        let mut detail = div().flex().flex_col().gap_1p5().child(
-            div()
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(text_color)
-                .child(headline.join(" · ")),
-        );
-        if active || st.chats_total > 0 {
-            detail = detail.child(
-                div()
-                    .w_full()
-                    .h(px(6.0))
-                    .flex()
-                    .flex_row()
-                    .rounded_full()
-                    .bg(tag_bg)
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative(if active && fraction < 0.01 { 0.01 } else { fraction }))
-                            .bg(primary_color),
-                    )
-                    .child(div().h_full().w(relative(working)).bg(primary_color.opacity(0.4))),
-            );
-        }
-        if !timing.is_empty() {
-            detail = detail.child(div().text_xs().text_color(muted_text).child(timing.join(" · ")));
-        }
-        if active {
-            for current in st.current.iter().take(3) {
-                detail = detail.child(
-                    div()
-                        .text_xs()
-                        .text_color(muted_text)
-                        .child(format!("Now: {}", history_sync::current_text(current))),
-                );
-            }
-            if st.current.is_empty() && st.chats_total > 0 {
-                detail = detail.child(div().text_xs().text_color(muted_text).child("Now: picking the next chat…"));
-            }
-        }
-        if let Some(note) = history_sync::paused_text(&st) {
-            detail = detail.child(div().text_xs().text_color(rgb(0xd97706)).child(note));
-        }
-        detail = detail.child(div().text_xs().text_color(muted_text).child(history_sync::result_text(&st)));
-        if let Some(note) = history_sync::staged_text(&st) {
-            detail = detail.child(div().text_xs().text_color(muted_text).child(note));
-        }
-        if let Some(error) = history_sync::error_text(&st) {
-            detail = detail.child(div().text_xs().text_color(rgb(0xef4444)).child(error));
-        }
-        card = card.child(detail);
-        card
-    }
-
-    /// The "Chat media" section: kinds to download, start/stop/resume, and progress.
-    fn render_media_section(
-        &mut self,
-        cx: &mut Context<Self>,
-        text_color: Hsla,
-        muted_text: Hsla,
-        primary_color: Hsla,
-        secondary_bg: Hsla,
-        tag_bg: Hsla,
-        border_color: Hsla,
-    ) -> Div {
-        let state = self.media_status.as_ref().map(|st| st.state.clone()).unwrap_or_default();
-        let active = history_media::is_active(&state) || self.is_downloading_media;
-        let stopping = state == "cancelling";
-        let resumable = !active && self.media_status.as_ref().is_some_and(|st| st.resumable);
-        let nothing_chosen = self.media_kinds.is_empty();
-        let retry = self.media_retry_unavailable;
-        let ask_phone = self.media_ask_phone;
-
-        let chips = history_media::MEDIA_KINDS.into_iter().map(|kind| {
-            let selected = self.media_kinds.iter().any(|k| k == kind.id);
-            let label = match self.media_status.as_ref() {
-                Some(st) => format!("{} · {}", kind.label, history_media::files_of_kind(Some(st), kind.id, ask_phone)),
-                None => kind.label.to_string(),
-            };
-            div()
-                .px_2p5()
-                .py_1()
-                .rounded_md()
-                .border_1()
-                .border_color(if selected { primary_color } else { border_color })
-                .bg(if selected { tag_bg } else { gpui::transparent_black() })
-                .text_xs()
-                .text_color(if selected { primary_color } else { text_color })
-                .when(!active, |d| d.cursor_pointer().hover(|s| s.bg(secondary_bg)))
-                .child(label)
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                    if this.is_downloading_media {
-                        return;
-                    }
-                    if let Some(at) = this.media_kinds.iter().position(|k| k == kind.id) {
-                        this.media_kinds.remove(at);
-                    } else {
-                        this.media_kinds.push(kind.id.to_string());
-                    }
-                    cx.notify();
-                }))
-        });
-
-        let button = |label: &'static str, primary: bool, enabled: bool| {
-            div()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .bg(if primary { primary_color } else { tag_bg })
-                .border_1()
-                .border_color(if primary { primary_color } else { border_color })
-                .when(enabled, |d| d.cursor_pointer().hover(|s| s.opacity(0.85)))
-                .when(!enabled, |d| d.opacity(0.5))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(if primary { rgb(0xffffff).into() } else { text_color })
-                        .child(label),
-                )
-        };
-        let action = if active {
-            div()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .border_1()
-                .border_color(rgba(0xef444460))
-                .when(!stopping, |d| d.cursor_pointer().hover(|s| s.bg(rgba(0xef444440))))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(0xef4444))
-                        .child(if stopping { "Stopping…" } else { "Stop download" }),
-                )
-                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                    this.cancel_history_media(cx);
-                }))
-        } else if resumable {
-            div()
-                .flex()
-                .flex_row()
-                .gap_2()
-                .child(button("Start over", false, !nothing_chosen).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| this.start_history_media(false, cx)),
-                ))
-                .child(button("Resume", true, true).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| this.start_history_media(true, cx)),
-                ))
-        } else {
-            div().child(button("Download media", false, !nothing_chosen).on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.start_history_media(false, cx)),
-            ))
-        };
-
-        let mut section = div()
-            .px_4()
-            .py_4()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_start()
-                    .justify_between()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(text_color)
-                                    .child("Chat media"),
-                            )
-                            .child(div().text_xs().text_color(muted_text).child(
-                                "History messages only keep their text. Download their photos, stickers and files \
-                                 into the app so they open instantly.",
-                            ))
-                            .children(history_media::usage_text(self.storage_usage.as_ref()).map(|usage| {
-                                div().text_xs().text_color(muted_text).child(format!("Storage used: {usage}"))
-                            })),
-                    )
-                    .child(div().flex_none().child(action)),
-            )
-            .child(div().flex().flex_row().flex_wrap().gap_1p5().children(chips))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(muted_text)
-                    .child(history_media::chosen_text(self.media_status.as_ref(), &self.media_kinds, self.media_ask_phone)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_start()
-                    .gap_2()
-                    .when(!active, |d| d.cursor_pointer())
-                    .child(
-                        div()
-                            .mt_0p5()
-                            .size(px(14.0))
-                            .flex_none()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(if ask_phone { primary_color } else { border_color })
-                            .bg(if ask_phone { primary_color } else { gpui::transparent_black() })
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when(ask_phone, |d| {
-                                d.child(div().text_color(rgb(0xffffff)).text_size(px(10.0)).child("✓"))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(text_color)
-                                    .child("Ask my phone for media that expired"),
-                            )
-                            .child(div().text_xs().text_color(muted_text).child(
-                                "Your phone must be online with WhatsApp open. Only files still stored on the phone \
-                                 can be recovered; this can take a while.",
-                            )),
-                    )
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                        if !this.is_downloading_media {
-                            this.media_ask_phone = !this.media_ask_phone;
-                            cx.notify();
-                        }
-                    })),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_start()
-                    .gap_2()
-                    .when(!active, |d| d.cursor_pointer())
-                    .child(
-                        div()
-                            .mt_0p5()
-                            .size(px(14.0))
-                            .flex_none()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(if retry { primary_color } else { border_color })
-                            .bg(if retry { primary_color } else { gpui::transparent_black() })
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when(retry, |d| {
-                                d.child(div().text_color(rgb(0xffffff)).text_size(px(10.0)).child("✓"))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(text_color)
-                                    .child("Also retry media that was no longer available"),
-                            )
-                            .child(div().text_xs().text_color(muted_text).child(
-                                "WhatsApp deletes old media from its servers; files found to be gone are skipped unless this is on.",
-                            )),
-                    )
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                        if !this.is_downloading_media {
-                            this.media_retry_unavailable = !this.media_retry_unavailable;
-                            cx.notify();
-                        }
-                    })),
-            );
-
-        let Some(st) = self.media_status.clone() else {
-            return section;
-        };
-        if !active && st.started_at.is_none() {
-            return section;
-        }
-        let (done, gone, failed) = history_media::progress_shares(&st);
-        let mut detail = div().flex().flex_col().gap_1p5().child(
-            div()
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(text_color)
-                .child(history_media::headline(&st)),
-        );
-        if active || st.total > 0 {
-            detail = detail.child(
-                div()
-                    .w_full()
-                    .h(px(6.0))
-                    .flex()
-                    .flex_row()
-                    .rounded_full()
-                    .bg(tag_bg)
-                    .overflow_hidden()
-                    .child(div().h_full().w(relative(done)).bg(primary_color))
-                    .child(div().h_full().w(relative(gone)).bg(muted_text.opacity(0.5)))
-                    .child(div().h_full().w(relative(failed)).bg(rgb(0xef4444))),
-            );
-        }
-        if let Some(timing) = history_media::timing_text(&st) {
-            detail = detail.child(div().text_xs().text_color(muted_text).child(timing));
-        }
-        if active && st.current > 0 {
-            detail = detail.child(
-                div()
-                    .text_xs()
-                    .text_color(muted_text)
-                    .child(format!("Now: downloading {} files at once", st.current)),
-            );
-        }
-        if let Some(note) = history_media::paused_text(&st) {
-            detail = detail.child(div().text_xs().text_color(rgb(0xd97706)).child(note));
-        }
-        detail = detail.child(div().text_xs().text_color(muted_text).child(history_media::result_text(&st)));
-        if let Some(error) = history_media::error_text(&st) {
-            detail = detail.child(div().text_xs().text_color(rgb(0xef4444)).child(error));
-        }
-        section = section.child(detail);
-        section
-    }
-}
-
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.app_theme();
@@ -1939,15 +1469,22 @@ impl Render for SettingsView {
         let tag_bg = theme.muted;
         let update_card = self.render_update_card(text_color, muted_text, border_color, tag_bg, secondary_bg, cx);
 
-        // Chat history card: depth choice, start/stop, and what the sync is doing.
-        let history_card = self.render_history_card(
-            cx, text_color, muted_text, primary_color, secondary_bg, tag_bg, border_color,
-        );
+        let palette = super::settings_history::Palette {
+            text: text_color,
+            muted: muted_text,
+            primary: primary_color,
+            secondary: secondary_bg,
+            tag: tag_bg,
+            border: border_color,
+            card: card_bg,
+        };
+        // Chat history and chat media rows.
+        let history_card = self.render_history_card(cx, palette);
+        let media_section = self.render_media_section(cx, palette);
 
-        // Chat media section: kinds, start/stop/resume, and download progress.
-        let media_section = self.render_media_section(
-            cx, text_color, muted_text, primary_color, secondary_bg, tag_bg, border_color,
-        );
+        let backup_section = self.render_backup_section(cx, palette);
+
+        let ai_section = self.render_ai_section(cx, text_color, muted_text, primary_color, secondary_bg, tag_bg, border_color, card_bg);
 
         let layout_pref_now = crate::layout_pref::preference(cx);
         let notifications_now = crate::notifications::enabled(cx);
@@ -1980,6 +1517,20 @@ impl Render for SettingsView {
                 .map(Cow::Borrowed),
         );
 
+        let theme_count = filtered_presets.len();
+        let (active_theme_label, active_swatch) = {
+            let active = &theme_mgr.active_preset;
+            (
+                active.label.clone(),
+                (
+                    parse_hex_hsla(&active.colors.background),
+                    parse_hex_hsla(&active.colors.primary),
+                    parse_hex_hsla(&active.colors.accent),
+                    parse_hex_hsla(&active.colors.destructive),
+                ),
+            )
+        };
+
         let is_connected = cx.has_global::<ConnectionState>()
             && ConnectionState::global(cx).status == ConnectionStatus::Connected;
         let is_logged_in = cx.has_global::<AuthState>()
@@ -1990,19 +1541,217 @@ impl Render for SettingsView {
             None
         };
 
-        let show_theme_picker = self.show_theme_mode_picker;
         let show_tts_picker = self.show_tts_provider_picker;
-
-        let theme_mode_label = match mode_filter.as_str() {
-            "dark" => "Dark",
-            "light" => "Light",
-            _ => "All themes",
-        };
 
         let tts_provider_label = match self.tts_provider.as_str() {
             "fish" => "Fish Audio",
             "edge" => "Edge TTS",
             _ => "Disabled",
+        };
+
+        let theme_modal = if self.show_theme_modal {
+            let grid = div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap(px(12.0))
+                                                    .children(filtered_presets.into_iter().map(|preset| {
+                                                        let is_active = preset.name == active_preset_name;
+                                                        let preset_name = preset.name.clone();
+                                                        let p_bg = parse_hex_hsla(&preset.colors.background);
+                                                        let p_primary = parse_hex_hsla(&preset.colors.primary);
+                                                        let p_accent = parse_hex_hsla(&preset.colors.accent);
+                                                        let p_destructive = parse_hex_hsla(&preset.colors.destructive);
+                                                        let p_fg = parse_hex_hsla(&preset.colors.foreground);
+                                                        let p_muted_fg = parse_hex_hsla(&preset.colors.muted_foreground);
+                                                        let clean_label = preset.label.clone();
+
+                                                        div()
+                                                            .relative()
+                                                            .w(px(204.0))
+                                                            .p_2()
+                                                            .rounded_lg()
+                                                            .border_2()
+                                                            .border_color(if is_active {
+                                                                primary_color
+                                                            } else {
+                                                                border_color
+                                                            })
+                                                            .bg(if is_active {
+                                                                tag_bg
+                                                            } else {
+                                                                secondary_bg
+                                                            })
+                                                            .cursor_pointer()
+                                                            .hover(|s| s.border_color(theme.muted_foreground))
+                                                            // Mini preview box
+                                                            .child(
+                                                                div()
+                                                                    .h(px(56.0))
+                                                                    .w_full()
+                                                                    .rounded_md()
+                                                                    .p_2()
+                                                                    .flex()
+                                                                    .flex_col()
+                                                                    .justify_between()
+                                                                    .bg(p_bg)
+                                                                    // 3 colored dots
+                                                                    .child(
+                                                                        div()
+                                                                            .flex()
+                                                                            .flex_row()
+                                                                            .gap_1()
+                                                                            .child(div().size(px(8.0)).rounded_full().bg(p_primary))
+                                                                            .child(div().size(px(8.0)).rounded_full().bg(p_accent))
+                                                                            .child(div().size(px(8.0)).rounded_full().bg(p_destructive)),
+                                                                    )
+                                                                    // 2 preview bars
+                                                                    .child(
+                                                                        div()
+                                                                            .flex()
+                                                                            .flex_row()
+                                                                            .items_end()
+                                                                            .gap_1()
+                                                                            .child(div().w(px(110.0)).h(px(4.0)).rounded_sm().bg(p_fg))
+                                                                            .child(div().w(px(40.0)).h(px(4.0)).rounded_sm().bg(p_muted_fg)),
+                                                                    ),
+                                                            )
+                                                            // Label
+                                                            .child(
+                                                                div()
+                                                                    .mt_1p5()
+                                                                    .px_1()
+                                                                    .flex()
+                                                                    .flex_row()
+                                                                    .items_center()
+                                                                    .justify_between()
+                                                                    .child(
+                                                                        div()
+                                                                            .text_xs()
+                                                                            .font_weight(FontWeight::MEDIUM)
+                                                                            .text_color(if is_active { text_color } else { muted_text })
+                                                                            .child(clean_label),
+                                                                    ),
+                                                            )
+                                                            // Active Checkmark icon
+                                                            .children(if is_active {
+                                                                Some(
+                                                                    div()
+                                                                        .absolute()
+                                                                        .top(px(8.0))
+                                                                        .right(px(8.0))
+                                                                        .child(Icon::new(IconName::Check).text_color(primary_color)),
+                                                                )
+                                                            } else {
+                                                                None
+                                                            })
+                                                            .on_mouse_down(MouseButton::Left, cx.listener(move |_this, _, window, cx| {
+                                                                ThemeManager::apply_preset(&preset_name, Some(window), cx);
+                                                            }))
+                                                    }))
+                ;
+            let chips = ["all", "dark", "light"].into_iter().map(|m| {
+                let selected = mode_filter == m;
+                div()
+                    .px_2p5()
+                    .py_1()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if selected { primary_color } else { border_color })
+                    .bg(if selected { tag_bg } else { gpui::transparent_black() })
+                    .text_xs()
+                    .text_color(if selected { primary_color } else { text_color })
+                    .cursor_pointer()
+                    .hover(|s| s.bg(secondary_bg))
+                    .child(match m {
+                        "dark" => "Dark",
+                        "light" => "Light",
+                        _ => "All",
+                    })
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
+                        this.set_theme_mode_filter(m, window, cx);
+                    }))
+            });
+            Some(crate::components::motion::modal_in(
+                div()
+                    .absolute()
+                    .occlude()
+                    .inset_0()
+                    .bg(rgba(0x00000088))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        this.show_theme_modal = false;
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .w(px(720.0))
+                            .max_h(px(600.0))
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(border_color)
+                            .bg(card_bg)
+                            .p_6()
+                            .shadow_2xl()
+                            .flex()
+                            .flex_col()
+                            .gap_4()
+                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                                if ev.keystroke.key.as_str() == "escape" {
+                                    this.show_theme_modal = false;
+                                    cx.notify();
+                                }
+                            }))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_3()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .child(div().text_lg().font_weight(FontWeight::BOLD).text_color(text_color).child("Choose a theme"))
+                                            .child(div().text_xs().text_color(muted_text).child(format!("{theme_count} themes"))),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap_3()
+                                            .child(div().flex().flex_row().gap_1p5().children(chips))
+                                            .child(
+                                                div()
+                                                    .cursor_pointer()
+                                                    .text_sm()
+                                                    .text_color(muted_text)
+                                                    .child("✕")
+                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                        this.show_theme_modal = false;
+                                                        cx.notify();
+                                                    })),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id("theme-modal-scroll")
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .child(grid),
+                            ),
+                    ),
+                "theme-modal",
+            ))
+        } else {
+            None
         };
 
         div()
@@ -2075,23 +1824,26 @@ impl Render for SettingsView {
                                     .border_1()
                                     .border_color(border_color)
                                     .overflow_hidden()
-                                    // Row 1: Theme Mode Filter
+                                    // Color theme: the active one, a click opens the picker.
                                     .child(
                                         div()
-                                            .relative()
+                                            .id("color-theme-row")
                                             .flex()
                                             .flex_row()
                                             .items_center()
                                             .justify_between()
+                                            .gap_3()
                                             .px_4()
                                             .py_3()
+                                            .cursor_pointer()
+                                            .hover(|s| s.bg(tag_bg.opacity(0.5)))
                                             .child(
                                                 div()
                                                     .flex()
                                                     .flex_row()
                                                     .items_center()
                                                     .gap_3()
-                                                    .child(Icon::new(IconName::Inbox).text_color(muted_text))
+                                                    .child(Icon::new(IconName::Palette).text_color(muted_text))
                                                     .child(
                                                         div()
                                                             .flex()
@@ -2101,87 +1853,45 @@ impl Render for SettingsView {
                                                                     .text_sm()
                                                                     .font_weight(FontWeight::MEDIUM)
                                                                     .text_color(text_color)
-                                                                    .child("Theme Mode"),
+                                                                    .child("Color theme"),
                                                             )
                                                             .child(
                                                                 div()
                                                                     .text_xs()
                                                                     .text_color(muted_text)
-                                                                    .child("Filter by dark or light appearance"),
+                                                                    .child(active_theme_label.clone()),
                                                             ),
                                                     ),
                                             )
-                                            // Mode Selector Dropdown Button
                                             .child(
                                                 div()
-                                                    .w(px(110.0))
-                                                    .h(px(32.0))
-                                                    .px_3()
-                                                    .rounded_md()
-                                                    .border_1()
-                                                    .border_color(border_color)
-                                                    .bg(tag_bg)
                                                     .flex()
                                                     .flex_row()
                                                     .items_center()
-                                                    .justify_between()
-                                                    .cursor_pointer()
+                                                    .gap_2()
                                                     .child(
                                                         div()
-                                                            .text_xs()
-                                                            .text_color(text_color)
-                                                            .child(theme_mode_label),
+                                                            .w(px(72.0))
+                                                            .h(px(32.0))
+                                                            .rounded_md()
+                                                            .border_1()
+                                                            .border_color(border_color)
+                                                            .bg(active_swatch.0)
+                                                            .px_2()
+                                                            .flex()
+                                                            .flex_row()
+                                                            .items_center()
+                                                            .gap_1()
+                                                            .child(div().size(px(8.0)).rounded_full().bg(active_swatch.1))
+                                                            .child(div().size(px(8.0)).rounded_full().bg(active_swatch.2))
+                                                            .child(div().size(px(8.0)).rounded_full().bg(active_swatch.3)),
                                                     )
-                                                    .child(Icon::new(IconName::ChevronDown).text_color(muted_text))
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _window, cx| {
-                                                        this.show_theme_mode_picker = !this.show_theme_mode_picker;
-                                                        this.show_tts_provider_picker = false;
-                                                        cx.notify();
-                                                    })),
+                                                    .child(Icon::new(IconName::ChevronRight).text_color(muted_text)),
                                             )
-                                            // Dropdown Popover
-                                            .children(if show_theme_picker {
-                                                Some(
-                                                    div()
-                                                        .absolute()
-                                                        .occlude()
-                                                        .top(px(46.0))
-                                                        .right(px(16.0))
-                                                        .w(px(110.0))
-                                                        .rounded_md()
-                                                        .border_1()
-                                                        .border_color(border_color)
-                                                        .bg(card_bg)
-                                                        .shadow_lg()
-                                                        .py_1()
-                                                        .children(["all", "dark", "light"].into_iter().map(|m| {
-                                                            let is_selected = mode_filter == m;
-                                                            let label = match m {
-                                                                "dark" => "Dark",
-                                                                "light" => "Light",
-                                                                _ => "All themes",
-                                                            };
-                                                            div()
-                                                                .px_3()
-                                                                .py_1p5()
-                                                                .text_xs()
-                                                                .text_color(if is_selected { primary_color } else { text_color })
-                                                                .cursor_pointer()
-                                                                .hover(|s| s.bg(tag_bg))
-                                                                .child(label)
-                                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
-                                                                    this.set_theme_mode_filter(m, window, cx);
-                                                                }))
-                                                        }))
-                                                    .with_animation(
-                                                        "settings-dropdown-in-0",
-                                                        crate::components::motion::enter(crate::components::motion::FAST_MS),
-                                                        |el, d| el.opacity(d),
-                                                    ),
-                                                )
-                                            } else {
-                                                None
-                                            }),
+                                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                this.show_theme_modal = true;
+                                                cx.notify();
+                                            })),
                                     )
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Window transparency slider.
@@ -2258,6 +1968,12 @@ impl Render for SettingsView {
                                                     .child(
                                                         div()
                                                             .flex()
+                                                            .flex_row()
+                                                            .items_center()
+                                                            .gap_3()
+                                                            .child(Icon::new(IconName::ALargeSmall).text_color(muted_text))
+                                                            .child(div()
+                                                            .flex()
                                                             .flex_col()
                                                             .child(
                                                                 div()
@@ -2271,7 +1987,7 @@ impl Render for SettingsView {
                                                                     .text_xs()
                                                                     .text_color(muted_text)
                                                                     .child("Scales menus, lists, headers and settings"),
-                                                            ),
+                                                            ),)
                                                     )
                                                     .child(
                                                         h_flex()
@@ -2306,6 +2022,12 @@ impl Render for SettingsView {
                                                     .child(
                                                         div()
                                                             .flex()
+                                                            .flex_row()
+                                                            .items_center()
+                                                            .gap_3()
+                                                            .child(Icon::new(IconName::CaseSensitive).text_color(muted_text))
+                                                            .child(div()
+                                                            .flex()
                                                             .flex_col()
                                                             .child(
                                                                 div()
@@ -2319,7 +2041,7 @@ impl Render for SettingsView {
                                                                     .text_xs()
                                                                     .text_color(muted_text)
                                                                     .child("Scales the text inside message bubbles only"),
-                                                            ),
+                                                            ),)
                                                     )
                                                     .child(
                                                         h_flex()
@@ -2540,137 +2262,6 @@ impl Render for SettingsView {
                                                     }),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
-                                    // Row 2: Color Theme Cards Grid
-                                    .child(
-                                        div()
-                                            .px_4()
-                                            .py_4()
-                                            .flex()
-                                            .flex_col()
-                                            .gap_4()
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap_0p5()
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(text_color)
-                                                            .child("Color Theme"),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(muted_text)
-                                                            .child(format!("{} themes available", filtered_presets.len())),
-                                                    ),
-                                            )
-                                            // 3 Columns Swatch Grid
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_row()
-                                                    .flex_wrap()
-                                                    .gap(px(12.0))
-                                                    .children(filtered_presets.into_iter().map(|preset| {
-                                                        let is_active = preset.name == active_preset_name;
-                                                        let preset_name = preset.name.clone();
-                                                        let p_bg = parse_hex_hsla(&preset.colors.background);
-                                                        let p_primary = parse_hex_hsla(&preset.colors.primary);
-                                                        let p_accent = parse_hex_hsla(&preset.colors.accent);
-                                                        let p_destructive = parse_hex_hsla(&preset.colors.destructive);
-                                                        let p_fg = parse_hex_hsla(&preset.colors.foreground);
-                                                        let p_muted_fg = parse_hex_hsla(&preset.colors.muted_foreground);
-                                                        let clean_label = preset.label.clone();
-
-                                                        div()
-                                                            .relative()
-                                                            .w(px(204.0))
-                                                            .p_2()
-                                                            .rounded_lg()
-                                                            .border_2()
-                                                            .border_color(if is_active {
-                                                                primary_color
-                                                            } else {
-                                                                border_color
-                                                            })
-                                                            .bg(if is_active {
-                                                                tag_bg
-                                                            } else {
-                                                                secondary_bg
-                                                            })
-                                                            .cursor_pointer()
-                                                            .hover(|s| s.border_color(theme.muted_foreground))
-                                                            // Mini preview box
-                                                            .child(
-                                                                div()
-                                                                    .h(px(56.0))
-                                                                    .w_full()
-                                                                    .rounded_md()
-                                                                    .p_2()
-                                                                    .flex()
-                                                                    .flex_col()
-                                                                    .justify_between()
-                                                                    .bg(p_bg)
-                                                                    // 3 colored dots
-                                                                    .child(
-                                                                        div()
-                                                                            .flex()
-                                                                            .flex_row()
-                                                                            .gap_1()
-                                                                            .child(div().size(px(8.0)).rounded_full().bg(p_primary))
-                                                                            .child(div().size(px(8.0)).rounded_full().bg(p_accent))
-                                                                            .child(div().size(px(8.0)).rounded_full().bg(p_destructive)),
-                                                                    )
-                                                                    // 2 preview bars
-                                                                    .child(
-                                                                        div()
-                                                                            .flex()
-                                                                            .flex_row()
-                                                                            .items_end()
-                                                                            .gap_1()
-                                                                            .child(div().w(px(110.0)).h(px(4.0)).rounded_sm().bg(p_fg))
-                                                                            .child(div().w(px(40.0)).h(px(4.0)).rounded_sm().bg(p_muted_fg)),
-                                                                    ),
-                                                            )
-                                                            // Label
-                                                            .child(
-                                                                div()
-                                                                    .mt_1p5()
-                                                                    .px_1()
-                                                                    .flex()
-                                                                    .flex_row()
-                                                                    .items_center()
-                                                                    .justify_between()
-                                                                    .child(
-                                                                        div()
-                                                                            .text_xs()
-                                                                            .font_weight(FontWeight::MEDIUM)
-                                                                            .text_color(if is_active { text_color } else { muted_text })
-                                                                            .child(clean_label),
-                                                                    ),
-                                                            )
-                                                            // Active Checkmark icon
-                                                            .children(if is_active {
-                                                                Some(
-                                                                    div()
-                                                                        .absolute()
-                                                                        .top(px(8.0))
-                                                                        .right(px(8.0))
-                                                                        .child(Icon::new(IconName::Check).text_color(primary_color)),
-                                                                )
-                                                            } else {
-                                                                None
-                                                            })
-                                                            .on_mouse_down(MouseButton::Left, cx.listener(move |_this, _, window, cx| {
-                                                                ThemeManager::apply_preset(&preset_name, Some(window), cx);
-                                                            }))
-                                                    })),
-                                            ),
-                                    ),
                             ),
                     )
                     // ====================================================
@@ -2819,6 +2410,8 @@ impl Render for SettingsView {
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     .child(media_section)
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .child(backup_section)
+                                    .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Row 3: restart the local backend
                                     .child(
                                         div()
@@ -2877,169 +2470,7 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
-                    // ====================================================
-                    // 3. AI CONFIGURATION SECTION
-                    // ====================================================
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(12.0))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(muted_text)
-                                    .child("AI CONFIGURATION"),
-                            )
-                            .child(
-                                div()
-                                    .rounded_lg()
-                                    .border_1()
-                                    .border_color(border_color)
-                                    .overflow_hidden()
-                                    // Header row
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_row()
-                                            .items_center()
-                                            .gap_3()
-                                            .px_4()
-                                            .py_3()
-                                            .child(Icon::new(IconName::Bot).text_color(muted_text))
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(text_color)
-                                                            .child("Gemini + AI Server"),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(muted_text)
-                                                            .child("Connect the bot to Gemini and your AI backend"),
-                                                    ),
-                                            ),
-                                    )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
-                                    // Field 1: Gemini API Key
-                                    .child(
-                                        div()
-                                            .px_4()
-                                            .py_3()
-                                            .flex()
-                                            .flex_row()
-                                            .items_center()
-                                            .justify_between()
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .child(
-                                                        div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child("Gemini API Key"),
-                                                    )
-                                                    .child(
-                                                        div().text_xs().text_color(muted_text).child(if self.has_gemini_key {
-                                                            "•••••••••••••••• (Configured in backend)"
-                                                        } else {
-                                                            "Not configured (click to set)"
-                                                        }),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px_3()
-                                                    .py_1()
-                                                    .rounded_md()
-                                                    .bg(tag_bg)
-                                                    .border_1()
-                                                    .border_color(border_color)
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.bg(secondary_bg))
-                                                    .text_xs()
-                                                    .text_color(text_color)
-                                                    .child("Edit Key")
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                                        this.open_edit_modal(EditField::GeminiApiKey, window, cx);
-                                                    })),
-                                            ),
-                                    )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
-                                    // Field 2: AI Server URL
-                                    .child(
-                                        div()
-                                            .px_4()
-                                            .py_3()
-                                            .flex()
-                                            .flex_row()
-                                            .items_center()
-                                            .justify_between()
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .child(
-                                                        div().text_xs().font_weight(FontWeight::MEDIUM).text_color(text_color).child("AI Server URL"),
-                                                    )
-                                                    .child(
-                                                        div().text_xs().text_color(muted_text).child(self.ai_server_url.clone()),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px_3()
-                                                    .py_1()
-                                                    .rounded_md()
-                                                    .bg(tag_bg)
-                                                    .border_1()
-                                                    .border_color(border_color)
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.bg(secondary_bg))
-                                                    .text_xs()
-                                                    .text_color(text_color)
-                                                    .child("Edit URL")
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                                        this.open_edit_modal(EditField::AiServerUrl, window, cx);
-                                                    })),
-                                            ),
-                                    )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
-                                    // Save Button Row
-                                    .child(
-                                        div()
-                                            .px_4()
-                                            .py_3()
-                                            .flex()
-                                            .flex_row()
-                                            .justify_end()
-                                            .child(
-                                                div()
-                                                    .px_4()
-                                                    .py_1p5()
-                                                    .rounded_md()
-                                                    .bg(primary_color)
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.opacity(0.9))
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_color(theme.primary_foreground)
-                                                            .child(if self.is_saving_ai { "Saving..." } else { "Save AI Config" }),
-                                                    )
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                                        this.save_ai_settings(cx);
-                                                    })),
-                                            ),
-                                    ),
-                            ),
-                    )
+                    .child(ai_section)
                     // ====================================================
                     // CONTACT NAMES SECTION
                     // ====================================================
@@ -3256,7 +2687,10 @@ impl Render for SettingsView {
                                             )
                                             .child(
                                                 div()
+                                                    .relative()
                                                     .w(px(120.0))
+                                                    .child(div()
+                                                    .w_full()
                                                     .h(px(30.0))
                                                     .px_3()
                                                     .rounded_md()
@@ -3276,47 +2710,31 @@ impl Render for SettingsView {
                                                         this.show_tts_provider_picker = !this.show_tts_provider_picker;
                                                         this.show_theme_mode_picker = false;
                                                         cx.notify();
+                                                    })),)
+                                                    .children(show_tts_picker.then(|| {
+                                                        super::settings_dropdown::dropdown_list(
+                                                            120.0,
+                                                            card_bg,
+                                                            border_color,
+                                                            [("", "Disabled"), ("edge", "Edge TTS"), ("fish", "Fish Audio")].into_iter().map(|(val, lbl)| {
+                                                                let is_selected = self.tts_provider == val;
+                                                                div()
+                                                                    .px_3()
+                                                                    .py_1p5()
+                                                                    .text_xs()
+                                                                    .text_color(if is_selected { primary_color } else { text_color })
+                                                                    .cursor_pointer()
+                                                                    .hover(|s| s.bg(tag_bg))
+                                                                    .child(lbl)
+                                                                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                                        this.tts_provider = val.to_string();
+                                                                        this.show_tts_provider_picker = false;
+                                                                        cx.notify();
+                                                                    }))
+                                                            }),
+                                                        )
                                                     })),
-                                            )
-                                            .children(if show_tts_picker {
-                                                Some(
-                                                    div()
-                                                        .absolute()
-                                                        .occlude()
-                                                        .top(px(46.0))
-                                                        .right(px(16.0))
-                                                        .w(px(120.0))
-                                                        .rounded_md()
-                                                        .border_1()
-                                                        .border_color(border_color)
-                                                        .bg(card_bg)
-                                                        .shadow_lg()
-                                                        .py_1()
-                                                        .children([("", "Disabled"), ("edge", "Edge TTS"), ("fish", "Fish Audio")].into_iter().map(|(val, lbl)| {
-                                                            let is_selected = self.tts_provider == val;
-                                                            div()
-                                                                .px_3()
-                                                                .py_1p5()
-                                                                .text_xs()
-                                                                .text_color(if is_selected { primary_color } else { text_color })
-                                                                .cursor_pointer()
-                                                                .hover(|s| s.bg(tag_bg))
-                                                                .child(lbl)
-                                                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                                    this.tts_provider = val.to_string();
-                                                                    this.show_tts_provider_picker = false;
-                                                                    cx.notify();
-                                                                }))
-                                                        }))
-                                                    .with_animation(
-                                                        "settings-dropdown-in-1",
-                                                        crate::components::motion::enter(crate::components::motion::FAST_MS),
-                                                        |el, d| el.opacity(d),
-                                                    ),
-                                                )
-                                            } else {
-                                                None
-                                            }),
+                                            ),
                                     )
                                     .child(div().h(px(1.0)).bg(border_color).w_full())
                                     // Default Voice
@@ -3551,6 +2969,7 @@ impl Render for SettingsView {
                             .thumb_active(|th| th.bg(theme.primary.opacity(0.8)).radius(px(4.0)).width(px(8.0)))
                     }),
             )
+            .children(theme_modal)
             // ====================================================
             // 7. EDIT MODAL DIALOG
             // ====================================================

@@ -265,6 +265,30 @@ export type HistorySyncStatus = {
 }
 
 /** How big the account's two SQLite databases are; null when not known (media kept in S3). */
+export interface BackupStatus {
+	running: boolean
+	account?: string
+	accountIndex?: number
+	accountCount?: number
+	/** Progress of the whole run, 0 to 100. */
+	percent?: number
+	stage?: string
+	item?: string
+	done: number
+	total: number
+	startedAt?: number
+	finishedAt?: number
+	summary?: string
+	error?: string
+}
+
+export interface BackupEntry {
+	account: string
+	id: string
+	/** Unix milliseconds. */
+	createdAt: number
+}
+
 export type StorageUsage = {
 	/** The message database: chats, messages and staged history. */
 	chatBytes: number | null
@@ -558,6 +582,10 @@ export type CallLog = {
         ended_at?: number | null
         duration_ms?: number | null
         created_at: number
+        /** The chat the other side lives under (what the avatar route takes). */
+        peer_id?: string
+        /** Name to show for the other side; empty when none is known. */
+        peer_name?: string
 }
 
 export type CallHistoryResponse = {
@@ -578,6 +606,7 @@ export type SettingsMap = Record<string, string>
 export type SettingsResponse = SettingsMap & {
         hasGeminiKey?: boolean
         hasFishKey?: boolean
+        hasAiKey?: boolean
 }
 
 class ApiClient {	private baseUrl: string
@@ -628,8 +657,9 @@ class ApiClient {	private baseUrl: string
 			.filter((chat) => chat.id.length > 0)
 	}
 
-	async markAsRead(chatId: string): Promise<{ status: string }> {
-		return this.request<{ status: string }>(`/chats/${chatId}/read`, {
+	/** `cleared` is false when read receipts are off and the chat was left unread. */
+	async markAsRead(chatId: string): Promise<{ status: string; cleared?: boolean }> {
+		return this.request<{ status: string; cleared?: boolean }>(`/chats/${chatId}/read`, {
 			method: "POST",
 		})
 	}
@@ -684,6 +714,22 @@ class ApiClient {	private baseUrl: string
 			chatBytes: raw.chatBytes == null ? null : Number(raw.chatBytes),
 			mediaBytes: raw.mediaBytes == null ? null : Number(raw.mediaBytes),
 		}
+	}
+
+	async startBackup(target: string, keep: number): Promise<void> {
+		await this.request<unknown>("/backup/run", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ target, keep }),
+		})
+	}
+
+	async getBackupStatus(): Promise<BackupStatus> {
+		return this.request<BackupStatus>("/backup/status")
+	}
+
+	async listBackups(target: string): Promise<BackupEntry[]> {
+		return this.request<BackupEntry[]>(`/backup/list?target=${encodeURIComponent(target)}`)
 	}
 
 	async getHistoryMediaStatus(): Promise<HistoryMediaStatus> {
@@ -820,7 +866,7 @@ class ApiClient {	private baseUrl: string
 		return this.request<MessageReceipts>(`/chats/${chatId}/messages/${id}/receipts`)
 	}
 
-	/** Subscribe to a 1:1 contact's availability updates. */
+	/** Go online and subscribe to a chat's presence so typing events arrive. */
 	async subscribeChatPresence(chatId: string): Promise<{ status: string }> {
 		return this.request<{ status: string }>(`/chats/${chatId}/presence-subscribe`, { method: "POST" })
 	}
@@ -1438,11 +1484,13 @@ class ApiClient {	private baseUrl: string
 			settings: SettingsMap
 			hasGeminiKey?: boolean
 			hasFishKey?: boolean
+			hasAiKey?: boolean
 		}>("/settings")
 		return {
 			...resp.settings,
 			hasGeminiKey: resp.hasGeminiKey,
 			hasFishKey: resp.hasFishKey,
+			hasAiKey: resp.hasAiKey,
 		} as SettingsResponse
 	}
 
@@ -1451,6 +1499,7 @@ class ApiClient {	private baseUrl: string
 			settings: SettingsMap
 			hasGeminiKey?: boolean
 			hasFishKey?: boolean
+			hasAiKey?: boolean
 		}>("/settings", {
 			method: "PUT",
 			body: JSON.stringify(data),
@@ -1459,6 +1508,7 @@ class ApiClient {	private baseUrl: string
 			...resp.settings,
 			hasGeminiKey: resp.hasGeminiKey,
 			hasFishKey: resp.hasFishKey,
+			hasAiKey: resp.hasAiKey,
 		} as SettingsResponse
 	}
 }

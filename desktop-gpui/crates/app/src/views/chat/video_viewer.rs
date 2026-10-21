@@ -299,7 +299,9 @@ impl ChatView {
             .left_0()
             .w_full()
             .h(px(PREVIEW_TOOLBAR_H))
-            .px_4()
+            .pl_4()
+            // The window controls sit over the top right corner.
+            .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
             .items_center()
             .justify_end()
             .bg(rgba(0x0b141acc))

@@ -10,8 +10,19 @@ impl ChatView {
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
+        v_flex().size_full().child(
+            // The strip where the window controls sit; drag the window by it.
+            h_flex()
+                .w_full()
+                .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                .flex_shrink_0()
+                .pr(px(crate::components::titlebar::controls_room(cx)))
+                .child(crate::components::titlebar::drag_area()),
+        )
+        .child(
         v_flex()
-            .size_full()
+            .flex_1()
+            .w_full()
             .items_center()
             .justify_center()
             .gap_3()
@@ -38,7 +49,8 @@ impl ChatView {
                     .text_sm()
                     .text_color(muted_text)
                     .child("Select a conversation from the left to start chatting."),
-            )
-            .into_any_element()
+            ),
+        )
+        .into_any_element()
     }
 }

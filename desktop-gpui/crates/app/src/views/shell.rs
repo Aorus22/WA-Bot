@@ -81,13 +81,21 @@ impl Render for AppShellView {
         // its detail page doesn't replay the transition.
         let route_key = current_route.path_prefix();
 
+        // The chat page puts the window controls into its own headers; every
+        // other page keeps the title bar. Without a linked account the chat page
+        // shows the login, which needs the title bar too.
+        let unlinked = cx.has_global::<AuthState>() && AuthState::global(cx).status == AuthStatus::Unauthenticated;
+        let chat_chrome = matches!(current_route, AppRoute::Chat | AppRoute::ChatDetail(_))
+            && !unlinked
+            && !crate::popover::is_popover(cx);
+
         v_flex()
             .id("app-shell")
             .relative()
             .size_full()
             .text_color(theme.foreground)
             .overflow_hidden()
-            .child(AppTitleBar::new())
+            .when(!chat_chrome, |s| s.child(AppTitleBar::new()))
             .child(
                 h_flex()
                     .size_full()
@@ -116,6 +124,7 @@ impl Render for AppShellView {
                     ),
             )
             .child(self.call_overlay.clone())
+            .when(chat_chrome, |s| s.child(crate::components::titlebar::controls_overlay(window, cx)))
     }
 }
 

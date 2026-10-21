@@ -98,6 +98,12 @@ pub struct CallLog {
     pub ended_at: Option<i64>,
     pub duration_ms: Option<i64>,
     pub created_at: i64,
+    /// The chat the other side lives under (what the avatar route takes).
+    #[serde(default)]
+    pub peer_id: String,
+    /// Name to show for the other side; empty when none is known.
+    #[serde(default)]
+    pub peer_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

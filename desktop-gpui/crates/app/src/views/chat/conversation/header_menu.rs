@@ -1,10 +1,30 @@
 use crate::views::chat::*;
 
 impl ChatView {
+    /// True when no drawer is docked at the window's right edge, so the window
+    /// controls sit over the conversation header and it must leave them room.
+    pub(crate) fn controls_over_conversation(&self) -> bool {
+        !(self.is_info_sheet_open
+            || self.info_sheet_closing
+            || self.is_starred_sheet_open
+            || self.starred_sheet_closing
+            || self.viewed_by_message.is_some()
+            || self.viewed_by_closing
+            || self.is_search_sheet_open
+            || self.search_sheet_closing)
+    }
+
     /// Open a header dropdown just below the button that was pressed.
     pub(crate) fn open_header_menu(&mut self, kind: HeaderMenuKind, position: Point<Pixels>, cx: &mut Context<Self>) {
-        // Pressing the same button again closes it.
-        if self.header_menu.as_ref().is_some_and(|m| m.kind == kind) {
+        // Pressing the same button again closes it. The menu's own "click outside"
+        // handler already closed it for this very click, so look at that too.
+        let just_dismissed = self
+            .header_menu_dismissed
+            .take()
+            .is_some_and(|(k, at)| k == kind && at.elapsed() < std::time::Duration::from_millis(100));
+        if just_dismissed {
+            self.header_menu = None;
+        } else if self.header_menu.as_ref().is_some_and(|m| m.kind == kind) {
             self.header_menu = None;
         } else {
             self.header_menu = Some(HeaderMenu { kind, position, show_mute: false, confirm_exit: false });
@@ -32,7 +52,9 @@ impl ChatView {
 
         let mut menu = menu_surface(252.0, theme.card, border_color)
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                this.header_menu = None;
+                if let Some(open) = this.header_menu.take() {
+                    this.header_menu_dismissed = Some((open.kind, std::time::Instant::now()));
+                }
                 cx.notify();
             }));
 

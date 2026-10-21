@@ -153,6 +153,7 @@ func InitializeApp() (*App, error) {
 	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient, storageRepo)
 
 	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
+	httpServer.SetBackupService(newBackupService())
 
 	// Opened on a throwaway path; the account manager switches it to the
 	// linked account's folder (or an empty pending one) right below.
@@ -212,6 +213,8 @@ func InitializeApp() (*App, error) {
 		}
 	}
 	httpServer.SetGeminiService(geminiService)
+	textRouter := ai.NewTextRouter(settingsRepo, storageRepo)
+	httpServer.SetTextRouter(textRouter)
 
 	callSvc := call.NewCallService(waClient.GetCallClient(), waClient.IsConnected, appStore, httpServer)
 	httpServer.SetCallService(callSvc)
@@ -250,6 +253,7 @@ func InitializeApp() (*App, error) {
 	}
 
 	luaService := lua.NewLuaService(waClient, appStore, stateRepo, storageRepo, geminiService, mediaDownloader, redisService)
+	luaService.SetTextRouter(textRouter)
 	eventHandler.SetLuaService(luaService)
 	httpServer.SetLuaService(luaService)
 	httpServer.SetTriggerRepo(appStore)
@@ -336,6 +340,9 @@ func InitializeApp() (*App, error) {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "storage" {
 		os.Exit(runStorageCommand(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		os.Exit(runBackupCommand(os.Args[2:]))
 	}
 	teeOutputToFile()
 	app, err := InitializeApp()

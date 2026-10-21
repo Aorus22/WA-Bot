@@ -342,10 +342,20 @@ impl ChatStore {
                 if let Some(cid) = chat_id {
                     self.patch_message(cid, id, |m| m.status = status.clone());
                 } else {
+                    // The backend sends no chat id here. The render cache keys on
+                    // messages_version, so a changed tick must bump it or the
+                    // bubble keeps its old ticks until something else repaints.
+                    let mut changed = false;
                     for entry in self.messages_by_chat.values_mut() {
                         if let Some(m) = entry.messages.iter_mut().find(|m| m.id == *id) {
-                            m.status = status.clone();
+                            if m.status != *status {
+                                m.status = status.clone();
+                                changed = true;
+                            }
                         }
+                    }
+                    if changed {
+                        self.messages_version = self.messages_version.wrapping_add(1);
                     }
                 }
                 true
@@ -549,6 +559,20 @@ mod tests {
             extra: None,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn status_event_without_chat_id_refreshes_the_ticks() {
+        let mut store = ChatStore::default();
+        store.upsert_message("chat-1", make_test_msg("real-1", 1000, "halo", "sent"));
+        let before = store.messages_version;
+        store.handle_ws_event(&WsEvent::MessageStatus {
+            chat_id: None,
+            id: "real-1".into(),
+            status: "delivered".into(),
+        });
+        assert_eq!(store.messages_by_chat["chat-1"].messages[0].status, "delivered");
+        assert_ne!(store.messages_version, before, "the render cache must see the change");
     }
 
     #[test]

@@ -4,6 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+
+	waTypes "go.mau.fi/whatsmeow/types"
 
 	"wa-bot/internal/domain/entity"
 	"wa-bot/internal/domain/repository"
@@ -187,8 +190,54 @@ func (ch *CallHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ch.handler.sendJSON(w, map[string]interface{}{
-		"logs": logs,
+		"logs": ch.describeLogs(logs),
 	})
+}
+
+// callLogView is a call log with who it was with: the chat they live under
+// (what the avatar and chat routes take) and the name to show.
+type callLogView struct {
+	entity.CallLog
+	PeerID   string `json:"peer_id"`
+	PeerName string `json:"peer_name"`
+}
+
+func (ch *CallHandler) describeLogs(logs []*entity.CallLog) []callLogView {
+	resolver := ch.handler.newNameResolver()
+	out := make([]callLogView, 0, len(logs))
+	for _, log := range logs {
+		if log == nil {
+			continue
+		}
+		view := callLogView{CallLog: *log}
+		view.PeerID, view.PeerName = ch.peerOf(resolver, log)
+		out = append(out, view)
+	}
+	return out
+}
+
+// peerOf names the other side of a call. A group call is the group; a 1:1 call
+// is a person whose JID can carry a device ("123:75@lid") and may be a LID.
+func (ch *CallHandler) peerOf(resolver *nameResolver, log *entity.CallLog) (id, name string) {
+	if log.GroupJID != "" {
+		id = log.GroupJID
+		if ch.handler.msgRepo != nil {
+			if group, err := ch.handler.msgRepo.GetGroupCache(id); err == nil {
+				name = strings.TrimSpace(group.Name)
+			}
+		}
+		return id, name
+	}
+	id = log.Target
+	if parsed, err := waTypes.ParseJID(log.Target); err == nil && !parsed.IsEmpty() {
+		id = parsed.ToNonAD().String()
+	}
+	id = ch.handler.resolveMentionJID(id)
+	stored := ""
+	if ch.handler.msgRepo != nil {
+		stored, _ = ch.handler.msgRepo.GetContactName(id)
+	}
+	return id, resolver.resolve(id, stored)
 }
 
 // writeCallError maps call service sentinel errors to HTTP responses.

@@ -228,8 +228,9 @@ impl ChatView {
                 // Header
                 .child(
                     h_flex()
-                        .px_4()
-                        .py_3()
+                        .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                        .pl_4()
+                        .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
                         .border_b_1()
                         .border_color(border_color.opacity(0.4))
                         .bg(theme.muted.opacity(0.2))

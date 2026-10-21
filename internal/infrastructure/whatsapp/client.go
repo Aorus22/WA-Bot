@@ -996,6 +996,11 @@ func (w *WhatsAppClient) SubscribeUserPresence(ctx context.Context, jid string) 
 		return err
 	}
 	w.markOnlineWhileWatching(ctx)
+	if targetJID.Server == waTypes.GroupServer {
+		// Groups have no availability to subscribe to; being online is enough
+		// for their typing events to arrive.
+		return nil
+	}
 	return w.client.SubscribePresence(ctx, targetJID)
 }
 

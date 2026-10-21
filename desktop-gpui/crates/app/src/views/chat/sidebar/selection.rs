@@ -73,7 +73,7 @@ impl ChatView {
     }
 
     /// Replaces the list header while chats are being selected.
-    pub(crate) fn render_chat_selection_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_chat_selection_bar(&mut self, cx: &mut Context<Self>, pages: bool) -> AnyElement {
         let theme = *cx.app_theme();
         let muted_text = theme.muted_foreground;
         let count = self.selected_chats.len();
@@ -92,10 +92,11 @@ impl ChatView {
                 .tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
                 .child(svg().data(icon).size(px(18.0)).text_color(muted_text))
         };
+        let controls_room = if pages { crate::components::titlebar::controls_room(cx) } else { 0.0 };
         h_flex()
-            .px_4()
-            .pt_4()
-            .pb_2()
+            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+            .pl_4()
+            .pr(px(16.0 + controls_room))
             .gap_1()
             .items_center()
             .child(
