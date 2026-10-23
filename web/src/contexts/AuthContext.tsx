@@ -10,6 +10,7 @@ interface ChatUpdate {
 	lastTime: number
 	msgId: string
 	status?: string
+	fromMe?: boolean
 	senderName?: string
 	chatName?: string
 	chatAvatar?: string
@@ -81,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 					lastTime: payload.timestamp,
 					msgId: payload.id,
 					status: payload.status,
+					fromMe: payload.from === "me",
 					senderName: payload.senderName,
 					chatName: payload.chatName,
 				})
@@ -125,6 +127,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				break
 			case "message_status":
 				if (message.payload) {
+					const chat = useChatStore.getState().chats.find((item) => item.lastMessageId === message.payload.id)
+					if (chat?.lastMessageFromMe) {
+						useChatStore.getState().patchChat(chat.id, { lastMessageStatus: message.payload.status })
+					}
 					setStatusUpdate({
 						id: message.payload.id,
 						status: message.payload.status,

@@ -25,7 +25,7 @@ interface ChatStore {
 	upsertChat: (chat: Chat) => void
 	patchChatState: (state: ChatState) => void
 	/** In-place patch of a chat row (unread badge, preview); absent fields are untouched. */
-	patchChat: (chatId: string, patch: Partial<Pick<Chat, "unread" | "lastMsg" | "disappearingSecs">>) => void
+	patchChat: (chatId: string, patch: Partial<Pick<Chat, "unread" | "lastMsg" | "lastMessageId" | "lastMessageStatus" | "lastMessageFromMe" | "disappearingSecs">>) => void
 	setJumpTarget: (target: { chatId: string; messageId: string } | null) => void
 	/** Chat deleted on another device: drop it and its cached messages. */
 	removeChat: (chatId: string) => void
@@ -138,7 +138,9 @@ export const useChatStore = create<ChatStore>((set) => ({
 			const prev = state.messagesByChat[chatId]
 			return {
 				chats: state.chats.map((chat) =>
-					chat.id === chatId ? { ...chat, lastMsg: "", unread: 0 } : chat
+					chat.id === chatId
+						? { ...chat, lastMsg: "", lastMessageId: "", lastMessageStatus: "", lastMessageFromMe: false, unread: 0 }
+						: chat
 				),
 				messagesByChat: prev
 					? {

@@ -262,6 +262,9 @@ impl ChatView {
             if let Some(c) = store.chats.iter_mut().find(|c| c.id == chat_id) {
                 c.last_msg = content.clone();
                 c.last_time = now_ms;
+                c.last_message_id = temp_id.clone();
+                c.last_message_status = "pending".to_string();
+                c.last_message_from_me = true;
             }
         }
 
@@ -320,10 +323,15 @@ impl ChatView {
         } else {
             let rid = real_id.clone();
             if cx.has_global::<ChatStore>() {
-                ChatStore::global_mut(cx).patch_message(chat_id, temp_id, move |m| {
+                let store = ChatStore::global_mut(cx);
+                store.patch_message(chat_id, temp_id, move |m| {
                     m.id = rid.clone();
                     m.status = "sent".to_string();
                 });
+                if let Some(chat) = store.chats.iter_mut().find(|c| c.id == chat_id && c.last_message_id == temp_id) {
+                    chat.last_message_id = real_id.clone();
+                    chat.last_message_status = "sent".to_string();
+                }
             }
             if let Some(rm) = self.cached_render_messages.iter_mut().find(|m| m.msg.id == temp_id) {
                 rm.msg.id = real_id;
@@ -620,6 +628,9 @@ impl ChatView {
             if let Some(c) = store.chats.iter_mut().find(|c| c.id == chat_id) {
                 c.last_msg = text.clone();
                 c.last_time = now_ms;
+                c.last_message_id = temp_id.clone();
+                c.last_message_status = "pending".to_string();
+                c.last_message_from_me = true;
             }
         }
 
@@ -684,7 +695,8 @@ impl ChatView {
                             match res {
                                 Ok(Ok(id_res)) => {
                                     if cx.has_global::<ChatStore>() {
-                                        ChatStore::global_mut(cx).patch_message(
+                                        let store = ChatStore::global_mut(cx);
+                                        store.patch_message(
                                             &target_chat,
                                             &opt_id_clone,
                                             |m| {
@@ -694,6 +706,13 @@ impl ChatView {
                                                 m.status = "sent".to_string();
                                             },
                                         );
+                                        if let Some(chat) = store.chats.iter_mut().find(|c| c.id == target_chat && c.last_message_id == opt_id_clone) {
+                                            if !is_reply {
+                                                chat.last_message_id = id_res.id.clone();
+                                            }
+                                            chat.last_message_status = "sent".to_string();
+                                            chat.last_message_from_me = true;
+                                        }
                                     }
                                     if let Some(rm) = this.cached_render_messages.iter_mut().find(|m| m.msg.id == opt_id_clone) {
                                         if !is_reply {

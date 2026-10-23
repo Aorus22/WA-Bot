@@ -140,7 +140,7 @@ export function ChatPage() {
 						showSidebar ? "w-full absolute inset-0 z-40 bg-background" : "w-0 overflow-hidden"
 					)}
 				>
-					<ChatSidebar selectedChatId={selectedChat?.id || null} onChatSelect={handleChatSelect} chatUpdate={chatUpdate} onChatsLoaded={setChats} />
+					<ChatSidebar selectedChatId={selectedChat?.id || null} onChatSelect={handleChatSelect} chatUpdate={chatUpdate} statusUpdate={statusUpdate} onChatsLoaded={setChats} />
 				</div>
 
 				<main className={cn("flex-1 h-full relative overflow-hidden bg-muted/30", showSidebar ? "hidden" : "flex")}>
@@ -186,6 +186,7 @@ export function ChatPage() {
 					selectedChatId={selectedChat?.id || null}
 					onChatSelect={handleChatSelect}
 					chatUpdate={chatUpdate}
+					statusUpdate={statusUpdate}
 					onChatsLoaded={setChats}
 				/>
 			</div>

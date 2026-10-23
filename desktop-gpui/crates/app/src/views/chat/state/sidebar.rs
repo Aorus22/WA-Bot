@@ -82,6 +82,9 @@ mod tests {
             avatar: String::new(),
             last_msg: "Hi".to_string(),
             last_time,
+            last_message_id: String::new(),
+            last_message_status: String::new(),
+            last_message_from_me: false,
             unread: 0,
             has_unread_mention: false,
             is_active: false,
@@ -143,4 +146,3 @@ mod tests {
         assert_eq!(ChatSidebarComponent::format_timestamp(3661), "01:01");
     }
 }
-

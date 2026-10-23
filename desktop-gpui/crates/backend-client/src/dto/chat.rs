@@ -13,6 +13,12 @@ pub struct Chat {
     #[serde(default)]
     pub last_time: i64,
     #[serde(default)]
+    pub last_message_id: String,
+    #[serde(default)]
+    pub last_message_status: String,
+    #[serde(default)]
+    pub last_message_from_me: bool,
+    #[serde(default)]
     pub unread: u32,
     #[serde(default)]
     pub has_unread_mention: bool,

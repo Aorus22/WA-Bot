@@ -112,6 +112,7 @@ impl ChatStore {
             let existing = &self.chats[pos];
             let last_changed = (!chat.last_msg.is_empty() && chat.last_msg != existing.last_msg)
                 || (chat.last_time != 0 && chat.last_time != existing.last_time);
+            let has_new_last_message = !chat.last_message_id.is_empty();
 
             // Preserve unread unless updated explicitly (if unread == 0 and existing > 0, check if we keep existing)
             // Web parity: if unread is provided, merge. If not explicitly changed, preserve existing.
@@ -121,6 +122,9 @@ impl ChatStore {
                 avatar: if !chat.avatar.is_empty() { chat.avatar } else { existing.avatar.clone() },
                 last_msg: if !chat.last_msg.is_empty() { chat.last_msg } else { existing.last_msg.clone() },
                 last_time: if chat.last_time != 0 { chat.last_time } else { existing.last_time },
+                last_message_id: if has_new_last_message { chat.last_message_id } else { existing.last_message_id.clone() },
+                last_message_status: if has_new_last_message { chat.last_message_status } else { existing.last_message_status.clone() },
+                last_message_from_me: if has_new_last_message { chat.last_message_from_me } else { existing.last_message_from_me },
                 unread: chat.unread,
                 has_unread_mention: chat.unread > 0 && chat.has_unread_mention,
                 is_active: chat.is_active,
@@ -339,6 +343,16 @@ impl ChatStore {
                 true
             }
             WsEvent::MessageStatus { chat_id, id, status } => {
+                let mut chat_changed = false;
+                for chat in &mut self.chats {
+                    if chat.last_message_from_me && chat.last_message_id == *id && chat.last_message_status != *status {
+                        chat.last_message_status = status.clone();
+                        chat_changed = true;
+                    }
+                }
+                if chat_changed {
+                    self.chats_version = self.chats_version.wrapping_add(1);
+                }
                 if let Some(cid) = chat_id {
                     self.patch_message(cid, id, |m| m.status = status.clone());
                 } else {
@@ -424,6 +438,9 @@ impl ChatStore {
                     let mut existing = self.chats.remove(pos);
                     existing.last_msg = preview;
                     existing.last_time = msg.timestamp;
+                    existing.last_message_id = msg.id.clone();
+                    existing.last_message_status = msg.status.clone();
+                    existing.last_message_from_me = msg.from == "me";
                     if unread_here {
                         existing.unread += 1;
                         existing.has_unread_mention |= mentions_me;
@@ -436,6 +453,9 @@ impl ChatStore {
                         avatar: String::new(),
                         last_msg: preview,
                         last_time: msg.timestamp,
+                        last_message_id: msg.id.clone(),
+                        last_message_status: msg.status.clone(),
+                        last_message_from_me: msg.from == "me",
                         unread: if unread_here { 1 } else { 0 },
                         has_unread_mention: unread_here && mentions_me,
                         is_active: true,
@@ -510,6 +530,9 @@ impl ChatStore {
                 }
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == *chat_id) {
                     chat.last_msg.clear();
+                    chat.last_message_id.clear();
+                    chat.last_message_status.clear();
+                    chat.last_message_from_me = false;
                     chat.unread = 0;
                     chat.has_unread_mention = false;
                     self.chats_version = self.chats_version.wrapping_add(1);
@@ -603,7 +626,8 @@ mod tests {
         let mut store = ChatStore::new();
         let mut chat = Chat {
             id: "chat-1".into(), name: "A".into(), avatar: String::new(), last_msg: String::new(),
-            last_time: 0, unread: 0, has_unread_mention: false, is_active: true, is_group: false,
+            last_time: 0, last_message_id: String::new(), last_message_status: String::new(), last_message_from_me: false,
+            unread: 0, has_unread_mention: false, is_active: true, is_group: false,
             archived: false, pinned_at: None, mute_mode: "off".into(), muted_until: None, disappearing_secs: 0,
         };
         store.set_chats(vec![chat.clone()]);
@@ -733,6 +757,9 @@ mod tests {
             avatar: String::new(),
             last_msg: "Hello".to_string(),
             last_time: 100,
+            last_message_id: String::new(),
+            last_message_status: String::new(),
+            last_message_from_me: false,
             unread: 0,
             has_unread_mention: false,
             is_active: false,
@@ -749,6 +776,9 @@ mod tests {
             avatar: String::new(),
             last_msg: "Hey".to_string(),
             last_time: 200,
+            last_message_id: String::new(),
+            last_message_status: String::new(),
+            last_message_from_me: false,
             unread: 0,
             has_unread_mention: false,
             is_active: false,
@@ -770,6 +800,9 @@ mod tests {
             avatar: String::new(),
             last_msg: "New message from Alice".to_string(),
             last_time: 300,
+            last_message_id: String::new(),
+            last_message_status: String::new(),
+            last_message_from_me: false,
             unread: 1,
             has_unread_mention: false,
             is_active: false,

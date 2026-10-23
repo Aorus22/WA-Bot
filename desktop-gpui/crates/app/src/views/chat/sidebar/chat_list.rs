@@ -192,6 +192,18 @@ impl ChatView {
                                     .has_global::<ChatStore>()
                                     .then(|| ChatStore::global(cx).typing_label(&chat.id, chat.is_group))
                                     .flatten();
+                                let is_typing = typing_label.is_some();
+                                let preview = typing_label.clone().unwrap_or(last_msg_snippet);
+                                let last_message_tick = if !is_typing && chat.last_message_from_me {
+                                    match chat.last_message_status.as_str() {
+                                        "sent" => Some(svg().data(CHECK_SVG).size(px(12.0)).text_color(muted_text).flex_shrink_0()),
+                                        "delivered" => Some(svg().data(CHECK_CHECK_SVG).size(px(13.0)).text_color(muted_text).flex_shrink_0()),
+                                        "read" => Some(svg().data(CHECK_CHECK_SVG).size(px(13.0)).text_color(rgb(0x53bdeb)).flex_shrink_0()),
+                                        _ => None,
+                                    }
+                                } else {
+                                    None
+                                };
                                 let formatted_time = Self::format_chat_time(chat.last_time);
                                 let unread = chat.unread;
 
@@ -365,18 +377,21 @@ impl ChatView {
                                                     }),
                                             )
                                             .child(
-                                                div()
-                                                    .truncate()
+                                                h_flex()
+                                                    .min_w(px(0.0))
+                                                    .gap_1()
+                                                    .items_center()
                                                     .text_xs()
-                                                    .text_color(if typing_label.is_some() {
+                                                    .text_color(if is_typing {
                                                         Hsla::from(if theme.background.l < 0.5 { rgb(0x25d366) } else { rgb(0x008069) })
                                                     } else if unread > 0 {
                                                         text_color
                                                     } else {
                                                         muted_text
                                                     })
-                                                    .when(typing_label.is_some(), |d| d.font_weight(FontWeight::MEDIUM))
-                                                    .child(typing_label.unwrap_or(last_msg_snippet)),
+                                                    .when(is_typing, |d| d.font_weight(FontWeight::MEDIUM))
+                                                    .children(last_message_tick)
+                                                    .child(div().min_w(px(0.0)).truncate().child(preview)),
                                             ),
                                     )
                                     // Timestamp & Unread Badge

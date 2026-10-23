@@ -169,6 +169,9 @@ export type Chat = {
 	avatar: string
 	lastMsg: string
 	lastTime: number
+	lastMessageId: string
+	lastMessageStatus: string
+	lastMessageFromMe: boolean
 	unread: number
 	isActive: boolean
 	isGroup: boolean
@@ -195,6 +198,9 @@ export function normalizeChat(raw: Partial<Chat> | null | undefined): Chat {
 		avatar: typeof value.avatar === "string" ? value.avatar : "",
 		lastMsg: typeof value.lastMsg === "string" ? value.lastMsg : "",
 		lastTime: Number.isFinite(Number(value.lastTime)) ? Number(value.lastTime) : 0,
+		lastMessageId: typeof value.lastMessageId === "string" ? value.lastMessageId : "",
+		lastMessageStatus: typeof value.lastMessageStatus === "string" ? value.lastMessageStatus : "",
+		lastMessageFromMe: Boolean(value.lastMessageFromMe),
 		unread: Number.isFinite(Number(value.unread)) ? Number(value.unread) : 0,
 		isActive: Boolean(value.isActive),
 		isGroup: Boolean(value.isGroup),

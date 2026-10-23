@@ -204,19 +204,22 @@ type Message struct {
 }
 
 type Chat struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Avatar           string `json:"avatar"`
-	LastMsg          string `json:"lastMsg"`
-	LastTime         int64  `json:"lastTime"`
-	Unread           int    `json:"unread"`
-	IsActive         bool   `json:"isActive"`
-	IsGroup          bool   `json:"isGroup"`
-	Archived         bool   `json:"archived"`
-	PinnedAt         *int64 `json:"pinnedAt"`
-	MuteMode         string `json:"muteMode"`
-	MutedUntil       *int64 `json:"mutedUntil"`
-	HasUnreadMention bool   `json:"hasUnreadMention"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Avatar            string `json:"avatar"`
+	LastMsg           string `json:"lastMsg"`
+	LastTime          int64  `json:"lastTime"`
+	LastMessageID     string `json:"lastMessageId,omitempty"`
+	LastMessageStatus string `json:"lastMessageStatus,omitempty"`
+	LastMessageFromMe bool   `json:"lastMessageFromMe,omitempty"`
+	Unread            int    `json:"unread"`
+	IsActive          bool   `json:"isActive"`
+	IsGroup           bool   `json:"isGroup"`
+	Archived          bool   `json:"archived"`
+	PinnedAt          *int64 `json:"pinnedAt"`
+	MuteMode          string `json:"muteMode"`
+	MutedUntil        *int64 `json:"mutedUntil"`
+	HasUnreadMention  bool   `json:"hasUnreadMention"`
 	// DisappearingSecs is the chat's disappearing-messages timer (0 = off).
 	DisappearingSecs uint32 `json:"disappearingSecs,omitempty"`
 }
@@ -438,6 +441,7 @@ func (s *MessageStore) initLocked() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp ON messages(chat_id, timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_history_staged_pending ON history_staged_messages(chat_id, imported, timestamp DESC)`,
 		`CREATE TRIGGER IF NOT EXISTS update_chat_timestamp
                         AFTER INSERT ON messages
@@ -914,6 +918,19 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			MAX(ephemeral_secs) as ephemeral_secs
                     FROM normalized_chats
                     GROUP BY target_id
+                ),
+                chat_last_messages AS (
+                    SELECT
+                        g.target_id,
+                        (
+                            SELECT m.id
+                            FROM normalized_chats nc2
+                            JOIN messages m ON m.chat_id = nc2.original_id
+                            WHERE nc2.target_id = g.target_id AND m.deleted_at IS NULL
+                            ORDER BY m.timestamp DESC, m.rowid DESC
+                            LIMIT 1
+                        ) AS message_id
+                    FROM grouped_chats g
                 )
                 SELECT 
                     g.target_id, 
@@ -921,6 +938,9 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
                     g.avatar, 
                     COALESCE((SELECT last_msg FROM normalized_chats nc2 WHERE nc2.target_id = g.target_id ORDER BY last_time DESC LIMIT 1), '') as last_msg,
                     g.last_time,
+                    COALESCE(last_message.id, ''),
+                    COALESCE(last_message.status, ''),
+                    COALESCE(last_message.sender_id = 'me', 0),
                     g.unread,
                     g.is_active,
 			g.is_group,
@@ -930,6 +950,8 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			g.muted_until,
 			g.ephemeral_secs
                 FROM grouped_chats g
+                LEFT JOIN chat_last_messages lm ON lm.target_id = g.target_id
+                LEFT JOIN messages last_message ON last_message.id = lm.message_id
                 ORDER BY g.last_time DESC
         `
 
@@ -950,6 +972,9 @@ func (s *MessageStore) GetChats() ([]Chat, error) {
 			&chat.Avatar,
 			&chat.LastMsg,
 			&chat.LastTime,
+			&chat.LastMessageID,
+			&chat.LastMessageStatus,
+			&chat.LastMessageFromMe,
 			&chat.Unread,
 			&isActive,
 			&isGroup,

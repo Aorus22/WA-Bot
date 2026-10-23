@@ -31,10 +31,12 @@ interface ChatSidebarProps {
         lastTime: number; 
         msgId: string; 
         status?: string; 
+        fromMe?: boolean;
         senderName?: string; 
         chatName?: string; 
         chatAvatar?: string 
     } | null
+    statusUpdate?: { id: string; status: string } | null
     className?: string
 }
 
@@ -51,11 +53,36 @@ const getAvatarUrl = (chat: Chat): string | undefined => {
     return undefined
 }
 
+function ChatMessageStatus({ status }: { status: string }) {
+    const label = status === "read" ? "Read" : status === "delivered" ? "Delivered" : status === "sent" ? "Sent" : ""
+    if (!label) return null
+
+    return (
+        <span
+            aria-label={label}
+            title={label}
+            className={cn("inline-flex h-4 w-5 shrink-0 items-center", status === "read" ? "text-[#53bdeb]" : "text-current/60")}
+        >
+            <svg width="20" height="16" viewBox="0 0 20 16" fill="none" aria-hidden="true">
+                {status === "sent" ? (
+                    <path d="M13.5 4.5L6.5 11.5L3 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                ) : (
+                    <>
+                        <path d="M11.5 4.5L5.5 10.5L2.5 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M17.5 4.5L11.5 10.5L8.5 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </>
+                )}
+            </svg>
+        </span>
+    )
+}
+
 export const ChatSidebar = memo(({
     selectedChatId,
     onChatSelect,
     onChatsLoaded,
     chatUpdate,
+    statusUpdate,
     className,
 }: ChatSidebarProps) => {
     const chats = useChatStore(s => s.chats)
@@ -94,6 +121,8 @@ export const ChatSidebar = memo(({
             }
 
             const existingChat = chats.find(c => c.id === chatUpdate.chatId)
+            const hasMessage = chatUpdate.status !== undefined || chatUpdate.lastMsg !== ""
+            const messageStatus = statusUpdate?.id === chatUpdate.msgId ? statusUpdate.status : chatUpdate.status
             // My own messages (sent from the phone, say) are never unread.
             const isIncoming = chatUpdate.status === "received" || (!chatUpdate.status && chatUpdate.lastMsg !== "")
 
@@ -104,6 +133,9 @@ export const ChatSidebar = memo(({
                     avatar: "",
                     lastMsg: chatUpdate.lastMsg,
                     lastTime: chatUpdate.lastTime,
+                    lastMessageId: hasMessage ? chatUpdate.msgId : "",
+                    lastMessageStatus: hasMessage ? messageStatus || "" : "",
+                    lastMessageFromMe: hasMessage && Boolean(chatUpdate.fromMe),
                     unread: selectedChatId === chatUpdate.chatId || !isIncoming ? 0 : 1,
                     isActive: true,
                     isGroup: chatUpdate.chatId.includes("@g.us"),
@@ -123,11 +155,16 @@ export const ChatSidebar = memo(({
                     avatar: chatUpdate.chatAvatar || existingChat.avatar,
                     lastMsg: chatUpdate.lastMsg,
                     lastTime: chatUpdate.lastTime,
+                    ...(hasMessage ? {
+                        lastMessageId: chatUpdate.msgId,
+                        lastMessageStatus: messageStatus || "",
+                        lastMessageFromMe: Boolean(chatUpdate.fromMe),
+                    } : {}),
                     unread: newUnread,
                 })
             }
         }
-    }, [chatUpdate, selectedChatId, chats, upsertChat])
+    }, [chatUpdate, statusUpdate, selectedChatId, chats, upsertChat])
 
     // Clear unread when chat is selected. With read receipts off the backend
     // keeps the chat unread, and so does the list.
@@ -363,7 +400,10 @@ export const ChatSidebar = memo(({
                                                     const label = typingLabel(typistsOf(typing, chat.id, jid => chats.find(c => c.id === jid)?.name), chat.isGroup)
                                                     return label
                                                         ? <span className="truncate font-medium text-emerald-500">{label}</span>
-                                                        : <span className="truncate">{chat.lastMsg || "Tap to chat"}</span>
+                                                        : <>
+                                                            {chat.lastMessageFromMe && <ChatMessageStatus status={chat.lastMessageStatus} />}
+                                                            <span className="truncate">{chat.lastMsg || "Tap to chat"}</span>
+                                                        </>
                                                 })()}
                                             </span>
                                         </p>
