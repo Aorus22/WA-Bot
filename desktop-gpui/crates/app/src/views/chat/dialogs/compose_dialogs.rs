@@ -124,7 +124,7 @@ impl ChatView {
             .px_4()
             .py_2()
             .rounded_xl()
-            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
+            .when(shape.styled, |button| button.rounded(px(shape.radius_button)))
             .border_1()
             .border_color(if primary { primary_color } else { border_color })
             .bg(if primary { primary_color } else { rgba(0x00000000).into() })
@@ -141,8 +141,6 @@ impl ChatView {
         &mut self,
         window: &mut Window,
         theme: ActiveTokens,
-        border_color: Hsla,
-        card_bg: Hsla,
         primary_color: Hsla,
         text_color: Hsla,
         muted_text: Hsla,
@@ -151,9 +149,9 @@ impl ChatView {
         let dialog = self.compose_dialog?;
         let shape = cx.shape();
         let surface = cx.surface();
-        let scrim = if shape.adwaita { surface.scrim } else { surface.scrim_default };
-        let dialog_bg = if shape.adwaita { surface.dialog } else { card_bg };
-        let dialog_border = if shape.adwaita { surface.border } else { border_color };
+        let scrim = surface.scrim;
+        let dialog_bg = surface.dialog;
+        let dialog_border = surface.border;
         let busy = self.is_sending_attachment;
 
         let (title, body, action_label): (&str, Vec<AnyElement>, &str) = match dialog {
@@ -210,7 +208,7 @@ impl ChatView {
                         .px_3()
                         .py_1p5()
                         .rounded_lg()
-                        .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
+                        .when(shape.styled, |button| button.rounded(px(shape.radius_button)))
                         .border_1()
                         .border_color(dialog_border)
                         .text_xs()
@@ -293,12 +291,13 @@ impl ChatView {
                         .p_5()
                         .gap_3()
                         .rounded_2xl()
-                        .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                        .when(shape.styled, |dialog| dialog.rounded(px(shape.radius_popover)))
                         .bg(dialog_bg)
                         .border_1()
                         .border_color(dialog_border)
-                        .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
-                        .when(shape.adwaita, |dialog| dialog.shadow_md())
+                        .when(!shape.styled, |dialog| dialog.shadow_2xl())
+                        .when(shape.styled && !shape.winui, |dialog| dialog.shadow_md())
+                            .when(shape.winui, |dialog| dialog.shadow(crate::theme::shape::dialog_shadow()))
                         .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
                             if ev.keystroke.key.as_str() == "escape" {
                                 this.close_compose_dialog(cx);
@@ -309,7 +308,7 @@ impl ChatView {
                                 .w_full()
                                 .justify_between()
                                 .items_center()
-                                .when(shape.adwaita, |header| header.h(px(shape.header_height)).bg(surface.headerbar))
+                                .when(shape.styled, |header| header.h(px(shape.header_height)).bg(surface.headerbar))
                                 .child(
                                     div()
                                         .text_lg()

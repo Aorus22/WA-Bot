@@ -9,16 +9,14 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
         let theme = *cx.app_theme();
-        let border_color = theme.border;
-        let card_bg = theme.card;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         let shape = cx.shape();
         let surface = cx.surface();
-        let scrim = if shape.adwaita { surface.scrim } else { surface.scrim_default };
-        let dialog_bg = if shape.adwaita { surface.dialog } else { card_bg };
-        let dialog_border = if shape.adwaita { surface.border } else { border_color };
+        let scrim = surface.scrim;
+        let dialog_bg = surface.dialog;
+        let dialog_border = surface.border;
         if self.forward_msg.is_some() {
             let targets: Vec<Chat> = if cx.has_global::<ChatStore>() {
                 ChatStore::global(cx).chats.iter().filter(|c| !c.archived).cloned().collect()
@@ -43,18 +41,19 @@ impl ChatView {
                             .w(px(400.0))
                             .p_5()
                             .rounded_2xl()
-                            .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                            .when(shape.styled, |dialog| dialog.rounded(px(shape.radius_popover)))
                             .bg(dialog_bg)
                             .border_1()
                             .border_color(dialog_border)
-                            .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
-                            .when(shape.adwaita, |dialog| dialog.shadow_md())
+                            .when(!shape.styled, |dialog| dialog.shadow_2xl())
+                            .when(shape.styled && !shape.winui, |dialog| dialog.shadow_md())
+                            .when(shape.winui, |dialog| dialog.shadow(crate::theme::shape::dialog_shadow()))
                             .gap_4()
                             .child(
                                 h_flex()
                                     .justify_between()
                                     .items_center()
-                                    .when(shape.adwaita, |header| header.h(px(shape.header_height)).bg(surface.headerbar))
+                                    .when(shape.styled, |header| header.h(px(shape.header_height)).bg(surface.headerbar))
                                     .child(div().text_lg().font_weight(FontWeight::BOLD).text_color(text_color).child("Forward message to"))
                                     .child(
                                         div()
@@ -80,15 +79,15 @@ impl ChatView {
                                         let cid = c.id.clone();
                                         h_flex()
                                             .cursor_pointer()
-                                            .when(!shape.adwaita, |row| row.p_2().rounded_lg())
+                                            .when(!shape.styled, |row| row.p_2().rounded_lg())
                                             .items_center()
                                             .justify_between()
                                             .bg(if is_checked {
-                                                if shape.adwaita { surface.card_shade } else { theme.primary.opacity(0.12) }
+                                                surface.card_shade
                                             } else {
                                                 rgba(0x00000000).into()
                                             })
-                                            .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.4) }))
+                                            .hover(|s| s.bg(surface.dialog_row_hover))
                                             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                                                 if !this.forward_selected.remove(&cid) {
                                                     this.forward_selected.insert(cid.clone());
@@ -114,7 +113,7 @@ impl ChatView {
                                                     }),
                                             )
                                     })))
-                                    .when(!shape.adwaita, |list| list.gap_1()),
+                                    .when(!shape.styled, |list| list.gap_1()),
                             )
                             .child(
                                 h_flex()
@@ -126,7 +125,7 @@ impl ChatView {
                                             .px_4()
                                             .py_2()
                                             .rounded_xl()
-                                            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
+                                            .when(shape.styled, |button| button.rounded(px(shape.radius_button)))
                                             .border_1()
                                             .border_color(dialog_border)
                                             .text_xs()
@@ -144,7 +143,7 @@ impl ChatView {
                                             .px_4()
                                             .py_2()
                                             .rounded_xl()
-                                            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
+                                            .when(shape.styled, |button| button.rounded(px(shape.radius_button)))
                                             .bg(primary_color)
                                             .opacity(if can_send { 1.0 } else { 0.5 })
                                             .cursor_pointer()

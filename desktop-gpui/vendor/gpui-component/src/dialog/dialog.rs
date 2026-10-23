@@ -667,7 +667,7 @@ impl RenderOnce for Dialog {
                                         .test_support()
                                         .debug_selector(move || format!("dialog-{layer_ix}"))
                                         .bg(cx.theme().tokens.background)
-                                        .when(cx.theme().adwaita, |style| {
+                                        .when(cx.theme().adwaita || cx.theme().winui, |style| {
                                             style.bg(cx.theme().adwaita_dialog_bg.unwrap_or(cx.theme().background))
                                         })
                                         .border_1()

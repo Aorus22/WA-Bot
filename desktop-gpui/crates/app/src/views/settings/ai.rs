@@ -4,7 +4,7 @@ use gpui::*;
 use crate::theme::shape::ShapeExt;
 
 use crate::components::ui::{
-    card_group, Icon, IconName, dropdown_menu::{dropdown_list, DropdownMenuStyle},
+    settings_group, Icon, IconName, dropdown_menu::{dropdown_list, DropdownMenuStyle},
 };
 use super::{settings_section_heading, EditField, SettingsView};
 use crate::theme::manager::AppThemeExt;
@@ -78,7 +78,7 @@ impl SettingsView {
         let key_state = |set: bool| if set { "•••••••••••••••• (set)" } else { "Not set" };
         let or_dash = |v: &str, empty: &str| if v.trim().is_empty() { empty.to_string() } else { v.to_string() };
 
-        let mut card = card_group(cx)
+        let mut card = settings_group()
             // Provider
             .child(
                 div()

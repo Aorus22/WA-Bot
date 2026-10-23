@@ -7,7 +7,8 @@ use gpui::{
 use crate::components::ui::{v_flex, Icon, IconName, Tooltip};
 use crate::components::motion;
 use crate::router::{AppRoute, Router};
-use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::state::auth::{AuthState, AuthStatus};
+use crate::theme::manager::AppThemeExt;
 use crate::theme::shape::ShapeExt;
 use crate::theme::surface::SurfaceExt;
 use crate::window_material;
@@ -25,24 +26,14 @@ impl NavigationSidebar {
 
 impl RenderOnce for NavigationSidebar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = cx.app_theme();
-        let window_transparency = ThemeManager::global(cx).window_transparency;
         let shape = cx.shape();
         let surface = cx.surface();
-        let background = if shape.adwaita {
-            if window.is_window_active() {
-                surface.sidebar
-            } else {
-                surface.sidebar_backdrop
-            }
+        let background = if window.is_window_active() {
+            surface.navigation_sidebar_background
         } else {
-            window_material::glass_fill(theme.background, window_transparency)
+            surface.navigation_sidebar_backdrop
         };
-        let border = if shape.adwaita {
-            surface.sidebar_border
-        } else {
-            theme.border.opacity(0.4)
-        };
+        let border = surface.navigation_sidebar_border;
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
         let current_prefix = if cx.has_global::<Router>() {
@@ -50,6 +41,9 @@ impl RenderOnce for NavigationSidebar {
         } else {
             "/chat"
         };
+        let unlinked = cx.has_global::<AuthState>()
+            && AuthState::global(cx).status == AuthStatus::Unauthenticated;
+        let chat_chrome = current_prefix == "/chat" && !unlinked && !crate::popover::is_popover(cx);
 
         v_flex()
             .id("nav-sidebar")
@@ -64,6 +58,9 @@ impl RenderOnce for NavigationSidebar {
             .when(framed, |s| {
                 s.rounded_bl(px(shape.radius_window))
             })
+            // Chat uses the pane header as its titlebar, so it needs to own the
+            // window's top-left corner when the standalone titlebar is hidden.
+            .when(framed && chat_chrome, |s| s.rounded_tl(px(shape.radius_window)))
             .justify_between()
             .child(
                 // Top nav items
@@ -105,17 +102,20 @@ impl NavigationSidebar {
 
         // The active pill and its edge indicator ease in when an item becomes
         // active (id differs from the inactive one, so the animation restarts).
-        let indicator: AnyElement = if is_active && !shape.adwaita {
+        let indicator: AnyElement = if is_active && (!shape.styled || shape.winui) {
+            // Fluent's selection pill is 3x16 and fully rounded; stock is a 24px edge bar.
+            let (height, radius) = if shape.winui { (16., 1.5) } else { (24., 0.) };
             div()
                 .absolute()
-                .left_0()
+                .left(px(if shape.winui { 4. } else { 0. }))
                 .w(px(3.))
                 .bg(theme.primary)
-                .rounded_r_full()
+                .when(shape.winui, |s| s.rounded(px(radius)))
+                .when(!shape.winui, |s| s.rounded_r_full())
                 .with_animation(
                     (ElementId::from("nav-indicator"), label),
                     motion::enter(motion::BASE_MS),
-                    |el, d| el.h(px(24. * d)).opacity(d),
+                    move |el, d| el.h(px(height * d)).opacity(d),
                 )
                 .into_any_element()
         } else {
@@ -136,26 +136,19 @@ impl NavigationSidebar {
             })
             .when(!is_active, |s| {
                 s.text_color(theme.muted_foreground)
-                    .hover(|h| {
-                        h.bg(if shape.adwaita {
-                            theme.foreground.opacity(0.05)
-                        } else {
-                            theme.muted.opacity(0.8)
-                        })
-                        .text_color(theme.foreground)
-                    })
+                    .hover(|h| h.bg(surface.navigation_hover).text_color(theme.foreground))
             })
             .child(Icon::new(icon));
 
         let button: AnyElement = if is_active {
-            if shape.adwaita {
+            if shape.styled {
                 button
-                    .bg(surface.selection_unfocused)
+                    .bg(surface.navigation_selected)
                     .text_color(theme.foreground)
-                    .hover(|h| h.bg(theme.foreground.opacity(0.15)))
+                    .hover(|h| h.bg(surface.navigation_selected_hover))
                     .into_any_element()
             } else {
-                let (bg, from_fg, to_fg) = (theme.primary, theme.muted_foreground, theme.primary_foreground);
+                let (bg, from_fg, to_fg) = (surface.navigation_selected, theme.muted_foreground, theme.primary_foreground);
                 button
                     .hover(|h| h.bg(theme.primary.opacity(0.85)))
                     .with_animation(

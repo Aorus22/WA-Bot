@@ -20,7 +20,7 @@ where
     let mut children: Vec<AnyElement> = Vec::with_capacity(row_count.saturating_mul(2).saturating_sub(1));
 
     for (index, row) in rows.into_iter().enumerate() {
-        if shape.adwaita && index > 0 {
+        if shape.styled && index > 0 {
             children.push(
                 div()
                     .w_full()
@@ -30,7 +30,7 @@ where
             );
         }
 
-        let row = if shape.adwaita {
+        let row = if shape.styled {
             let top_radius = if index == 0 { shape.radius_group } else { shape.radius_flat };
             let bottom_radius = if index + 1 == row_count { shape.radius_group } else { shape.radius_flat };
             row.min_h(px(shape.list_row_min_height))
@@ -46,7 +46,7 @@ where
         children.push(row.into_any_element());
     }
 
-    let list = if shape.adwaita {
+    let list = if shape.styled {
         card_group(cx)
     } else {
         v_flex().w_full()

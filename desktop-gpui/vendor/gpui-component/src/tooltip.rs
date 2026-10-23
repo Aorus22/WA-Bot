@@ -124,7 +124,7 @@ impl Render for Tooltip {
                 .text_sm()
                 .gap_3()
                 .refine_style(&self.style)
-                .when(cx.theme().adwaita, |this| {
+                .when(cx.theme().adwaita || cx.theme().winui, |this| {
                     this.bg(gpui::rgb(0x000000).opacity(0.8))
                         .text_color(gpui::rgb(0xffffff))
                         .border_color(gpui::rgb(0xffffff).opacity(0.10))

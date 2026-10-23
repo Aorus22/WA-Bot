@@ -25,6 +25,9 @@ pub enum TextFieldEvent {
 #[derive(Clone)]
 pub struct TextField {
     state: Entity<InputState>,
+    /// Tracks focus for the field shell so the Fluent accent line follows it.
+    shell_focus: FocusHandle,
+    input_focus: FocusHandle,
 }
 
 impl TextField {
@@ -66,7 +69,8 @@ impl TextField {
             }
         })
         .detach();
-        Self { state }
+        let input_focus = state.read(cx).focus_handle(cx);
+        Self { state, shell_focus: cx.focus_handle(), input_focus }
     }
 
     pub fn value(&self, cx: &App) -> String {
@@ -95,13 +99,14 @@ impl TextField {
         shape: ShapeTokens,
         leading: Option<&'static [u8]>,
     ) -> Div {
-        self.element_on(
+        self.build_element(
             theme.foreground,
             theme.muted_foreground,
             theme.muted.opacity(0.5),
             theme.border.opacity(0.3),
             shape,
             leading,
+            Some(theme.accent),
         )
     }
 
@@ -116,20 +121,41 @@ impl TextField {
         shape: ShapeTokens,
         leading: Option<&'static [u8]>,
     ) -> Div {
-        let (fill, border) = if shape.adwaita {
+        self.build_element(text, icon, fill, border, shape, leading, None)
+    }
+
+    fn build_element(
+        &self,
+        text: Hsla,
+        icon: Hsla,
+        fill: Hsla,
+        border: Hsla,
+        shape: ShapeTokens,
+        leading: Option<&'static [u8]>,
+        accent: Option<Hsla>,
+    ) -> Div {
+        let fluent = shape.winui;
+        let dark_text = text.l < 0.5;
+        let (fill, border) = if fluent {
+            // Fluent TextBox: raised fill with a 1px control stroke.
+            // ControlFillColorDefault: white 70% on light, white 5.9% on dark.
+            let fill = if dark_text { gpui::white().opacity(0.70) } else { gpui::white().opacity(0.0588) };
+            (fill, if dark_text { gpui::black().opacity(0.0588) } else { gpui::white().opacity(0.0706) })
+        } else if shape.styled {
             (text.opacity(0.10), text.opacity(0.0))
         } else {
             (fill, border)
         };
-        h_flex()
+        let field = h_flex()
             .w_full()
             .items_center()
             .gap_2()
             .px_3()
             .rounded(px(shape.radius_field))
-            .when(!shape.adwaita, |this| this.border_1().border_color(border))
+            .when(!shape.styled || fluent, |this| this.border_1().border_color(border))
             .bg(fill)
-            .cursor_text()
+            .cursor_text();
+        let content = field
             .when_some(leading, |el, icon_data| {
                 el.child(svg().data(icon_data).size(px(14.0)).flex_shrink_0().text_color(icon))
             })
@@ -141,7 +167,33 @@ impl TextField {
                     .flex_1()
                     .text_sm()
                     .text_color(text),
-            )
+            );
+        match accent.filter(|_| fluent) {
+            // The 2px accent underline Fluent draws under a focused TextBox.
+            Some(accent) => {
+                let input_focus = self.input_focus.clone();
+                // ControlFillColorInputActive: #1E1E1E at 70% on dark, white on light.
+                let focused_fill = if dark_text { gpui::white() } else { Hsla::from(gpui::rgb(0x1e1e1e)).opacity(0.70) };
+                div().w_full().child(
+                    content
+                        .id(("text-field", self.state.entity_id().as_u64()))
+                        .track_focus(&self.shell_focus)
+                        .in_focus(move |s| {
+                            s.bg(focused_fill).shadow(vec![gpui::BoxShadow {
+                                color: accent,
+                                offset: gpui::point(px(0.0), px(-2.0)),
+                                blur_radius: px(0.0),
+                                spread_radius: px(0.0),
+                                inset: true,
+                            }])
+                        })
+                        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                            window.focus(&input_focus, cx);
+                        }),
+                )
+            }
+            None => content,
+        }
     }
 }
 

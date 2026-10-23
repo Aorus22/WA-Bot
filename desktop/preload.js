@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electron', {
     maximize: () => ipcRenderer.send('window-maximize'),
     close: () => ipcRenderer.send('window-close'),
     getWindowState: () => ipcRenderer.invoke('get-window-state'),
+    setWindowMaterial: (material) => ipcRenderer.send('window-set-background-material', material),
     onWindowStateChange: (callback) =>
         ipcRenderer.on('window-state-change', (_event, state) => callback(state)),
     getBackendPort: () => ipcRenderer.invoke('get-backend-port'),

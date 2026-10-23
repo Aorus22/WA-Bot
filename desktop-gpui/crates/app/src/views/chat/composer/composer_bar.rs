@@ -30,13 +30,9 @@ impl ChatView {
         // No bar behind the pill: it floats over the chat, as in WhatsApp Web.
         v_flex()
             .relative()
-            .when(shape.adwaita, |s| s.bg(surface.window))
+            .bg(surface.composer_background)
             .when(framed, |s| {
-                s.rounded_br(px(if shape.adwaita {
-                    shape.radius_window
-                } else {
-                    window_material::corner_radius(cx)
-                }))
+                s.rounded_br(px(shape.radius_window))
             })
             // Reply Preview Banner
             .children(if let Some(ref r_msg) = self.reply_to {
@@ -290,22 +286,8 @@ impl ChatView {
                         .justify_center()
                         .flex_shrink_0()
                         .cursor_pointer()
-                        .bg(if active {
-                            if shape.adwaita {
-                                theme.foreground.opacity(0.10)
-                            } else {
-                                primary_color.opacity(0.15)
-                            }
-                        } else {
-                            rgba(0x00000000).into()
-                        })
-                        .hover(|s| {
-                            s.bg(if shape.adwaita {
-                                theme.foreground.opacity(0.15)
-                            } else {
-                                theme.muted.opacity(0.65)
-                            })
-                        })
+                        .bg(if active { surface.composer_action_active } else { rgba(0x00000000).into() })
+                        .hover(|s| s.bg(surface.composer_action_hover))
                 };
                 h_flex()
                     .p_3()
@@ -316,14 +298,10 @@ impl ChatView {
                             .px_2()
                             .py_1()
                             .rounded(radius_input)
-                            .when(!shape.adwaita, |el| {
-                                el.border_1().border_color(border_color.opacity(0.2))
+                            .when(surface.composer_field_border.a > 0.0, |el| {
+                                el.border_1().border_color(surface.composer_field_border)
                             })
-                            .bg(if shape.adwaita {
-                                theme.foreground.opacity(0.10)
-                            } else {
-                                theme.muted.opacity(0.5)
-                            })
+                            .bg(surface.composer_field_fill)
                             .items_center()
                             .gap_1()
                             .cursor_text()

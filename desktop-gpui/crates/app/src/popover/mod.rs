@@ -22,7 +22,6 @@ use gpui::{
     Render, Styled, Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
 
-use crate::theme::manager::ThemeManager;
 use crate::theme::shape::ShapeExt;
 use crate::theme::surface::SurfaceExt;
 use crate::window_material;
@@ -498,24 +497,14 @@ impl Render for PopoverFrame {
         let viewport = window.viewport_size();
         let shape = cx.shape();
         let surface = cx.surface();
-        let radius = if shape.adwaita { shape.radius_popover } else { CARD_RADIUS };
+        let radius = shape.radius_popover;
         window_material::set_blur_regions(window, &rounded_blur_regions(
             f32::from(viewport.width),
             f32::from(viewport.height),
             radius,
         ));
-        let (background, border, transparency) = {
-            let theme = ThemeManager::global(cx);
-            if shape.adwaita {
-                (surface.popover, surface.border, theme.window_transparency)
-            } else {
-                (
-                    theme.tokens.background,
-                    theme.tokens.border,
-                    theme.window_transparency,
-                )
-            }
-        };
+        let background = surface.popover_frame_fill;
+        let border = surface.popover_frame_border;
         // The card is a fresh window on every toggle, so this plays on each
         // open: it fades in while sliding out from the panel edge it hangs
         // from (the layer surface clips the part still "behind" the panel).
@@ -529,11 +518,7 @@ impl Render for PopoverFrame {
             .relative()
             .size_full()
             .rounded(px(radius))
-            .bg(if shape.adwaita {
-                background
-            } else {
-                window_material::glass_fill(background, transparency)
-            })
+            .bg(background)
             .border_1()
             .border_color(border)
             .p(px(5.0))

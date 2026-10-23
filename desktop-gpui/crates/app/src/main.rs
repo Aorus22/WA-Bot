@@ -69,6 +69,14 @@ fn main() {
                 include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
             let _ = cx.text_system().add_fonts(vec![Cow::Borrowed(font_bytes)]);
 
+            // Selawik (Microsoft's open Segoe UI stand-in) is the Fluent profile's font
+            // off Windows, where Segoe UI Variable is not available.
+            let _ = cx.text_system().add_fonts(vec![
+                Cow::Borrowed(include_bytes!("../assets/fonts/Selawik-Regular.ttf") as &'static [u8]),
+                Cow::Borrowed(include_bytes!("../assets/fonts/Selawik-Semibold.ttf") as &'static [u8]),
+                Cow::Borrowed(include_bytes!("../assets/fonts/Selawik-Bold.ttf") as &'static [u8]),
+            ]);
+
             // Color emoji: gpui's Linux text stack (swash) rasterizes CBDT bitmap
             // emoji but not the COLRv1 font most distros ship, which renders as
             // blank glyphs. Bundle the CBDT build of Noto Color Emoji.
@@ -184,7 +192,7 @@ fn main() {
                         titlebar: None,
                         app_id: Some("dev.wabot.popover".to_string()),
                         window_background: window_material::background_appearance(
-                            ThemeManager::global(cx).window_blur_enabled,
+                            ThemeManager::global(cx).effective_window_blur_enabled(),
                         ),
                         kind: WindowKind::LayerShell(popover::card_layer_options(&placement)),
                         ..Default::default()
@@ -196,7 +204,7 @@ fn main() {
                         window_min_size: Some(size(px(480.0), px(420.0))),
                         app_id: Some("wa-bot".to_string()),
                         window_background: window_material::background_appearance(
-                            ThemeManager::global(cx).window_blur_enabled,
+                            ThemeManager::global(cx).effective_window_blur_enabled(),
                         ),
                         window_decorations: Some(WindowDecorations::Client),
                         titlebar: Some(TitlebarOptions {

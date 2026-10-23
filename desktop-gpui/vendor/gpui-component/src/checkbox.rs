@@ -189,11 +189,12 @@ pub(crate) fn checkbox_check_icon(
         window,
         cx,
     );
-    let color = if disabled {
-        cx.theme().primary_foreground.opacity(0.5)
+    let glyph = if cx.theme().winui {
+        cx.theme().accent_foreground
     } else {
         cx.theme().primary_foreground
     };
+    let color = if disabled { glyph.opacity(0.5) } else { glyph };
 
     svg()
         .absolute()
@@ -218,6 +219,8 @@ impl RenderOnce for Checkbox {
         let has_content = self.label.is_some() || !self.children.is_empty();
         let indicator_size = rems(if cx.theme().adwaita {
             1.375
+        } else if cx.theme().winui {
+            1.25
         } else {
             match self.size {
                 Size::XSmall => 0.75,
@@ -239,12 +242,14 @@ impl RenderOnce for Checkbox {
             .clone();
         let is_focused = focus_handle.is_focused(window);
 
-        let unchecked_border = if cx.theme().adwaita {
+        let unchecked_border = if cx.theme().winui {
+            cx.theme().winui_colors.strong_stroke
+        } else if cx.theme().adwaita {
             cx.theme().foreground.opacity(0.25)
         } else {
             cx.theme().input
         };
-        let checked_color = if cx.theme().adwaita {
+        let checked_color = if cx.theme().adwaita || cx.theme().winui {
             cx.theme().accent
         } else {
             cx.theme().primary
@@ -305,7 +310,9 @@ impl RenderOnce for Checkbox {
                     .border_1()
                     .rounded(radius)
                     .when(!checked, |this| {
-                        this.bg(if cx.theme().adwaita {
+                        this.bg(if cx.theme().winui {
+                            cx.theme().winui_colors.alt_fill
+                        } else if cx.theme().adwaita {
                             cx.theme().background
                         } else {
                             cx.theme().input_background()
@@ -316,7 +323,7 @@ impl RenderOnce for Checkbox {
                         styles
                             .checked(|style| {
                                 let style = style.border_color(checked_color);
-                                if cx.theme().adwaita {
+                                if cx.theme().adwaita || cx.theme().winui {
                                     style.bg(cx.theme().accent)
                                 } else {
                                     style.bg(cx.theme().tokens.primary)

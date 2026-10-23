@@ -33,6 +33,7 @@ change in the other, in the same commit or the same PR.
 | Backup | `views/settings_backup.rs` | `BackupSection.tsx` |
 | AI provider | `views/settings_ai.rs` | `SettingsPage.tsx` (AI) |
 | Theme picker | `settings.rs` (modal) | `SettingsPage.tsx` (dialog) |
+| WinUI / Fluent style | `theme/shape.rs` (`WINUI`), `SurfaceTokens::apply_fluent` in `theme/surface.rs`, setting `winui_style` | `--winui-*` vars and `:root[data-style="winui"]` rules in `index.css`, key `wa-bot-winui-style` |
 | GTK style (shape tokens) | `theme/shape.rs`, `ThemeManager::apply_gtk_style`, setting `gtk_style` | `--shape-*` vars in `index.css`, `data-style="adwaita"` set by `AppThemeProvider.tsx`, key `wa-bot-gtk-style` |
 | Typing indicator | `state/chat.rs`, `chat_list.rs`, `conversation/typing.rs` | `stores/typingStore.ts`, `ChatSidebar.tsx`, `ChatArea.tsx` |
 | Calls page | `views/calls.rs` | `src/pages/calls/CallHistoryPage.tsx` |
@@ -99,3 +100,39 @@ Use a token instead of a literal radius, surface colour, or control/header heigh
 view. Adwaita reference values include 9px control radii, 12px cards and message bubbles,
 15px popovers/windows, 34px controls, and a 46px headerbar. They are based on
 `ricewind012/discord-gnome-theme` (`libadwaita-other.scss`, `controls.scss`).
+
+## WinUI / Fluent style
+
+The Fluent profile copies the Windows 11 WinUI templates: values come from
+microsoft-ui-xaml (`Common_themeresources_any.xaml` and the per-control theme
+resources), not from the active palette. Only the accent comes from the palette; the
+surface and text colors are neutral. Both clients use the same values.
+
+- Layers: the window, navigation pane and title bar are the base layer (`#202020` /
+  `#f3f3f3`, no border). The content area is a sheet above it (`#282828` / `#f9f9f9`)
+  with a 1px stroke on its left and top edges and an 8px top-left radius. Cards are a
+  5% white (dark) / 70% white (light) overlay with a 1px stroke; flyouts `#2c2c2c` /
+  `#fcfcfc`. Text is white / 90% black, secondary 77% / 62%.
+- Controls: buttons 4px radius, padding 11/5, regular weight, fill 6% / 8% / 3% ink.
+  Switch 40x20 with a 12px knob (outline when off). Checkbox and radio 20px. Slider
+  4px track with an 18px thumb and a 12px accent dot. Text box 32px with a 2px accent
+  line while focused. Scrollbar thumb 6px in gpui, 2px growing to 6px on web.
+- Accent: darker shade on light, lighter shade on dark, with 90% / 80% on hover / press.
+  gpui lightens the palette primary and picks black or white text by contrast; web uses
+  the palette accent and its own on-accent color.
+- Selected nav and list items: 3x16 accent pill on the leading edge, subtle fill.
+- Settings: each row is its own card (68px minimum, 4px radius, 4px apart); section
+  headings are 14px semibold sentence case. gpui renders this with `SettingsGroup`
+  (`components/ui/card.rs`); sections that are one card (backup, history, update) stay
+  one card.
+- Flyouts and dialogs use the Fluent two-layer shadows; cards have none.
+- Font: Segoe UI Variable on Windows, bundled Selawik (Microsoft's open Segoe UI
+  stand-in, OFL) elsewhere. gpui bundles `assets/fonts/Selawik-*.ttf`; web serves
+  `public/fonts/selawik-*.woff2`.
+- gpui caption buttons are 46px wide with a `#c42b1c` close hover and no separator.
+
+Intentional differences: Mica / acrylic blur is not implemented in either client. The
+gpui button has one border color, so the brighter-top (dark) / darker-bottom (light)
+control stroke is a web-only detail. gpui hover states do not animate, so the 167ms
+transition is web-only. The navigation pane stays icon-only at 68px instead of WinUI's
+labelled 320px pane.

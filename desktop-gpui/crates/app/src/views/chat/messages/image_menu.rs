@@ -1,4 +1,5 @@
 
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 /// Container format of an image, from its first bytes.
@@ -56,17 +57,19 @@ impl ChatView {
         let menu = self.image_menu.clone()?;
         let theme = *cx.app_theme();
         let shape = cx.shape();
-        let hover_bg: Hsla = theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 });
+        let surface = cx.surface();
+        let hover_bg = surface.menu_hover;
         macro_rules! styled_menu_row {
             ($($args:tt)*) => {
                 menu_row($($args)*)
-                    .when(shape.adwaita, |row| row.px_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                    .when(shape.styled, |row| row.px_3().py_1p5().rounded(px(shape.radius_menu_item)).overflow_hidden())
             };
         }
         let (muted_text, text_color) = (theme.muted_foreground, theme.foreground);
 
-        let card = menu_surface(208.0, theme.card, theme.border, cx)
-            .when(shape.adwaita, |menu| menu.shadow_sm())
+        let card = menu_surface(208.0, cx)
+            .when(shape.styled && !shape.winui, |menu| menu.shadow_sm())
+                .when(shape.winui, |menu| menu.shadow(crate::theme::shape::flyout_shadow()))
             .child(
                 styled_menu_row!(window, cx, "im-copy", COPY_SVG, "Copy image", muted_text, text_color, hover_bg)
                     .on_mouse_down(MouseButton::Left, cx.listener({

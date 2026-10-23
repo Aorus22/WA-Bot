@@ -1114,3 +1114,703 @@ div[class*="language-"] {
     transition-duration: 0ms !important;
   }
 }
+
+/* WinUI / Windows 11 profile. Neutral Fluent layers and control templates; the
+   active palette only supplies the accent and the text colour. Values come from
+   microsoft-ui-xaml (theme resources and control templates). No Mica/acrylic blur:
+   every surface is a solid colour. */
+@font-face {
+  font-family: "Selawik";
+  src: url("/fonts/selawik-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Selawik";
+  src: url("/fonts/selawik-semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Selawik";
+  src: url("/fonts/selawik-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root[data-style="winui"] {
+  --font-sans: "Segoe UI Variable", "Segoe UI", Selawik, system-ui, sans-serif;
+  --radius: 0.25rem;
+  --shape-group: 4px;
+  --shape-card: 4px;
+  --shape-bubble: 12px;
+  --shape-button: 4px;
+  --shape-input: 4px;
+  --shape-popover: 8px;
+  --shape-window: 8px;
+  --shape-window-control: 0px;
+  --shape-bubble-tail: 4px;
+  --shape-scrollbar-thumb: 3px;
+  --shape-round: 9999px;
+  --shape-row: 4px;
+  --shape-call-row: 4px;
+  --shape-toggle-selected: 4px;
+  --header-h: 48px;
+  --titlebar-h: 48px;
+
+  /* Light theme. Layers: base (nav pane, title bar) < layer (content sheet) < card. */
+  --winui-base: #f3f3f3;
+  --winui-secondary: #eeeeee;
+  --winui-tertiary: #f9f9f9;
+  --winui-layer: #f9f9f9;
+  --winui-window: var(--winui-base);
+  --winui-background: var(--winui-base);
+  --winui-view: var(--winui-layer);
+  --winui-sidebar: var(--winui-base);
+  --winui-sidebar-border: transparent;
+  --winui-card: rgba(255, 255, 255, 0.7);
+  --winui-popover: #fcfcfc;
+  --winui-muted: rgba(0, 0, 0, 0.0373);
+  --winui-text-secondary: color-mix(in srgb, var(--palette-foreground) 62%, transparent);
+  --winui-text-tertiary: color-mix(in srgb, var(--palette-foreground) 45%, transparent);
+  --winui-text-disabled: color-mix(in srgb, var(--palette-foreground) 36%, transparent);
+  --winui-muted-foreground: var(--winui-text-secondary);
+  --winui-border: rgba(0, 0, 0, 0.0578);
+  --winui-card-stroke: rgba(0, 0, 0, 0.0578);
+  --winui-flyout-stroke: rgba(0, 0, 0, 0.0578);
+  --winui-divider: rgba(0, 0, 0, 0.0578);
+  --winui-strong-stroke: rgba(0, 0, 0, 0.4458);
+  --winui-stroke: rgba(0, 0, 0, 0.0578);
+  --winui-stroke-top: rgba(0, 0, 0, 0.0578);
+  --winui-stroke-bottom: rgba(0, 0, 0, 0.1608);
+  --winui-control-fill: rgba(255, 255, 255, 0.7);
+  --winui-control-fill-hover: rgba(249, 249, 249, 0.5);
+  --winui-control-fill-pressed: rgba(249, 249, 249, 0.3);
+  --winui-input: var(--winui-control-fill);
+  --winui-input-hover: var(--winui-control-fill-hover);
+  --winui-input-focus: #ffffff;
+  --winui-subtle-hover: rgba(0, 0, 0, 0.0373);
+  --winui-subtle-pressed: rgba(0, 0, 0, 0.0241);
+  --winui-hover: var(--winui-subtle-hover);
+  --winui-hover-strong: var(--winui-subtle-pressed);
+  --winui-selected: var(--winui-subtle-hover);
+  --winui-alt-fill: rgba(0, 0, 0, 0.0241);
+  --winui-alt-fill-hover: rgba(0, 0, 0, 0.0578);
+  --winui-alt-fill-pressed: rgba(0, 0, 0, 0.0941);
+  /* The palette's own on-accent colour keeps any accent readable; Windows uses
+     black on its (light) dark-mode accent and white on its (dark) light-mode accent. */
+  --winui-on-accent: var(--accent-foreground);
+  --winui-control-height: 32px;
+  --winui-focus: color-mix(in srgb, var(--palette-foreground) 90%, transparent);
+  --winui-smoke: rgba(0, 0, 0, 0.3);
+  --winui-shadow-flyout: 0 8px 16px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
+  --winui-shadow-dialog: 0 32px 64px rgba(0, 0, 0, 0.18), 0 0 8px rgba(0, 0, 0, 0.2);
+  --winui-duration: 167ms;
+}
+
+:root[data-style="winui"].dark {
+  --winui-base: #202020;
+  --winui-secondary: #1c1c1c;
+  --winui-tertiary: #282828;
+  --winui-layer: #282828;
+  --winui-card: rgba(255, 255, 255, 0.0512);
+  --winui-popover: #2c2c2c;
+  --winui-muted: rgba(255, 255, 255, 0.0605);
+  --winui-text-secondary: color-mix(in srgb, var(--palette-foreground) 77%, transparent);
+  --winui-text-tertiary: color-mix(in srgb, var(--palette-foreground) 53%, transparent);
+  --winui-text-disabled: color-mix(in srgb, var(--palette-foreground) 36%, transparent);
+  --winui-border: rgba(0, 0, 0, 0.1);
+  --winui-card-stroke: rgba(0, 0, 0, 0.1);
+  --winui-flyout-stroke: rgba(0, 0, 0, 0.2);
+  --winui-divider: rgba(255, 255, 255, 0.0824);
+  --winui-strong-stroke: rgba(255, 255, 255, 0.5451);
+  --winui-stroke: rgba(255, 255, 255, 0.0706);
+  --winui-stroke-top: rgba(255, 255, 255, 0.0941);
+  --winui-stroke-bottom: rgba(255, 255, 255, 0.0706);
+  --winui-control-fill: rgba(255, 255, 255, 0.0605);
+  --winui-control-fill-hover: rgba(255, 255, 255, 0.0837);
+  --winui-control-fill-pressed: rgba(255, 255, 255, 0.0314);
+  --winui-input-focus: rgba(30, 30, 30, 0.7);
+  --winui-subtle-hover: rgba(255, 255, 255, 0.0605);
+  --winui-subtle-pressed: rgba(255, 255, 255, 0.0419);
+  --winui-alt-fill: rgba(0, 0, 0, 0.1);
+  --winui-alt-fill-hover: rgba(255, 255, 255, 0.0431);
+  --winui-alt-fill-pressed: rgba(255, 255, 255, 0.0706);
+  --winui-shadow-flyout: 0 8px 16px rgba(0, 0, 0, 0.36), 0 0 2px rgba(0, 0, 0, 0.31);
+  --winui-shadow-dialog: 0 32px 64px rgba(0, 0, 0, 0.46), 0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Fluent text is neutral: white on dark, 90% black on light, whatever the palette. The
+   theme provider sets these inline, so only !important can override them. */
+:root[data-style="winui"] {
+  --foreground: rgba(0, 0, 0, 0.8956) !important;
+  --card-foreground: rgba(0, 0, 0, 0.8956) !important;
+  --popover-foreground: rgba(0, 0, 0, 0.8956) !important;
+  --sidebar-foreground: rgba(0, 0, 0, 0.8956) !important;
+}
+
+:root[data-style="winui"].dark {
+  --foreground: #ffffff !important;
+  --card-foreground: #ffffff !important;
+  --popover-foreground: #ffffff !important;
+  --sidebar-foreground: #ffffff !important;
+}
+
+:root[data-style="winui"] body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  background-color: transparent;
+}
+
+:root[data-style="winui"] :is(button, [role="button"], input, textarea, select, [data-slot]) {
+  border-radius: var(--shape-button);
+  transition-duration: var(--winui-duration);
+  transition-timing-function: cubic-bezier(0, 0, 0, 1);
+}
+
+/* Window, base layer and content sheet ------------------------------------ */
+
+:root[data-style="winui"] [data-app-window] {
+  border-radius: var(--shape-window);
+  background-color: var(--winui-base);
+  clip-path: inset(0 round var(--shape-window));
+  -webkit-clip-path: inset(0 round var(--shape-window));
+}
+
+:root[data-style="winui"] [data-app-titlebar] {
+  min-height: var(--header-h);
+  background-color: var(--winui-base);
+  border: 0;
+}
+
+:root[data-style="winui"] [data-app-titlebar] span {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+:root[data-style="winui"] [data-navigation-sidebar] {
+  background-color: var(--winui-base);
+  border-color: transparent;
+}
+
+/* The content layer: a sheet over the base layer with a rounded top-left corner
+   and a stroke on its left and top edges. Pages inside see the layer colour as
+   their background. */
+:root[data-style="winui"] [data-app-content] {
+  --background: var(--winui-layer);
+  background-color: var(--winui-layer);
+  border-style: solid;
+  border-color: var(--winui-card-stroke);
+  border-width: 1px 0 0 1px;
+}
+
+@media (min-width: 768px) {
+  :root[data-style="winui"] [data-app-content] {
+    border-top-left-radius: var(--shape-popover);
+  }
+}
+
+:root[data-style="winui"] [data-main-chat] {
+  background-color: transparent;
+}
+
+:root[data-style="winui"] [data-chat-sidebar] {
+  background-color: transparent;
+  border-color: var(--winui-divider);
+}
+
+:root[data-style="winui"] :is([data-chat-list-header], [data-chat-header], [data-call-list-header], [data-channel-header], [data-slot="sheet-header"]) {
+  min-height: var(--header-h);
+  background-color: transparent;
+  border-color: var(--winui-divider);
+}
+
+:root[data-style="winui"] [data-chat-composer] {
+  background-color: var(--winui-layer);
+  border-color: var(--winui-divider);
+}
+
+/* Buttons ----------------------------------------------------------------- */
+
+:root[data-style="winui"] [data-slot="button"] {
+  min-height: var(--winui-control-height);
+  border: 1px solid var(--winui-stroke);
+  border-top-color: var(--winui-stroke-top);
+  border-bottom-color: var(--winui-stroke-bottom);
+  border-radius: var(--shape-button);
+  font-weight: 400;
+  box-shadow: none;
+}
+
+:root[data-style="winui"] [data-slot="button"][data-size="default"] {
+  height: auto;
+  padding: 5px 11px 6px;
+}
+
+:root[data-style="winui"] [data-slot="button"][data-variant="default"] {
+  color: var(--winui-on-accent);
+  background-color: var(--accent);
+  border-color: color-mix(in srgb, var(--winui-on-accent) 8%, transparent);
+}
+
+:root[data-style="winui"] [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--accent) 90%, transparent);
+}
+
+:root[data-style="winui"] [data-slot="button"][data-variant="default"]:active:not(:disabled) {
+  color: color-mix(in srgb, var(--winui-on-accent) 70%, transparent);
+  background-color: color-mix(in srgb, var(--accent) 80%, transparent);
+  border-color: transparent;
+}
+
+:root[data-style="winui"] [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]) {
+  color: var(--foreground);
+  background-color: var(--winui-control-fill);
+}
+
+:root[data-style="winui"] [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):hover:not(:disabled) {
+  background-color: var(--winui-control-fill-hover);
+}
+
+:root[data-style="winui"] [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):active:not(:disabled) {
+  color: var(--winui-text-secondary);
+  background-color: var(--winui-control-fill-pressed);
+  border-color: var(--winui-stroke);
+}
+
+:root[data-style="winui"] [data-slot="button"]:is([data-variant="ghost"], [data-variant="link"]) {
+  border-color: transparent;
+  background-color: transparent;
+}
+
+:root[data-style="winui"] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) {
+  background-color: var(--winui-subtle-hover);
+}
+
+:root[data-style="winui"] [data-slot="button"][data-variant="ghost"]:active:not(:disabled) {
+  color: var(--winui-text-secondary);
+  background-color: var(--winui-subtle-pressed);
+}
+
+:root[data-style="winui"] [data-slot="button"]:disabled {
+  color: var(--winui-text-disabled);
+  opacity: 1;
+}
+
+/* Text input: 32px, fill/hover/focus fills, 2px accent line on focus ------- */
+
+:root[data-style="winui"] :is(input:not([type="checkbox"], [type="radio"], [type="range"]), textarea, select, [data-slot="select-trigger"]) {
+  min-height: var(--winui-control-height);
+  border: 1px solid var(--winui-stroke);
+  border-bottom-color: var(--winui-strong-stroke);
+  border-radius: var(--shape-input);
+  background-color: var(--winui-input);
+  box-shadow: none;
+}
+
+:root[data-style="winui"] :is(input:not([type="checkbox"], [type="radio"], [type="range"]), textarea, select, [data-slot="select-trigger"]):hover {
+  background-color: var(--winui-input-hover);
+}
+
+:root[data-style="winui"] :is(input:not([type="checkbox"], [type="radio"], [type="range"]), textarea, select, [data-slot="select-trigger"]):focus-visible {
+  background-color: var(--winui-input-focus);
+  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -1px 0 var(--accent);
+  outline: none;
+}
+
+:root[data-style="winui"] :is(input, textarea)::placeholder {
+  color: var(--winui-text-secondary);
+}
+
+/* Toggle switch: 40x20, outlined when off, accent when on ------------------ */
+
+:root[data-style="winui"] [data-slot="switch"] {
+  width: 40px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--winui-strong-stroke);
+  border-radius: 10px;
+  background-color: var(--winui-alt-fill);
+  box-shadow: none;
+}
+
+:root[data-style="winui"] [data-slot="switch"]:hover {
+  background-color: var(--winui-alt-fill-hover);
+}
+
+:root[data-style="winui"] [data-slot="switch"]:active {
+  background-color: var(--winui-alt-fill-pressed);
+}
+
+:root[data-style="winui"] [data-slot="switch"][data-state="checked"],
+:root[data-style="winui"] [data-slot="switch"][data-state="checked"]:hover {
+  border-color: var(--accent);
+  background-color: var(--accent);
+}
+
+:root[data-style="winui"] [data-slot="switch"][data-state="checked"]:hover {
+  background-color: color-mix(in srgb, var(--accent) 90%, transparent);
+}
+
+:root[data-style="winui"] [data-slot="switch"][data-state="checked"]:active {
+  background-color: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+:root[data-style="winui"] [data-slot="switch-thumb"] {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background-color: var(--winui-text-secondary);
+  box-shadow: none;
+  /* Tailwind positions the thumb with the `translate` property, so override that. */
+  transition: translate var(--winui-duration) cubic-bezier(0, 0, 0, 1), width 83ms, height 83ms;
+}
+
+:root[data-style="winui"] [data-slot="switch"]:hover [data-slot="switch-thumb"] {
+  width: 14px;
+  height: 14px;
+}
+
+:root[data-style="winui"] [data-slot="switch-thumb"][data-state="unchecked"] {
+  translate: 0 0;
+}
+
+:root[data-style="winui"] [data-slot="switch-thumb"][data-state="checked"] {
+  background-color: var(--winui-on-accent);
+  translate: 18px 0;
+}
+
+/* Checkbox and radio: 20px, strong stroke off, accent on ------------------- */
+
+:root[data-style="winui"] [data-slot="checkbox"] {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--winui-strong-stroke);
+  border-radius: 4px;
+  background-color: var(--winui-alt-fill);
+  box-shadow: none;
+}
+
+:root[data-style="winui"] [data-slot="radio-group-item"] {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--winui-strong-stroke);
+  border-radius: 9999px;
+  background-color: var(--winui-alt-fill);
+  box-shadow: none;
+}
+
+:root[data-style="winui"] :is([data-slot="checkbox"], [data-slot="radio-group-item"]):hover {
+  background-color: var(--winui-alt-fill-hover);
+}
+
+:root[data-style="winui"] [data-slot="checkbox"][data-state="checked"] {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  color: var(--winui-on-accent);
+}
+
+:root[data-style="winui"] [data-slot="checkbox"][data-state="checked"]:hover {
+  background-color: color-mix(in srgb, var(--accent) 90%, transparent);
+}
+
+:root[data-style="winui"] [data-slot="checkbox-indicator"] svg {
+  width: 12px;
+  height: 12px;
+}
+
+:root[data-style="winui"] [data-slot="radio-group-item"][data-state="checked"] {
+  border-color: var(--accent);
+  background-color: var(--accent);
+}
+
+:root[data-style="winui"] [data-slot="radio-group-indicator"] svg {
+  width: 12px;
+  height: 12px;
+  fill: var(--winui-on-accent);
+  color: var(--winui-on-accent);
+}
+
+/* Slider: 4px track, 18px thumb with a 12px accent dot ---------------------- */
+
+:root[data-style="winui"] [data-slot="slider"] {
+  min-height: 32px;
+}
+
+:root[data-style="winui"] [data-slot="slider-track"] {
+  height: 4px;
+  border-radius: 2px;
+  background-color: var(--winui-strong-stroke);
+}
+
+:root[data-style="winui"] [data-slot="slider-range"] {
+  background-color: var(--accent);
+}
+
+:root[data-style="winui"] [data-slot="slider-thumb"] {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--winui-stroke);
+  border-radius: 10px;
+  background-color: var(--winui-popover);
+  background-image: radial-gradient(circle, var(--accent) 0 6px, transparent 6.5px);
+  box-shadow: none;
+  transition: background-image var(--winui-duration);
+}
+
+:root[data-style="winui"] [data-slot="slider-thumb"]:hover {
+  background-image: radial-gradient(circle, var(--accent) 0 7px, transparent 7.5px);
+}
+
+:root[data-style="winui"] [data-slot="slider-thumb"]:active {
+  background-image: radial-gradient(circle, var(--accent) 0 5px, transparent 5.5px);
+}
+
+/* Flyouts, menus, dialogs, tooltips ---------------------------------------- */
+
+:root[data-style="winui"] :is([data-slot="popover-content"], [data-slot="dropdown-menu-content"], [data-slot="context-menu-content"], [data-slot="select-content"]) {
+  border: 1px solid var(--winui-flyout-stroke);
+  border-radius: var(--shape-popover);
+  background-color: var(--winui-popover);
+  padding: 2px 0;
+  box-shadow: var(--winui-shadow-flyout);
+}
+
+:root[data-style="winui"] [data-slot="sheet-content"] {
+  border: 1px solid var(--winui-flyout-stroke);
+  background-color: var(--background);
+}
+
+:root[data-style="winui"] [data-slot="dialog-content"] {
+  padding: 24px;
+  border: 1px solid var(--winui-flyout-stroke);
+  border-radius: var(--shape-popover);
+  background-color: var(--winui-base);
+  box-shadow: var(--winui-shadow-dialog);
+}
+
+:root[data-style="winui"] [data-slot="dialog-overlay"] {
+  background-color: var(--winui-smoke);
+}
+
+:root[data-style="winui"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="context-menu-item"], [data-slot="select-item"]) {
+  margin: 2px 4px;
+  min-height: 32px;
+  padding: 8px 11px 9px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+:root[data-style="winui"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="context-menu-item"], [data-slot="select-item"]):is(:focus, [data-highlighted]) {
+  color: var(--foreground);
+  background-color: var(--winui-subtle-hover);
+}
+
+:root[data-style="winui"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="context-menu-item"], [data-slot="select-item"]):active {
+  background-color: var(--winui-subtle-pressed);
+}
+
+:root[data-style="winui"] :is([data-slot="dropdown-menu-separator"], [data-slot="context-menu-separator"]) {
+  height: 1px;
+  margin: 1px 0;
+  background-color: var(--winui-divider);
+}
+
+:root[data-style="winui"] [data-slot="tooltip-content"] {
+  max-width: 320px;
+  padding: 6px 9px 8px;
+  border: 1px solid var(--winui-flyout-stroke);
+  border-radius: 4px;
+  background-color: var(--winui-popover);
+  color: var(--foreground);
+  font-size: 12px;
+  box-shadow: var(--winui-shadow-flyout);
+}
+
+:root[data-style="winui"] [data-slot="tooltip-arrow"] {
+  display: none;
+}
+
+/* Lists and navigation ------------------------------------------------------ */
+
+:root[data-style="winui"] [data-chat-item] > button {
+  position: relative;
+  min-height: 40px;
+  border-radius: var(--shape-row);
+}
+
+:root[data-style="winui"] [data-chat-item] > button:hover:not(:disabled) {
+  background-color: var(--winui-subtle-hover);
+}
+
+:root[data-style="winui"] [data-chat-item] > button:active:not(:disabled) {
+  background-color: var(--winui-subtle-pressed);
+}
+
+:root[data-style="winui"] [data-chat-item] > button[data-selected="true"] {
+  background-color: var(--winui-subtle-hover);
+}
+
+:root[data-style="winui"] [data-chat-item] > button[data-selected="true"]:hover {
+  background-color: var(--winui-subtle-pressed);
+}
+
+:root[data-style="winui"] [data-navigation-sidebar] button[data-selected] {
+  position: relative;
+  border-radius: var(--shape-row);
+  background-color: transparent;
+  color: var(--winui-text-secondary);
+  box-shadow: none;
+  transform: none;
+}
+
+:root[data-style="winui"] [data-navigation-sidebar] button[data-selected]:hover {
+  background-color: var(--winui-subtle-hover);
+  color: var(--foreground);
+}
+
+:root[data-style="winui"] [data-navigation-sidebar] button[data-selected="true"] {
+  background-color: var(--winui-subtle-hover);
+  color: var(--foreground);
+}
+
+:root[data-style="winui"] [data-navigation-sidebar] [data-adw-active-indicator] {
+  display: none;
+}
+
+/* Fluent selection indicator: a 3x16 accent pill on the leading edge. */
+:root[data-style="winui"] :is([data-chat-item] > button, [data-navigation-sidebar] button)[data-selected="true"]::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 1.5px;
+  background-color: var(--accent);
+  transform: translateY(-50%);
+}
+
+:root[data-style="winui"] [data-navigation-sidebar] button[data-selected="true"]::before {
+  left: 4px;
+}
+
+/* Cards and settings -------------------------------------------------------- */
+
+:root[data-style="winui"] [data-slot="boxed-list"] {
+  overflow: hidden;
+  border: 1px solid var(--winui-card-stroke);
+  border-radius: var(--shape-card);
+  background-color: var(--winui-card);
+}
+
+:root[data-style="winui"] [data-slot="boxed-list"] > * {
+  border-radius: 0;
+  background-color: transparent;
+}
+
+:root[data-style="winui"] [data-slot="boxed-list"] > * + * {
+  border-block-start: 1px solid var(--winui-divider);
+}
+
+/* Settings: every row is its own card (SettingsCard), 4px apart. */
+:root[data-style="winui"] [data-settings-section-title] {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--foreground);
+}
+
+:root[data-style="winui"] [data-settings-section-title] + div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-style="winui"] [data-settings-section-title] + div > * {
+  min-height: 68px;
+  padding: 16px;
+  border: 1px solid var(--winui-card-stroke);
+  border-radius: var(--shape-card);
+  background-color: var(--winui-card);
+}
+
+:root[data-style="winui"] [data-settings-section-title] + div > button:hover {
+  background-color: var(--winui-control-fill-hover);
+}
+
+:root[data-style="winui"] [data-settings-section-title] + div .text-xs {
+  font-size: 12px;
+}
+
+:root[data-style="winui"] [data-settings-section-title] + div .text-sm {
+  font-size: 14px;
+}
+
+:root[data-style="winui"] [data-settings-page] {
+  max-width: 1100px;
+}
+
+:root[data-style="winui"] [data-message-bubble] {
+  border-radius: var(--shape-bubble);
+}
+
+/* Focus, scrollbars --------------------------------------------------------- */
+
+:root[data-style="winui"] :focus-visible {
+  outline: 2px solid var(--winui-focus);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+:root[data-style="winui"] :is(input, textarea):focus-visible {
+  outline: none;
+}
+
+:root[data-style="winui"] ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+:root[data-style="winui"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* A 2px thumb at rest, 6px on hover, drawn by clipping the border box. */
+:root[data-style="winui"] ::-webkit-scrollbar-thumb {
+  min-height: 30px;
+  min-width: 30px;
+  border: 5px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+  background-color: var(--winui-text-tertiary);
+}
+
+:root[data-style="winui"] ::-webkit-scrollbar-thumb:hover {
+  border-width: 3px;
+  background-color: var(--winui-text-secondary);
+}
+
+:root[data-style="winui"] [data-slot="scroll-area-thumb"] {
+  border-radius: 3px;
+  background-color: var(--winui-text-tertiary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="winui"] *,
+  :root[data-style="winui"] *::before,
+  :root[data-style="winui"] *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+  }
+}

@@ -282,7 +282,6 @@ impl ChatView {
         _chat: &Chat,
         theme: ActiveTokens,
         border_color: Hsla,
-        bg_color: Hsla,
         _card_bg: Hsla,
         primary_color: Hsla,
         text_color: Hsla,
@@ -291,9 +290,9 @@ impl ChatView {
     ) -> AnyElement {
         let shape = cx.shape();
         let surface = cx.surface();
-        let sheet_bg = if shape.adwaita { surface.view } else { bg_color };
-        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
-        let header_bg = if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) };
+        let sheet_bg = surface.chat_view;
+        let sheet_border = surface.sheet_border;
+        let header_bg = surface.headerbar;
         v_flex()
             .w(px(SHEET_WIDTH))
             .min_w(px(SHEET_WIDTH))
@@ -336,7 +335,7 @@ impl ChatView {
                                     .id("btn-close-search-sheet")
                                     .cursor_pointer()
                                     .p_1()
-                                    .when(shape.adwaita, |s| {
+                                    .when(shape.styled, |s| {
                                         s.w(px(shape.control_size))
                                             .h(px(shape.control_size))
                                             .flex()
@@ -418,10 +417,10 @@ impl ChatView {
                             v_flex()
                                 .id(SharedString::from(format!("search-result-{}", msg_id)))
                                 .cursor_pointer()
-                                .when(!shape.adwaita, |row| {
+                                .when(!shape.styled, |row| {
                                     row.p_3().rounded_xl().border_b_1().border_color(border_color.opacity(0.15))
                                 })
-                                .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
+                                .hover(|s| s.bg(surface.row_hover))
                                 .gap_1()
                                 .tooltip(move |window, cx| {
                                     Tooltip::new("Click to jump to message").build(window, cx)
@@ -472,7 +471,7 @@ impl ChatView {
                                         ),
                                 )
                         })))
-                        .when(!shape.adwaita, |list| list.gap_1())
+                        .when(!shape.styled, |list| list.gap_1())
                         .into_any_element()
                 } else if !self.search_sheet_query.trim().is_empty() {
                     // Empty results state

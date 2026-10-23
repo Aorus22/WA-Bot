@@ -148,6 +148,9 @@ pub struct DesktopSettings {
     /// GTK / Adwaita shapes (radii, flat surfaces) on top of any colour theme.
     #[serde(default)]
     pub gtk_style: bool,
+    /// Windows 11 Fluent-inspired shapes and acrylic material.
+    #[serde(default)]
+    pub winui_style: bool,
     /// Scale of the interface text in percent (`MIN_FONT_SCALE`..=`MAX_FONT_SCALE`).
     #[serde(default = "default_font_scale")]
     pub ui_font_scale: u8,
@@ -183,6 +186,7 @@ impl Default for DesktopSettings {
             window_transparency: default_window_transparency(),
             window_blur_enabled: default_window_blur_enabled(),
             gtk_style: false,
+            winui_style: false,
             ui_font_scale: default_font_scale(),
             chat_font_scale: default_font_scale(),
             notifications_enabled: default_notifications_enabled(),

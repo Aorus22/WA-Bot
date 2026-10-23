@@ -167,6 +167,8 @@ impl RenderOnce for Radio {
         let has_content = self.label.is_some() || !self.children.is_empty();
         let indicator_size = rems(if cx.theme().adwaita {
             1.375
+        } else if cx.theme().winui {
+            1.25
         } else {
             match self.size {
                 Size::XSmall => 0.75,
@@ -187,7 +189,15 @@ impl RenderOnce for Radio {
             .or_else(|| self.label.as_ref().map(|label| label.get_text(cx)));
 
         let adwaita = cx.theme().adwaita;
-        let (border_color, bg) = if adwaita {
+        let winui = cx.theme().winui;
+        let styled = adwaita || winui;
+        let (border_color, bg) = if winui {
+            if checked {
+                (cx.theme().accent, cx.theme().accent_foreground.into())
+            } else {
+                (cx.theme().winui_colors.strong_stroke, cx.theme().winui_colors.alt_fill.into())
+            }
+        } else if styled {
             (
                 if checked {
                     cx.theme().accent
@@ -244,8 +254,15 @@ impl RenderOnce for Radio {
                     .flex_shrink_0()
                     .rounded_full_style(cx)
                     .border_1()
-                    .when(adwaita, |this| {
-                                            if checked {
+                    .when(styled, |this| {
+                                            if winui {
+                                                // 20px ring with a 12px glyph dot; unchecked is a 1px outline.
+                                                if checked {
+                                                    this.border(px(4.))
+                                                } else {
+                                                    this
+                                                }
+                                            } else if checked {
                                                 this.border(px(7.))
                                             } else {
                                                 this.border_2()
@@ -253,7 +270,7 @@ impl RenderOnce for Radio {
                                         })
                     .border_color(border_color)
                     .map(|this| {
-                        if adwaita {
+                        if styled {
                             this.bg(bg)
                         } else {
                             match self.checked {
@@ -263,7 +280,7 @@ impl RenderOnce for Radio {
                             }
                         }
                     })
-                    .child(if adwaita {
+                    .child(if styled {
                         div().hidden().into_any_element()
                     } else {
                         checkbox_check_icon(

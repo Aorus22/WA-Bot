@@ -9,7 +9,7 @@ use crate::components::ui::{h_flex, v_flex, TextArea, TextField, TextFieldEvent}
 use crate::components::toast;
 use crate::icons::*;
 use crate::state::auth::AuthState;
-use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::theme::manager::AppThemeExt;
 use crate::theme::shape::ShapeExt;
 use crate::theme::surface::SurfaceExt;
 use crate::window_material;
@@ -361,19 +361,14 @@ impl Render for StatusView {
         let surface = cx.surface();
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
-        let window_transparency = ThemeManager::global(cx).window_transparency;
         let border_color = theme.border;
-        let sidebar_border = if shape.adwaita {
-            surface.sidebar_border
-        } else {
-            border_color
-        };
+        let sidebar_border = surface.sidebar_border;
         let sidebar_bg = if window.is_window_active() {
             surface.sidebar
         } else {
             surface.sidebar_backdrop
         };
-        let dialog_bg = if shape.adwaita { surface.dialog } else { theme.card };
+        let dialog_bg = surface.dialog;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         let bg_color = theme.background;
@@ -396,11 +391,7 @@ impl Render for StatusView {
             .id("status-view")
             .size_full()
             .overflow_hidden()
-            .bg(if shape.adwaita {
-                surface.view
-            } else {
-                window_material::glass_fill(bg_color, window_transparency)
-            })
+            .bg(surface.page_background)
             .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
             .relative()
             // --- Left Sidebar (340px) ---
@@ -411,7 +402,7 @@ impl Render for StatusView {
                     .flex_shrink_0()
                     .border_r_1()
                     .border_color(sidebar_border)
-                    .when(shape.adwaita, |s| s.bg(sidebar_bg))
+                    .when(shape.styled, |s| s.bg(sidebar_bg))
                     // Sidebar Header
                     .child(
                         h_flex()
@@ -433,7 +424,7 @@ impl Render for StatusView {
                                     .cursor_pointer()
                                     .w(px(36.0))
                                     .h(px(36.0))
-                                    .when(shape.adwaita, |s| s.w(px(shape.control_size)).h(px(shape.control_size)))
+                                    .when(shape.styled, |s| s.w(px(shape.control_size)).h(px(shape.control_size)))
                                     .rounded(px(shape.radius_button))
                                     .flex()
                                     .items_center()
@@ -690,10 +681,8 @@ impl Render for StatusView {
                     .overflow_hidden()
                     .bg(if self.viewing_group.is_some() {
                         rgb(0x0b141a).into()
-                    } else if shape.adwaita {
-                        surface.view
                     } else {
-                        theme.muted.opacity(0.1)
+                        surface.status_view_background
                     })
                     .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
                     .children(if let Some(group) = self.viewing_group.clone() {
@@ -738,7 +727,7 @@ impl Render for StatusView {
                                         .flex_shrink_0()
                                         .w(px(36.0))
                                         .h(px(36.0))
-                                        .when(shape.adwaita, |s| s.w(px(shape.control_size)).h(px(shape.control_size)))
+                                        .when(shape.styled, |s| s.w(px(shape.control_size)).h(px(shape.control_size)))
                                         .rounded(px(shape.radius_button))
                                         .bg(theme.primary.opacity(if can_send { 1.0 } else { 0.4 }))
                                         .when(can_send, |el| el.cursor_pointer().hover(|h| h.opacity(0.85)))
@@ -1012,7 +1001,7 @@ impl Render for StatusView {
                         .absolute()
                         .occlude()
                         .inset_0()
-                        .bg(if shape.adwaita { surface.scrim } else { surface.scrim_default })
+                        .bg(surface.scrim)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1021,12 +1010,13 @@ impl Render for StatusView {
                                 .w(px(420.0))
                                 .p_5()
                                 .rounded_2xl()
-                                .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                                .when(shape.styled, |dialog| dialog.rounded(px(shape.radius_popover)))
                                 .bg(dialog_bg)
                                 .border_1()
-                                .border_color(if shape.adwaita { surface.border } else { border_color })
-                                .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
-                                .when(shape.adwaita, |dialog| dialog.shadow_md())
+                                .border_color(surface.border)
+                                .when(!shape.styled, |dialog| dialog.shadow_2xl())
+                                .when(shape.styled && !shape.winui, |dialog| dialog.shadow_md())
+                            .when(shape.winui, |dialog| dialog.shadow(crate::theme::shape::dialog_shadow()))
                                 .gap_4()
                                 // Header
                                 .child(

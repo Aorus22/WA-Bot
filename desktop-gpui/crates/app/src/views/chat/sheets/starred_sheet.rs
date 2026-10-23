@@ -111,8 +111,8 @@ impl ChatView {
         let shape = cx.shape();
         let surface = cx.surface();
         let border_color = theme.border;
-        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
-        let header_bg = if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) };
+        let sheet_border = surface.sheet_border;
+        let header_bg = surface.headerbar;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -129,7 +129,7 @@ impl ChatView {
             .overflow_hidden()
             .border_l_1()
             .border_color(sheet_border)
-            .bg(if shape.adwaita { surface.view } else { theme.background })
+            .bg(surface.view)
             .flex_shrink_0()
             .child(
                 h_flex()
@@ -159,7 +159,7 @@ impl ChatView {
                             .id("btn-close-starred-sheet")
                             .cursor_pointer()
                             .p_1()
-                            .when(shape.adwaita, |s| {
+                            .when(shape.styled, |s| {
                                 s.w(px(shape.control_size))
                                     .h(px(shape.control_size))
                                     .flex()
@@ -234,8 +234,8 @@ impl ChatView {
                             .cursor_pointer()
                             .p_3()
                             .rounded_xl()
-                            .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
-                            .when(!shape.adwaita, |row| row.border_b_1().border_color(border_color.opacity(0.15)))
+                            .hover(|s| s.bg(surface.row_hover))
+                            .when(!shape.styled, |row| row.border_b_1().border_color(border_color.opacity(0.15)))
                             .gap_1()
                             .tooltip(move |window, cx| Tooltip::new("Click to jump to message").build(window, cx))
                             .on_mouse_down(MouseButton::Left, cx.listener({
@@ -298,7 +298,7 @@ impl ChatView {
                                         div()
                                             .id(SharedString::from(format!("unstar-{}", m.id)))
                                             .p_1()
-                                            .when(shape.adwaita, |s| {
+                                            .when(shape.styled, |s| {
                                                 s.w(px(shape.control_size))
                                                     .h(px(shape.control_size))
                                                     .flex()
@@ -318,7 +318,7 @@ impl ChatView {
                                             })),
                                     ),
                             )
-                    })).when(!shape.adwaita, |list| list.gap_1()))
+                    })).when(!shape.styled, |list| list.gap_1()))
                     .when(self.starred_has_more, |list| {
                         list.child(
                             div()

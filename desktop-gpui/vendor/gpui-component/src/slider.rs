@@ -156,14 +156,17 @@ impl RenderOnce for Slider {
         };
         let rem_size = window.rem_size();
 
-        let adwaita = cx.theme().adwaita;
+        let winui = cx.theme().winui;
+        let adwaita = cx.theme().adwaita || winui;
         let bar_color = self
             .style
             .background
             .clone()
             .and_then(|bg| bg.color())
             .unwrap_or(cx.theme().tokens.slider_bar.into());
-        let thumb_bg: Background = if adwaita {
+        let thumb_bg: Background = if winui {
+            cx.theme().winui_colors.thumb_fill.into()
+        } else if adwaita {
             gpui::rgb(0xffffff).into()
         } else {
             self.style
@@ -207,11 +210,18 @@ impl RenderOnce for Slider {
                 .disabled(self.disabled)
                 .when(!self.disabled, |this| {
                     this.absolute()
-                        .when(axis.is_horizontal(), |this| {
+                        .when(axis.is_horizontal() && !winui, |this| {
                             this.top(px(-5.)).left(position).ml(-px(8.))
                         })
-                        .when(axis.is_vertical(), |this| {
+                        .when(axis.is_vertical() && !winui, |this| {
                             this.bottom(position).left(px(-5.)).mb(-px(8.))
+                        })
+                        // Fluent: an 18px thumb centered on the 4px track.
+                        .when(axis.is_horizontal() && winui, |this| {
+                            this.top(px(-7.)).left(position).ml(-px(9.))
+                        })
+                        .when(axis.is_vertical() && winui, |this| {
+                            this.bottom(position).left(px(-7.)).mb(-px(9.))
                         })
                         .flex()
                         .items_center()
@@ -220,7 +230,8 @@ impl RenderOnce for Slider {
                         .rounded_full_style(cx)
                         .bg(bar_color.opacity(0.5))
                         .size_4()
-                        .when(adwaita, |this| this.size_5())
+                        .when(adwaita && !winui, |this| this.size_5())
+                        .when(winui, |this| this.size(px(18.)))
                         .p(px(1.))
                         .on_hover({
                             let interaction = ring.interaction.clone();
@@ -258,7 +269,16 @@ impl RenderOnce for Slider {
                                 .flex_shrink_0()
                                 .size_full()
                                 .rounded_full_style(cx)
-                                .bg(thumb_bg),
+                                .bg(thumb_bg)
+                                .when(winui, |this| {
+                                    // The accent dot inside Fluent's thumb.
+                                    this.flex().items_center().justify_center().child(
+                                        div()
+                                            .size(px(12.))
+                                            .rounded_full_style(cx)
+                                            .bg(bar_color),
+                                    )
+                                }),
                         )
                 })
         };
@@ -294,8 +314,18 @@ impl RenderOnce for Slider {
                             .when(axis.is_vertical(), |this| this.h_full().w_1p5())
                             .when(adwaita && axis.is_horizontal(), |this| this.h(px(4.)))
                             .when(adwaita && axis.is_vertical(), |this| this.w(px(4.)))
-                            .bg(bar_color.opacity(0.2))
-                            .active(|this| this.bg(bar_color.opacity(0.4)))
+                            .bg(if winui {
+                                Background::from(cx.theme().winui_colors.strong_stroke)
+                            } else {
+                                bar_color.opacity(0.2)
+                            })
+                            .active(|this| {
+                                this.bg(if winui {
+                                    Background::from(cx.theme().winui_colors.strong_stroke)
+                                } else {
+                                    bar_color.opacity(0.4)
+                                })
+                            })
                             .corner_radii(radius)
                             .child(
                                 div()

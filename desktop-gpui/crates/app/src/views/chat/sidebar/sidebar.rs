@@ -13,26 +13,13 @@ impl ChatView {
         archived_count: usize,
         pinned_count: usize,
     ) -> AnyElement {
-        let theme = *cx.app_theme();
-        let border_color = theme.border;
-        let bg_color = theme.background;
-        let window_transparency = ThemeManager::global(cx).window_transparency;
-        let shape = cx.shape();
         let surface = cx.surface();
-        let background = if shape.adwaita {
-            if window.is_window_active() {
-                surface.secondary_sidebar
-            } else {
-                surface.secondary_sidebar_backdrop
-            }
+        let background = if window.is_window_active() {
+            surface.chat_sidebar_background
         } else {
-            window_material::glass_fill(bg_color, window_transparency)
+            surface.chat_sidebar_backdrop
         };
-        let border = if shape.adwaita {
-            surface.sidebar_border
-        } else {
-            border_color.opacity(0.4)
-        };
+        let border = surface.chat_sidebar_border;
         let sidebar = v_flex()
             .w(px(self.sidebar_width))
             .when(pages, |el| el.w_full())

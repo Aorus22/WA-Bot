@@ -11,7 +11,7 @@ use crate::components::ui::{
 use crate::components::toast;
 use crate::icons::*;
 use crate::state::auth::AuthState;
-use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::theme::manager::AppThemeExt;
 use crate::theme::shape::ShapeExt;
 use crate::theme::surface::SurfaceExt;
 use crate::window_material;
@@ -461,23 +461,17 @@ impl Render for ChannelsView {
         let surface = cx.surface();
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
-        let window_transparency = ThemeManager::global(cx).window_transparency;
         let border_color = theme.border;
-        let sidebar_border = if shape.adwaita {
-            surface.sidebar_border
-        } else {
-            border_color
-        };
+        let sidebar_border = surface.sidebar_border;
         let sidebar_bg = if window.is_window_active() {
             surface.sidebar
         } else {
             surface.sidebar_backdrop
         };
-        let dialog_bg = if shape.adwaita { surface.dialog } else { theme.card };
+        let dialog_bg = surface.dialog;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
-        let bg_color = theme.background;
-        let card_bg = if shape.adwaita { surface.card } else { theme.card };
+        let card_bg = surface.card;
 
         let base_url = if cx.has_global::<AuthState>() {
             AuthState::global(cx).base_url.clone()
@@ -491,11 +485,7 @@ impl Render for ChannelsView {
             .id("channels-view")
             .size_full()
             .overflow_hidden()
-            .bg(if shape.adwaita {
-                surface.view
-            } else {
-                window_material::glass_fill(bg_color, window_transparency)
-            })
+            .bg(surface.page_background)
             .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
             .relative()
             // --- Left Sidebar (340px) ---
@@ -506,7 +496,7 @@ impl Render for ChannelsView {
                     .flex_shrink_0()
                     .border_r_1()
                     .border_color(sidebar_border)
-                    .when(shape.adwaita, |s| s.bg(sidebar_bg))
+                    .when(shape.styled, |s| s.bg(sidebar_bg))
                     // Header
                     .child(
                         h_flex()
@@ -528,7 +518,7 @@ impl Render for ChannelsView {
                                     .cursor_pointer()
                                     .w(px(36.0))
                                     .h(px(36.0))
-                                    .when(shape.adwaita, |s| s.w(px(shape.control_size)).h(px(shape.control_size)))
+                                    .when(shape.styled, |s| s.w(px(shape.control_size)).h(px(shape.control_size)))
                                     .rounded(px(shape.radius_button))
                                     .flex()
                                     .items_center()
@@ -913,7 +903,7 @@ impl Render for ChannelsView {
                                                     let border_color = theme.border;
                                                     let text_color = theme.foreground;
                                                     let muted_text = theme.muted_foreground;
-                                                    let card_bg = if shape.adwaita { surface.card } else { theme.card };
+                                                    let card_bg = surface.card;
                                                     let primary_color = theme.primary;
 
                                                     // Auto-load older posts when user scrolls near top
@@ -1167,7 +1157,7 @@ impl Render for ChannelsView {
                         .absolute()
                         .occlude()
                         .inset_0()
-                        .bg(if shape.adwaita { surface.scrim } else { surface.scrim_default })
+                        .bg(surface.scrim)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1176,12 +1166,13 @@ impl Render for ChannelsView {
                                 .w(px(440.0))
                                 .p_5()
                                 .rounded_2xl()
-                                .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                                .when(shape.styled, |dialog| dialog.rounded(px(shape.radius_popover)))
                                 .bg(dialog_bg)
                                 .border_1()
-                                .border_color(if shape.adwaita { surface.border } else { border_color })
-                                .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
-                                .when(shape.adwaita, |dialog| dialog.shadow_md())
+                                .border_color(surface.border)
+                                .when(!shape.styled, |dialog| dialog.shadow_2xl())
+                                .when(shape.styled && !shape.winui, |dialog| dialog.shadow_md())
+                            .when(shape.winui, |dialog| dialog.shadow(crate::theme::shape::dialog_shadow()))
                                 .gap_4()
                                 // Header
                                 .child(
@@ -1325,7 +1316,7 @@ impl Render for ChannelsView {
                         .absolute()
                         .occlude()
                         .inset_0()
-                        .bg(if shape.adwaita { surface.scrim } else { surface.scrim_default })
+                        .bg(surface.scrim)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1334,12 +1325,13 @@ impl Render for ChannelsView {
                                 .w(px(380.0))
                                 .p_5()
                                 .rounded_2xl()
-                                .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                                .when(shape.styled, |dialog| dialog.rounded(px(shape.radius_popover)))
                                 .bg(dialog_bg)
                                 .border_1()
-                                .border_color(if shape.adwaita { surface.border } else { border_color })
-                                .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
-                                .when(shape.adwaita, |dialog| dialog.shadow_md())
+                                .border_color(surface.border)
+                                .when(!shape.styled, |dialog| dialog.shadow_2xl())
+                                .when(shape.styled && !shape.winui, |dialog| dialog.shadow_md())
+                            .when(shape.winui, |dialog| dialog.shadow(crate::theme::shape::dialog_shadow()))
                                 .gap_4()
                                 .child(
                                     div()

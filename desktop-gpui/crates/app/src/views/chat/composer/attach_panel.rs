@@ -76,8 +76,8 @@ impl ChatView {
         // Emoji / sticker switch at the bottom of both pickers, as in WhatsApp Web.
         let picker_switch = |sticker_active: bool, cx: &mut Context<Self>| -> AnyElement {
             let segment = |id: &'static str, icon: &'static [u8], active: bool| {
-                let active_bg = if shape.adwaita { surface.active_toggle_bg } else { theme.muted.opacity(0.9) };
-                let hover_bg = if shape.adwaita && !active { theme.foreground.opacity(0.05) } else { active_bg };
+                let active_bg = surface.active_toggle_bg;
+                let hover_bg = if active { active_bg } else { surface.attachment_hover };
                 div()
                     .id(id)
                     .cursor_pointer()
@@ -88,7 +88,7 @@ impl ChatView {
                     .h(px(30.0))
                     .rounded(px(if active { shape.radius_toggle_selected } else { shape.radius_button }))
                     .bg(if active { active_bg } else { rgba(0x00000000).into() })
-                    .when(active && shape.adwaita, |segment| segment.shadow_sm())
+                    .when(active && shape.styled, |segment| segment.shadow_sm())
                     .hover(move |s| s.bg(hover_bg))
                     .child(svg().data(icon).size(px(17.0)).text_color(if active { text_color } else { muted_text }))
             };
@@ -101,7 +101,7 @@ impl ChatView {
                         .p(px(3.0))
                         .gap_0p5()
                         .rounded(px(shape.radius_button))
-                        .bg(if shape.adwaita { theme.foreground.opacity(0.10) } else { theme.muted.opacity(0.45) })
+                        .bg(surface.attachment_separator)
                         .child(segment("picker-emoji", SMILE_SVG, !sticker_active)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.open_emoji_panel(cx))))
                         .child(segment("picker-sticker", STICKER_SVG, sticker_active)

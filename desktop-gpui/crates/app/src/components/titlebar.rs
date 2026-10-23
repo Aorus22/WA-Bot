@@ -9,7 +9,7 @@ use crate::components::ui::h_flex;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::icons::{MAXIMIZE_SVG, MINIMIZE_SVG, RESTORE_SVG, X_SVG};
-use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::theme::manager::AppThemeExt;
 use crate::theme::shape::ShapeExt;
 use crate::theme::surface::SurfaceExt;
 use crate::window_material;
@@ -103,6 +103,17 @@ const MAXIMIZE_WIDTH: f32 = 34.0;
 const CLOSE_WIDTH: f32 = 36.0;
 /// Room the window controls take at the right edge, with their separator.
 pub const CONTROLS_WIDTH: f32 = MINIMIZE_WIDTH + MAXIMIZE_WIDTH + CLOSE_WIDTH + 1.0;
+/// Windows 11 caption buttons are 46px wide, flush with no separator.
+const WINUI_BUTTON_WIDTH: f32 = 46.0;
+const WINUI_CLOSE_HOVER: u32 = 0xc42b1c;
+
+fn controls_width(winui: bool) -> f32 {
+    if winui {
+        WINUI_BUTTON_WIDTH * 3.0
+    } else {
+        CONTROLS_WIDTH
+    }
+}
 
 /// Width the window controls take over a header: none in a panel popover,
 /// which has no window chrome.
@@ -110,7 +121,7 @@ pub fn controls_room(cx: &App) -> f32 {
     if crate::popover::is_popover(cx) {
         0.0
     } else {
-        CONTROLS_WIDTH
+        controls_width(cx.shape().winui)
     }
 }
 
@@ -134,13 +145,19 @@ pub fn drag_area() -> gpui::Div {
 fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
     let theme = cx.app_theme();
     let shape = cx.shape();
-    let hover_bg = if shape.adwaita {
-        theme.foreground.opacity(0.15)
-    } else {
-        theme.muted
-    };
+    let surface = cx.surface();
+    let hover_bg = surface.control_hover;
     let is_max = is_window_maximized(window);
     let framed = window_material::is_framed_window(window);
+    let winui = shape.winui;
+    let (min_w, max_w, close_w) = if winui {
+        (WINUI_BUTTON_WIDTH, WINUI_BUTTON_WIDTH, WINUI_BUTTON_WIDTH)
+    } else {
+        (MINIMIZE_WIDTH, MAXIMIZE_WIDTH, CLOSE_WIDTH)
+    };
+    let glyph = if winui { 10.0 } else { 12.0 };
+    let close_glyph = if winui { 12.0 } else { 13.0 };
+    let close_hover = if winui { WINUI_CLOSE_HOVER } else { 0xe81123 };
     h_flex()
         .items_center()
         .h_full()
@@ -150,7 +167,7 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .w(px(MINIMIZE_WIDTH))
+                .w(px(min_w))
                 .h_full()
                 .when(shape.adwaita, |s| {
                     s.child(
@@ -173,7 +190,7 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 })
                 .when(!shape.adwaita, |s| {
                     s.hover(|s| s.bg(hover_bg))
-                        .child(svg().data(MINIMIZE_SVG).size(px(12.0)).text_color(theme.foreground))
+                        .child(svg().data(MINIMIZE_SVG).size(px(glyph)).text_color(theme.foreground))
                 })
                 .cursor_pointer()
                 .on_mouse_down(MouseButton::Left, |_, window, _| {
@@ -186,7 +203,7 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .w(px(MAXIMIZE_WIDTH))
+                .w(px(max_w))
                 .h_full()
                 .when(shape.adwaita, |s| {
                     s.child(
@@ -211,7 +228,7 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                     s.hover(|s| s.bg(hover_bg)).child(
                         svg()
                             .data(if is_max { RESTORE_SVG } else { MAXIMIZE_SVG })
-                            .size(px(12.0))
+                            .size(px(glyph))
                             .text_color(theme.foreground),
                     )
                 })
@@ -226,7 +243,7 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .w(px(CLOSE_WIDTH))
+                .w(px(close_w))
                 .h_full()
                 .when(shape.adwaita, |s| {
                     s.child(
@@ -249,8 +266,8 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 })
                 .when(!shape.adwaita, |s| {
                     s.when(framed, |s| s.rounded_tr(px(shape.radius_window)))
-                        .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
-                        .child(svg().data(X_SVG).size(px(13.0)).text_color(theme.foreground))
+                        .hover(|s| s.bg(rgb(close_hover)).text_color(rgb(0xffffff)))
+                        .child(svg().data(X_SVG).size(px(close_glyph)).text_color(theme.foreground))
                 })
                 .cursor_pointer()
                 .on_mouse_down(MouseButton::Left, |_, window, _| {
@@ -271,10 +288,12 @@ pub fn controls_overlay(window: &Window, cx: &App) -> gpui::AnyElement {
         .top_0()
         .right_0()
         .h(px(cx.shape().header_height))
-        .w(px(CONTROLS_WIDTH))
+        .w(px(controls_width(cx.shape().winui)))
         .items_center()
         .occlude()
-        .child(div().w(px(1.0)).h(px(24.0)).bg(if cx.shape().adwaita { cx.surface().border } else { theme.border.opacity(0.7) }))
+        .when(!cx.shape().winui, |s| {
+            s.child(div().w(px(1.0)).h(px(24.0)).bg(if cx.shape().adwaita { cx.surface().border } else { theme.border.opacity(0.7) }))
+        })
         .child(control_buttons(window, cx))
         .into_any_element()
 }
@@ -297,15 +316,14 @@ impl RenderOnce for AppTitleBar {
         let theme = cx.app_theme();
         let shape = cx.shape();
         let surface = cx.surface();
-        let window_transparency = ThemeManager::global(cx).window_transparency;
         let framed = window_material::is_framed_window(window);
         let window_active = window.is_window_active();
-        let header_background = if shape.adwaita {
-            if window_active { surface.headerbar } else { surface.headerbar_backdrop }
+        let header_background = if window_active {
+            surface.titlebar_background
         } else {
-            window_material::glass_fill(theme.background, window_transparency)
+            surface.titlebar_backdrop
         };
-        let border = if shape.adwaita { surface.border } else { theme.border.opacity(0.4) };
+        let border = surface.titlebar_border;
 
         h_flex()
             .id("app-titlebar")
@@ -326,14 +344,10 @@ impl RenderOnce for AppTitleBar {
             .child(
                 h_flex().items_center().gap_2().child(
                     div()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .when(!shape.winui, |s| s.text_sm().font_weight(gpui::FontWeight::SEMIBOLD))
+                        .when(shape.winui, |s| s.text_xs().font_weight(gpui::FontWeight::NORMAL))
                         .text_color(theme.foreground)
-                        .opacity(if shape.adwaita {
-                            if window_active { 1.0 } else { 0.5 }
-                        } else {
-                            0.7
-                        })
+                        .opacity(if window_active { 1.0 } else { surface.titlebar_unfocused_opacity })
                         .child("WA Bot"),
                 ),
             )

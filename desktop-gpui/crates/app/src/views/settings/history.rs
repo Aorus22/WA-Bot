@@ -8,7 +8,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use super::controls::{header, option_row, progress_bar, Palette};
 use crate::components::ui::{
-    ButtonVariant, Disableable as _, Icon, IconName, Switch, action_button, card_group,
+    ButtonVariant, Disableable as _, Icon, IconName, Switch, action_button, card_group, settings_group,
     destructive_button,
 };
 use super::SettingsView;

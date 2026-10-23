@@ -207,9 +207,9 @@ impl ChatView {
         let shape = cx.shape();
         let surface = cx.surface();
         let border_color = theme.border;
-        let bg_color = if shape.adwaita { surface.view } else { theme.background };
-        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
-        let header_bg = if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) };
+        let bg_color = surface.view;
+        let sheet_border = surface.sheet_border;
+        let header_bg = surface.headerbar;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -260,7 +260,7 @@ impl ChatView {
                                 .id("btn-close-info-sheet")
                                 .cursor_pointer()
                                 .p_1()
-                                .when(shape.adwaita, |s| {
+                                .when(shape.styled, |s| {
                                     s.w(px(shape.control_size))
                                         .h(px(shape.control_size))
                                         .flex()
@@ -482,8 +482,8 @@ impl ChatView {
                                                 h_flex()
                                                     .gap_3()
                                                     .p_3()
-                                                    .when(!shape.adwaita, |row| row.rounded_xl().border_1().border_color(border_color.opacity(0.4)))
-                                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
+                                                    .when(!shape.styled, |row| row.rounded_xl().border_1().border_color(border_color.opacity(0.4)))
+                                                    .hover(|s| s.bg(surface.row_hover))
                                                     .cursor_pointer()
                                                     .on_mouse_down(MouseButton::Left, cx.listener({
                                                         let u = url.clone();
@@ -519,7 +519,7 @@ impl ChatView {
                                                             .child(div().text_xs().text_color(muted_text).child(date)),
                                                     )
                                             }))
-                                            .when(!shape.adwaita, |list| list.gap_3())
+                                            .when(!shape.styled, |list| list.gap_3())
                                             .into_any_element()
                                     }
                                 }
@@ -552,9 +552,9 @@ impl ChatView {
                                                 h_flex()
                                                     .gap_3()
                                                     .p_3()
-                                                    .when(!shape.adwaita, |row| row.rounded_xl().border_1().border_color(border_color.opacity(0.4)))
-                                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
-                                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
+                                                    .when(!shape.styled, |row| row.rounded_xl().border_1().border_color(border_color.opacity(0.4)))
+                                                    .hover(|s| s.bg(surface.row_hover))
+                                                    .hover(|s| s.bg(surface.row_hover))
                                                     .cursor_pointer()
                                                     .on_mouse_down(MouseButton::Left, cx.listener({
                                                         let u = url.clone();
@@ -587,7 +587,7 @@ impl ChatView {
                                                             .child(div().text_xs().text_color(muted_text).child(date)),
                                                     )
                                             }))
-                                            .when(!shape.adwaita, |list| list.gap_3())
+                                            .when(!shape.styled, |list| list.gap_3())
                                             .into_any_element()
                                     }
                                 }

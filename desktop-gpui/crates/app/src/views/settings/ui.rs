@@ -19,7 +19,14 @@ pub(super) fn settings_section_heading(
                 .font_weight(FontWeight::BOLD)
                 .text_color(text_color)
         })
-        .child(if shape.adwaita { gtk_label } else { default_label })
+        // Fluent section headers are BodyStrong: 14px semibold, sentence case.
+        .when(shape.winui, |style| {
+            style
+                .text_size(rems(shape.typography.body_size))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(text_color)
+        })
+        .child(if shape.adwaita || shape.winui { gtk_label } else { default_label })
 }
 
 
@@ -171,8 +178,9 @@ impl Render for SettingsView {
         let window_transparency = theme_mgr.window_transparency;
         let ui_font_scale = theme_mgr.ui_font_scale;
         let chat_font_scale = theme_mgr.chat_font_scale;
-        let window_blur_enabled = theme_mgr.window_blur_enabled;
+        let window_blur_enabled = theme_mgr.effective_window_blur_enabled();
         let gtk_style = theme_mgr.gtk_style;
+        let winui_style = theme_mgr.winui_style;
 
         // Filter theme presets
         let mode_filter = self.theme_mode_filter.clone();
@@ -506,7 +514,7 @@ impl Render for SettingsView {
                                 settings_section_heading(cx.shape(), "APPEARANCE", "Appearance", text_color, muted_text),
                             )
                             .child(
-                                card_group(cx)
+                                settings_group()
                                     // Color theme: the active one, a click opens the picker.
                                     .child(
                                         div()
@@ -576,7 +584,7 @@ impl Render for SettingsView {
                                                 cx.notify();
                                             })),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Window transparency slider.
                                     .child(
                                         div()
@@ -635,7 +643,7 @@ impl Render for SettingsView {
                                                     ),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Interface text scale.
                                     .child(
                                         div()
@@ -689,7 +697,7 @@ impl Render for SettingsView {
                                                     ),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Message bubble text scale.
                                     .child(
                                         div()
@@ -743,7 +751,7 @@ impl Render for SettingsView {
                                                     ),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Blur uses the compositor's default strength.
                                     .child(
                                         div()
@@ -775,19 +783,20 @@ impl Render for SettingsView {
                                                                 div()
                                                                     .text_xs()
                                                                     .text_color(muted_text)
-                                                                    .child("Blur strength is controlled by COSMIC"),
+                                                                    .child(if winui_style { "Acrylic blur is enabled by WinUI style" } else { "Blur strength is controlled by COSMIC" }),
                                                             ),
                                                     ),
                                             )
                                             .child(
                                                 Switch::new("window-backdrop-blur")
                                                     .checked(window_blur_enabled)
+                                                    .disabled(winui_style)
                                                     .on_change(|enabled, _, cx| {
                                                         ThemeManager::apply_window_blur_enabled(*enabled, cx);
                                                     }),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Row: GTK style (shapes, on top of any colour theme)
                                     .child(
                                         div()
@@ -831,7 +840,51 @@ impl Render for SettingsView {
                                                     }),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
+                                    // Row: WinUI style (Fluent surfaces and Acrylic material)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .justify_between()
+                                            .px_4()
+                                            .py_3()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .gap_3()
+                                                    .child(Icon::new(IconName::Palette).text_color(muted_text))
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(text_color)
+                                                                    .child("WinUI style"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(muted_text)
+                                                                    .child("Windows 11 Fluent shapes and Acrylic. Works with any colour theme"),
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                Switch::new("winui-style")
+                                                    .checked(winui_style)
+                                                    .on_change(|enabled, _, cx| {
+                                                        ThemeManager::apply_winui_style(*enabled, cx);
+                                                    }),
+                                            ),
+                                    )
+                                    .divider(border_color)
                                     // Row: Chat layout (pages vs sidebar)
                                     .child(
                                         div()
@@ -901,7 +954,7 @@ impl Render for SettingsView {
                                                     })),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Row: OS notifications for incoming messages
                                     .child(
                                         div()
@@ -945,7 +998,7 @@ impl Render for SettingsView {
                                                     }),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Row: WhatsApp text formatting in message bubbles
                                     .child(
                                         div()
@@ -1003,7 +1056,7 @@ impl Render for SettingsView {
                                 settings_section_heading(cx.shape(), "ACCOUNT", "Account", text_color, muted_text),
                             )
                             .child(
-                                card_group(cx)
+                                settings_group()
                                     // Row 1: Connection & Logout
                                     .child(
                                         div()
@@ -1123,14 +1176,14 @@ impl Render for SettingsView {
                                                 },
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Row 2: Chat History Sync
                                     .child(history_card)
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     .child(media_section)
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     .child(backup_section)
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Row 3: restart the local backend
                                     .child(
                                         div()
@@ -1263,7 +1316,7 @@ impl Render for SettingsView {
                                 settings_section_heading(cx.shape(), "PRIVACY", "Privacy", text_color, muted_text),
                             )
                             .child(
-                                card_group(cx)
+                                settings_group()
                                     .child(
                                         div()
                                             .flex()
@@ -1339,7 +1392,7 @@ impl Render for SettingsView {
                                 settings_section_heading(cx.shape(), "CALL TTS", "Call TTS", text_color, muted_text),
                             )
                             .child(
-                                card_group(cx)
+                                settings_group()
                                     // Header
                                     .child(
                                         div()
@@ -1369,7 +1422,7 @@ impl Render for SettingsView {
                                                     ),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Provider Dropdown Row
                                     .child(
                                         div()
@@ -1433,7 +1486,7 @@ impl Render for SettingsView {
                                                     })),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Default Voice
                                     .child(
                                         div()
@@ -1562,7 +1615,7 @@ impl Render for SettingsView {
                                     } else {
                                         None
                                     })
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     // Save Button
                                     .child(
                                         div()
@@ -1605,7 +1658,7 @@ impl Render for SettingsView {
                                 settings_section_heading(cx.shape(), "CONNECTION INFO", "Connection info", text_color, muted_text),
                             )
                             .child(
-                                card_group(cx)
+                                settings_group()
                                     .child(
                                         div()
                                             .px_4()
@@ -1627,7 +1680,7 @@ impl Render for SettingsView {
                                                 ),
                                             ),
                                     )
-                                    .child(div().h(px(1.0)).bg(border_color).w_full())
+                                    .divider(border_color)
                                     .child(
                                         div()
                                             .px_4()

@@ -11,8 +11,7 @@ impl ChatView {
         let theme = *cx.app_theme();
         let shape = cx.shape();
         let surface = cx.surface();
-        let border_color = if shape.adwaita { surface.border } else { theme.border };
-        let card_bg = theme.card;
+        let border_color = surface.border;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -26,17 +25,18 @@ impl ChatView {
             let confirm_leave = ctx.confirm_leave;
             let show_mute_submenu = ctx.show_mute_submenu;
             let menu_pos = ctx.position;
-            let hover_bg: Hsla = theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 });
+            let hover_bg = surface.menu_hover;
             let danger: Hsla = rgb(0xef4444).into();
             macro_rules! styled_menu_row {
                 ($($args:tt)*) => {
                     menu_row($($args)*)
-                        .when(shape.adwaita, |row| row.px_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                        .when(shape.styled, |row| row.px_3().py_1p5().rounded(px(shape.radius_menu_item)).overflow_hidden())
                 };
             }
 
-            let mut menu = menu_surface(232.0, card_bg, border_color, cx)
-                .when(shape.adwaita, |menu| menu.shadow_sm())
+            let mut menu = menu_surface(232.0, cx)
+                .when(shape.styled && !shape.winui, |menu| menu.shadow_sm())
+                .when(shape.winui, |menu| menu.shadow(crate::theme::shape::flyout_shadow()))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.chat_context_menu = None;
                     cx.notify();
@@ -115,11 +115,11 @@ impl ChatView {
                                     .pl_12()
                                     .pr_5()
                                     .py_2()
-                                    .when(shape.adwaita, |row| row.pr_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                                    .when(shape.styled, |row| row.pr_3().py_1p5().rounded(px(shape.radius_menu_item)).overflow_hidden())
                                     .items_center(),
                                 id,
                                 hover_bg,
-                                px(if shape.adwaita { shape.radius_button } else { 0.0 }),
+                                px(shape.radius_menu_item),
                                 window,
                                 cx,
                             )

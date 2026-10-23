@@ -10,6 +10,7 @@ impl ChatView {
     ) -> Option<impl IntoElement> {
         let theme = *cx.app_theme();
         let shape = cx.shape();
+        let surface = cx.surface();
         let radius_card = px(shape.radius_row);
         let text_color = theme.foreground;
         if !self.archived_mode && self.search_query.is_empty() {
@@ -24,13 +25,7 @@ impl ChatView {
                     .items_center()
                     .gap_3()
                     .cursor_pointer()
-                    .hover(|s| {
-                        s.bg(if shape.adwaita {
-                            theme.foreground.opacity(0.05)
-                        } else {
-                            theme.muted.opacity(0.4)
-                        })
-                    })
+                    .hover(|s| s.bg(surface.archived_row_hover))
                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                         this.archived_mode = true;
                         cx.notify();
@@ -213,25 +208,20 @@ impl ChatView {
                                     .items_center()
                                     .cursor_pointer()
                                     .relative()
-                                    .bg(if shape.adwaita {
-                                        if is_selected {
-                                            surface.selection_unfocused
-                                        } else {
-                                            rgba(0x00000000).into()
-                                        }
-                                    } else if is_selected {
-                                        theme.chat.map(|c| c.list_selected).unwrap_or(theme.primary.opacity(0.14))
-                                    } else {
-                                        rgba(0x00000000).into()
-                                    })
-                                    .hover(|s| {
-                                        if shape.adwaita {
-                                            s.bg(theme.foreground.opacity(if is_selected { 0.08 } else { 0.03 }))
-                                        } else if is_selected {
-                                            s.bg(theme.chat.map(|c| c.list_selected).unwrap_or(theme.primary.opacity(0.22)))
-                                        } else {
-                                            s.bg(theme.chat.map(|c| c.list_hover).unwrap_or(theme.muted.opacity(0.65)))
-                                        }
+                                    .bg(if is_selected { surface.chat_list_selected } else { rgba(0x00000000).into() })
+                                    .hover(|s| s.bg(if is_selected { surface.chat_list_selected_hover } else { surface.chat_list_hover }))
+                                    .when(shape.winui && is_selected, |s| {
+                                        // Fluent's selection pill on the list item's leading edge.
+                                        s.child(
+                                            div()
+                                                .absolute()
+                                                .left(px(0.0))
+                                                .top(px(28.0))
+                                                .w(px(3.0))
+                                                .h(px(16.0))
+                                                .rounded(px(1.5))
+                                                .bg(theme.primary),
+                                        )
                                     })
                                     .on_mouse_down(
                                         MouseButton::Left,

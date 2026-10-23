@@ -90,6 +90,30 @@ fn unknown_fields_tolerated_and_preset_forward_compat() {
 }
 
 #[test]
+fn appearance_styles_round_trip_and_legacy_gtk_setting_defaults_winui_off() {
+    let tmp = tmp_base();
+    let base = tmp.path();
+    paths::ensure_dirs_with_base(base).unwrap();
+
+    std::fs::write(
+        paths::settings_path_with_base(base),
+        r#"{"gtk_style": true}"#,
+    )
+    .unwrap();
+    let legacy = DesktopSettings::load_from(base).unwrap();
+    assert!(legacy.gtk_style);
+    assert!(!legacy.winui_style);
+
+    let mut settings = legacy;
+    settings.gtk_style = false;
+    settings.winui_style = true;
+    settings.save_to(base).unwrap();
+    let restarted = DesktopSettings::load_from(base).unwrap();
+    assert!(!restarted.gtk_style);
+    assert!(restarted.winui_style);
+}
+
+#[test]
 fn validation_normalizes_bad_values() {
     let tmp = tmp_base();
     let base = tmp.path();

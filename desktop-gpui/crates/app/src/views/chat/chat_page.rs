@@ -399,7 +399,6 @@ impl Render for ChatView {
         }
         let theme = *cx.app_theme();
         let border_color = theme.border;
-        let bg_color = theme.background;
         let card_bg = theme.card;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
@@ -599,7 +598,7 @@ impl Render for ChatView {
                     "chat-search-sheet-in",
                     "chat-search-sheet-out",
                     self.search_sheet_closing,
-                    self.render_search_sheet(&chat, theme, border_color, bg_color, card_bg, primary_color, text_color, muted_text, cx),
+                    self.render_search_sheet(&chat, theme, border_color, card_bg, primary_color, text_color, muted_text, cx),
                 ))
             } else {
                 None
@@ -630,8 +629,6 @@ impl Render for ChatView {
             .children(self.render_compose_dialog(
                 window,
                 theme,
-                border_color,
-                card_bg,
                 primary_color,
                 text_color,
                 muted_text,

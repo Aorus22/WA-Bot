@@ -17,13 +17,11 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = *cx.app_theme();
-        let border_color = theme.border;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         let primary_color = theme.primary;
-        let shape = cx.shape();
         let surface = cx.surface();
-        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
+        let sheet_border = surface.sheet_border;
         let framed = !crate::popover::is_popover(cx) && window_material::is_framed_window(window);
         let base_url = Self::compose_base_url(cx);
         let media_base = base_url.clone();
@@ -259,7 +257,7 @@ impl ChatView {
             .overflow_hidden()
             .border_l_1()
             .border_color(sheet_border)
-            .bg(if shape.adwaita { surface.view } else { theme.background })
+            .bg(surface.view)
             .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
             .flex_shrink_0()
             .child(
@@ -271,7 +269,7 @@ impl ChatView {
                     .items_center()
                     .border_b_1()
                     .border_color(sheet_border)
-                    .bg(if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) })
+                    .bg(surface.headerbar)
                     .child(
                         div()
                             .id("btn-close-message-info")

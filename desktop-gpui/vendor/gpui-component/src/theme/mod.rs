@@ -142,6 +142,28 @@ fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
         })
 }
 
+/// Colors of the Windows 11 Fluent control styling that the shared theme colors
+/// cannot express, supplied by the host application when `Theme::winui` is on.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WinUiColors {
+    /// Outline of unchecked toggles, checkboxes and radios.
+    pub strong_stroke: Hsla,
+    /// Fill of unchecked toggles, checkboxes and radios, and its states.
+    pub alt_fill: Hsla,
+    pub alt_fill_hover: Hsla,
+    pub alt_fill_pressed: Hsla,
+    /// Slider thumb.
+    pub thumb_fill: Hsla,
+    /// Button and text box fills and their states.
+    pub control_fill: Hsla,
+    pub control_fill_hover: Hsla,
+    pub control_fill_pressed: Hsla,
+    /// Control border: top edge, sides and bottom edge.
+    pub control_stroke_top: Hsla,
+    pub control_stroke: Hsla,
+    pub control_stroke_bottom: Hsla,
+}
+
 /// The global theme configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Theme {
@@ -190,6 +212,12 @@ pub struct Theme {
     /// existing applications keep the original component appearance.
     #[serde(skip)]
     pub adwaita: bool,
+    /// Enables the app's Windows 11 Fluent-inspired control styling.
+    #[serde(skip)]
+    pub winui: bool,
+    /// Fluent control colors; only meaningful while `winui` is on.
+    #[serde(skip)]
+    pub winui_colors: WinUiColors,
     /// Optional dialog surface supplied by an Adwaita host application.
     #[serde(skip)]
     pub adwaita_dialog_bg: Option<Hsla>,
@@ -456,7 +484,7 @@ impl Theme {
                         .thumb_active(|style| {
                             style
                                 .bg(self.tokens.scrollbar_thumb_hover)
-                                .when(self.adwaita, |style| {
+                                .when(self.adwaita || self.winui, |style| {
                                     style.bg(self.foreground.opacity(0.60))
                                 })
                                 .radius(self.radius)
@@ -797,6 +825,8 @@ impl From<&ThemeColor> for Theme {
             radius_lg: px(8.),
             shadow: true,
             adwaita: false,
+            winui: false,
+            winui_colors: WinUiColors::default(),
             adwaita_dialog_bg: None,
             adwaita_scrollbar_width: None,
             focus_ring: true,

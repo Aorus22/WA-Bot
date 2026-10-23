@@ -633,7 +633,7 @@ impl RenderOnce for Button {
             .clone();
         let is_focused = focus_handle.is_focused(window);
 
-        let rounding = if cx.theme().adwaita {
+        let rounding = if cx.theme().adwaita || cx.theme().winui {
             match self.rounded {
                 ButtonRounded::None => Pixels::ZERO,
                 ButtonRounded::Size(px) => px,
@@ -693,15 +693,20 @@ impl RenderOnce for Button {
                     }
                 }
             })
-            .when(cx.theme().adwaita && !style.no_padding(), |this| {
+            .when((cx.theme().adwaita || cx.theme().winui) && !style.no_padding(), |this| {
                 if icon_only {
-                    this.size(px(34.))
+                    this.size(if cx.theme().winui { px(32.) } else { px(34.) })
                 } else {
-                    this.h(px(34.)).px_2p5()
+                    this.h(if cx.theme().winui { px(32.) } else { px(34.) })
+                        .when(cx.theme().winui, |this| this.px(px(11.)))
+                        .when(!cx.theme().winui, |this| this.px_2p5())
                 }
             })
             .when(cx.theme().adwaita && self.label.is_some(), |this| {
                 this.font_weight(FontWeight::BOLD)
+            })
+            .when(cx.theme().winui && self.label.is_some(), |this| {
+                this.font_weight(FontWeight::NORMAL)
             })
             .when(self.border_corners.top_left, |this| {
                 this.rounded_tl(rounding)
@@ -1191,9 +1196,58 @@ impl ButtonVariant {
         }
     }
 
+    /// Fluent buttons: the control fills and stroke of WinUI's `Button` and
+    /// `AccentButton` styles (see `Theme::winui_colors`), accent fading to 90% on
+    /// hover and 80% pressed, and subtle fills for ghost buttons.
+    fn winui_style(&self, state: ButtonStyleState, cx: &mut App) -> ButtonVariantStyle {
+        let foreground = cx.theme().foreground;
+        let colors = cx.theme().winui_colors;
+        let mut style = self.adwaita_style(state, cx);
+        match self {
+            Self::Default | Self::Secondary => {
+                style.bg = match state {
+                    ButtonStyleState::Normal => colors.control_fill,
+                    ButtonStyleState::Hovered => colors.control_fill_hover,
+                    ButtonStyleState::Active => colors.control_fill_pressed,
+                }
+                .into();
+                style.border = colors.control_stroke.into();
+                if state == ButtonStyleState::Active {
+                    style.fg = cx.theme().muted_foreground;
+                }
+            }
+            Self::Primary => {
+                let color = cx.theme().accent;
+                style.bg = color
+                    .opacity(match state {
+                        ButtonStyleState::Normal => 1.0,
+                        ButtonStyleState::Hovered => 0.90,
+                        ButtonStyleState::Active => 0.80,
+                    })
+                    .into();
+                style.fg = if state == ButtonStyleState::Active {
+                    cx.theme().accent_foreground.opacity(0.70)
+                } else {
+                    cx.theme().accent_foreground
+                };
+            }
+            Self::Ghost | Self::Text if state != ButtonStyleState::Normal => {
+                style.bg = foreground
+                    .opacity(if state == ButtonStyleState::Hovered { 0.0588 } else { 0.0392 })
+                    .into();
+            }
+            _ => {}
+        }
+        style.shadow = false;
+        style
+    }
+
     fn normal(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         if cx.theme().adwaita {
             return self.adwaita_style(ButtonStyleState::Normal, cx);
+        }
+        if cx.theme().winui {
+            return self.winui_style(ButtonStyleState::Normal, cx);
         }
         let bg = self.bg_color(outline, cx);
         let border = self.border_color(outline, cx);
@@ -1213,6 +1267,9 @@ impl ButtonVariant {
     fn hovered(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         if cx.theme().adwaita {
             return self.adwaita_style(ButtonStyleState::Hovered, cx);
+        }
+        if cx.theme().winui {
+            return self.winui_style(ButtonStyleState::Hovered, cx);
         }
         let bg: Background = match self {
             Self::Default => {
@@ -1301,6 +1358,9 @@ impl ButtonVariant {
         if cx.theme().adwaita {
             return self.adwaita_style(ButtonStyleState::Active, cx);
         }
+        if cx.theme().winui {
+            return self.winui_style(ButtonStyleState::Active, cx);
+        }
         let bg = match self {
             Self::Default => {
                 if outline {
@@ -1378,6 +1438,9 @@ impl ButtonVariant {
         if cx.theme().adwaita {
             return self.adwaita_style(ButtonStyleState::Active, cx);
         }
+        if cx.theme().winui {
+            return self.winui_style(ButtonStyleState::Active, cx);
+        }
         if outline {
             let active_style = self.active(outline, cx);
 
@@ -1422,6 +1485,13 @@ impl ButtonVariant {
     fn disabled(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
         if cx.theme().adwaita {
             return self.normal(outline, cx);
+        }
+        if cx.theme().winui {
+            let mut style = self.winui_style(ButtonStyleState::Normal, cx);
+            style.bg = style.bg.opacity(0.5);
+            style.border = style.border.opacity(0.5);
+            style.fg = style.fg.opacity(0.5);
+            return style;
         }
         let bg = match self {
             Self::Default | Self::Link | Self::Ghost | Self::Text => cx.theme().transparent.into(),

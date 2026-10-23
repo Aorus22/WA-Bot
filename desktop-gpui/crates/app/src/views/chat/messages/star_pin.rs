@@ -229,7 +229,7 @@ impl ChatView {
                 .w_full()
                 .px_4()
                 .py_2()
-                .when(shape.adwaita, |row| {
+                .when(shape.styled, |row| {
                     row.px(px(shape.spacing_unit)).py(px(shape.spacing_unit))
                 })
                 .gap_3()
@@ -237,18 +237,8 @@ impl ChatView {
                 .cursor_pointer()
                 .border_b_1()
                 .border_color(theme.border.opacity(0.4))
-                .bg(if shape.adwaita {
-                    surface.pinned_banner
-                } else {
-                    theme.card.opacity(0.9)
-                })
-                .hover(|s| {
-                    if shape.adwaita {
-                        s.bg(surface.pinned_banner)
-                    } else {
-                        s.bg(theme.muted.opacity(0.5))
-                    }
-                })
+                .bg(surface.pinned_banner)
+                .hover(|s| s.bg(surface.pinned_banner_hover))
                 .tooltip(move |window, cx| Tooltip::new("Go to pinned message").build(window, cx))
                 // A segment per pin, the current one lit, like WhatsApp's.
                 .when(count > 1, |row| {
@@ -277,7 +267,7 @@ impl ChatView {
                         .child(
                             div()
                                 .text_xs()
-                                .when(shape.adwaita, |text| text.font_weight(FontWeight::BOLD))
+                                .when(shape.styled, |text| text.font_weight(FontWeight::BOLD))
                                 .text_color(theme.foreground)
                                 .overflow_hidden()
                                 .line_clamp(1)

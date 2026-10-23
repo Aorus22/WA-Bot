@@ -134,7 +134,7 @@ impl SettingsView {
                     .text_color(p.muted)
                     .child(format!("{}  ·  {}", format_time(b.created_at), b.account))
             });
-            let backup_rows = boxed_list(cx, rows).when(!shape.adwaita, |list| list.gap_0p5());
+            let backup_rows = boxed_list(cx, rows).when(!shape.styled, |list| list.gap_0p5());
             section = section.child(
                 div()
                     .flex()

@@ -225,6 +225,18 @@ ipcMain.handle('get-window-state', () => {
     return mainWindow ? (mainWindow.isMaximized() ? 'maximized' : 'restored') : 'restored';
 });
 
+ipcMain.on('window-set-background-material', (_event, material) => {
+    if (process.platform !== 'win32' || !mainWindow) return;
+    if (material !== 'acrylic' && material !== 'none') return;
+    if (typeof mainWindow.setBackgroundMaterial !== 'function') return;
+
+    try {
+        mainWindow.setBackgroundMaterial(material);
+    } catch (error) {
+        console.warn('Could not set window background material:', error);
+    }
+});
+
 app.on('ready', () => {
     if (noBackend) {
         if (externalBackendPort === null) {

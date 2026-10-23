@@ -162,23 +162,18 @@ pub(crate) fn preview_load_state(url: &str, window: &mut Window, cx: &mut App) -
 
 
 /// Card that holds a context menu's rows, in WhatsApp Web's style.
-pub(crate) fn menu_surface<T>(width: f32, card_bg: Hsla, border: Hsla, cx: &Context<T>) -> Div {
+pub(crate) fn menu_surface<T>(width: f32, cx: &Context<T>) -> Div {
     let shape = cx.shape();
     let surface = cx.surface();
-    let base = v_flex().w(px(width)).py_2();
-    let menu = if shape.adwaita {
-        base.rounded(px(shape.radius_popover))
-            .bg(surface.popover)
-            .border_1()
-            .border_color(surface.border)
-    } else {
-        base.rounded_2xl()
-            .bg(card_bg)
-            .border_1()
-            .border_color(border.opacity(0.35))
-            .shadow_xl()
-    };
-    menu.occlude()
+    v_flex()
+        .w(px(width))
+        .py_2()
+        .rounded(px(shape.radius_menu_surface))
+        .bg(surface.menu_surface)
+        .border_1()
+        .border_color(surface.menu_border)
+        .when(!shape.styled, |menu| menu.shadow_xl())
+        .occlude()
 }
 
 /// Thin rule between groups of rows.

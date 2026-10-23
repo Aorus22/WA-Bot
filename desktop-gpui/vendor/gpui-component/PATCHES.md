@@ -26,3 +26,9 @@ Re-check them when updating `gpui-component`.
   padding only while the flag is enabled; placement is unchanged.
 - `src/theme/mod.rs`: use the host scrollbar width and strengthen the active thumb
   tint only while Adwaita is enabled.
+- `src/button/button.rs`: the WinUI flag uses 32px controls, semibold labels, subtle
+  bordered neutral fills, and the active palette accent for primary actions.
+- `src/checkbox.rs`, `src/radio.rs`, `src/switch.rs`, and `src/slider.rs`: WinUI uses
+  the host's Fluent radii and accent while retaining component-specific dimensions.
+- The non-serialized `Theme::winui` flag selects WinUI control styling and the same
+  host-provided dialog and scrollbar tokens without enabling Adwaita styling.

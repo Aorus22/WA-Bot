@@ -12,7 +12,6 @@ use crate::components::ui::{v_flex, Icon, IconName};
 use crate::components::motion;
 use crate::state::auth::{AuthState, AuthStatus};
 use crate::theme::manager::{AppThemeExt, ThemeManager};
-use crate::theme::shape::ShapeExt;
 use crate::theme::surface::SurfaceExt;
 use crate::window_material;
 use crate::components::shell::AppShellView;
@@ -41,18 +40,15 @@ impl RootGateView {
 impl Render for RootGateView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
-        let shape = cx.shape();
         let surface = cx.surface();
-        let window_background = if shape.adwaita {
-            if window.is_window_active() { surface.window } else { surface.window_backdrop }
+        let appearance = ThemeManager::global(cx);
+        let window_background = if window.is_window_active() {
+            surface.window_fill
         } else {
-            window_material::glass_fill(
-                theme.background,
-                ThemeManager::global(cx).window_transparency,
-            )
+            surface.window_fill_backdrop
         };
         window.set_background_appearance(window_material::background_appearance(
-            ThemeManager::global(cx).window_blur_enabled,
+            appearance.effective_window_blur_enabled(),
         ));
         let is_popover = crate::popover::is_popover(cx);
         let framed = !is_popover && window_material::is_framed_window(window);
@@ -144,7 +140,7 @@ impl Render for RootGateView {
                             .size_full()
                             .rounded(px(window_material::corner_radius(cx)))
                             .border_1()
-                            .border_color(if shape.adwaita { surface.border } else { theme.border })
+                            .border_color(surface.border)
                             .overflow_hidden()
                             .shadow(window_material::frame_shadow())
                             .child(content),

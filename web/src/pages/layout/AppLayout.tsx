@@ -109,7 +109,7 @@ export function AppLayout() {
 						<NavigationSidebar />
 					)}
 
-					<div className="flex-1 flex flex-col min-h-0 w-full overflow-hidden">
+					<div data-app-content className="flex-1 flex flex-col min-h-0 w-full overflow-hidden">
 						<Outlet />
 					</div>
 				</div>

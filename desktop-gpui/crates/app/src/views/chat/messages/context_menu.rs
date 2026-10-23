@@ -12,8 +12,7 @@ impl ChatView {
         let theme = *cx.app_theme();
         let shape = cx.shape();
         let surface = cx.surface();
-        let border_color = if shape.adwaita { surface.border } else { theme.border };
-        let card_bg = theme.card;
+        let border_color = surface.border;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         let selected_chat_id = self.selected_chat_id.clone();
@@ -38,13 +37,13 @@ impl ChatView {
                     msg_content.as_str(),
                     "[Image]" | "[Sticker]" | "[Video]" | "[Audio]" | "[Document]"
                 );
-            let hover_bg: Hsla = theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 });
-            let popover_bg = if shape.adwaita { surface.popover } else { card_bg };
-            let popover_border = if shape.adwaita { surface.border } else { border_color.opacity(0.35) };
+            let hover_bg = surface.menu_hover;
+            let popover_bg = surface.popover;
+            let popover_border = surface.menu_border;
             macro_rules! styled_menu_row {
                 ($($args:tt)*) => {
                     menu_row($($args)*)
-                        .when(shape.adwaita, |row| row.px_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                        .when(shape.styled, |row| row.px_3().py_1p5().rounded(px(shape.radius_menu_item)).overflow_hidden())
                 };
             }
             let picker_open = ctx.reaction_picker;
@@ -63,8 +62,9 @@ impl ChatView {
                 }};
             }
 
-            let mut card = menu_surface(if picker_open { 308.0 } else { 224.0 }, card_bg, border_color, cx)
-                .when(shape.adwaita, |menu| menu.shadow_sm());
+            let mut card = menu_surface(if picker_open { 308.0 } else { 224.0 }, cx)
+                .when(shape.styled && !shape.winui, |menu| menu.shadow_sm())
+                .when(shape.winui, |menu| menu.shadow(crate::theme::shape::flyout_shadow()));
             let mut pill = None;
             if picker_open {
                 // Full emoji list, opened from the pill's "+" or the React row.
@@ -84,8 +84,8 @@ impl ChatView {
                                     .items_center()
                                     .justify_center()
                                     .rounded_lg()
-                                    .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
-                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.15) } else { theme.muted.opacity(0.6) }))
+                                    .when(shape.styled, |button| button.rounded(px(shape.radius_button)))
+                                    .hover(|s| s.bg(surface.menu_item_hover))
                                     .text_lg()
                                     .child(emoji)
                                     .on_mouse_down(MouseButton::Left, react!(emoji, cx))
@@ -126,15 +126,16 @@ impl ChatView {
                         .bg(popover_bg)
                         .border_1()
                         .border_color(popover_border)
-                        .when(!shape.adwaita, |pill| pill.shadow_xl())
-                        .when(shape.adwaita, |pill| pill.shadow_sm())
+                        .when(!shape.styled, |pill| pill.shadow_xl())
+                        .when(shape.styled && !shape.winui, |pill| pill.shadow_sm())
+                .when(shape.winui, |pill| pill.shadow(crate::theme::shape::flyout_shadow()))
                         .children(["👍", "❤️", "😂", "😮", "😢", "🙏"].into_iter().map(|emoji| {
                             let key = SharedString::from(format!("mm-react-{emoji}"));
                             with_hover_fade(
-                                div().id(key.clone()).cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded(px(cx.shape().radius_button)),
+                                div().id(key.clone()).cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded(px(cx.shape().radius_menu_item)),
                                 key,
-                                theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 }),
-                                px(if shape.adwaita { shape.radius_button } else { 17.0 }),
+                                surface.menu_hover,
+                                px(shape.radius_menu_item),
                                 window,
                                 cx,
                             )
@@ -144,10 +145,10 @@ impl ChatView {
                         }))
                         .child(
                             with_hover_fade(
-                                div().id("mm-more-reactions").cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded(px(cx.shape().radius_button)),
+                                div().id("mm-more-reactions").cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded(px(cx.shape().radius_menu_item)),
                                 "mm-more-reactions",
-                                theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 }),
-                                px(if shape.adwaita { shape.radius_button } else { 17.0 }),
+                                surface.menu_hover,
+                                px(shape.radius_menu_item),
                                 window,
                                 cx,
                             )

@@ -435,7 +435,7 @@ impl Render for Notification {
             .px_4()
             .gap_3()
             .refine_style(&self.style)
-            .when(cx.theme().adwaita, |this| {
+            .when(cx.theme().adwaita || cx.theme().winui, |this| {
                 this.border_color(gpui::rgb(0xffffff).opacity(0.10))
                     .bg(gpui::rgb(0x505053))
                     .text_color(gpui::rgb(0xffffff))

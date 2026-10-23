@@ -35,13 +35,14 @@ use ui::settings_section_heading;
 use std::collections::HashMap;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
+use gpui_component::Disableable;
 use crate::theme::shape::{ShapeExt, ShapeTokens};
 use crate::theme::surface::SurfaceExt;
 use controls::Palette;
 use history_sync::SyncDepth;
 use crate::components::ui::{
     ButtonVariant, Icon, IconName, Scrollbar, ScrollbarMode, Slider, SliderEvent, SliderState,
-    SliderValue, Switch, action_button, card as card_surface, card_group, h_flex,
+    SliderValue, Switch, action_button, card as card_surface, card_group, settings_group, h_flex,
     dropdown_menu::{dropdown_list, DropdownMenuStyle},
 };
 use wabot_backend_client::client::HttpClient;

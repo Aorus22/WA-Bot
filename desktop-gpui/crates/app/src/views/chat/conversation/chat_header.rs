@@ -14,31 +14,14 @@ impl ChatView {
         let shape = cx.shape();
         let surface = cx.surface();
         let radius_button = px(shape.radius_button);
-        let border_color = if shape.adwaita {
-            surface.border
-        } else {
-            theme.border.opacity(0.4)
-        };
-        let icon_hover = if shape.adwaita {
-            theme.foreground.opacity(0.15)
-        } else {
-            theme.muted.opacity(0.65)
-        };
-        let bg_color = theme.background;
+        let border_color = surface.border;
+        let icon_hover = surface.chat_header_hover;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
-        let window_transparency = ThemeManager::global(cx).window_transparency;
-        let header_background = if shape.adwaita {
-            if window.is_window_active() {
-                surface.headerbar
-            } else {
-                surface.headerbar_backdrop
-            }
+        let header_background = if window.is_window_active() {
+            surface.chat_header
         } else {
-            window_material::glass_fill(
-                theme.chat.map(|c| c.header).unwrap_or(bg_color),
-                window_transparency,
-            )
+            surface.chat_header_backdrop
         };
         let base_url = if cx.has_global::<AuthState>() {
             AuthState::global(cx).base_url.clone()

@@ -680,8 +680,8 @@ impl CallOverlayView {
         let busy = self.action.is_some();
         let shape = cx.shape();
         let surface = cx.surface();
-        let dialog_background = if shape.adwaita { surface.dialog } else { theme.card };
-        let dialog_border = if shape.adwaita { surface.border } else { theme.border };
+        let dialog_background = surface.dialog;
+        let dialog_border = surface.border;
 
         v_flex()
             .id("incoming-call-overlay")
@@ -695,11 +695,7 @@ impl CallOverlayView {
                     .id("incoming-call-backdrop")
                     .absolute()
                     .inset_0()
-                    .bg(if shape.adwaita {
-                        rgb(0x000000).opacity(0.5)
-                    } else {
-                        rgb(0x0a0a0a).opacity(0.7)
-                    })
+                    .bg(surface.modal_scrim)
                     .on_mouse_down(MouseButton::Left, |_, _, _| {}),
             )
             .child(
@@ -709,11 +705,11 @@ impl CallOverlayView {
                     .gap_4()
                     .items_center()
                     .rounded_2xl()
-                    .when(shape.adwaita, |card| card.rounded(px(shape.radius_popover)))
+                    .when(shape.styled, |card| card.rounded(px(shape.radius_popover)))
                     .bg(dialog_background)
                     .border_1()
                     .border_color(dialog_border)
-                    .when(!shape.adwaita, |card| card.shadow_xl())
+                    .when(!shape.styled, |card| card.shadow_xl())
                     .child(
                         h_flex()
                             .items_center()

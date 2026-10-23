@@ -10,10 +10,10 @@ use crate::components::call_overlay::CallOverlayView;
 use crate::components::connection_banner::{ConnectionBanner, ConnectionState};
 use crate::components::motion;
 use navigation_sidebar::NavigationSidebar;
+use crate::theme::shape::ShapeExt;
 use crate::components::titlebar::AppTitleBar;
 use crate::router::{AppRoute, Router};
-use crate::theme::manager::{AppThemeExt, ThemeManager};
-use crate::theme::shape::ShapeExt;
+use crate::theme::manager::AppThemeExt;
 use crate::theme::surface::SurfaceExt;
 use crate::window_material;
 use crate::state::auth::{AuthState, AuthStatus};
@@ -23,6 +23,43 @@ use crate::views::channels::ChannelsView;
 use crate::views::chat::ChatView;
 use crate::views::settings::SettingsView;
 use crate::views::status::StatusView;
+
+/// Fluent's content sheet corner: the content layer is rounded at the top left
+/// where it meets the base layer. Pages paint their own square backgrounds, so the
+/// rounded edge is made by painting the base color back over the corner outside the
+/// arc, then stroking the arc.
+fn content_corner(base: gpui::Hsla, stroke: gpui::Hsla) -> impl IntoElement {
+    const RADIUS: f32 = 8.0;
+    gpui::canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let origin = bounds.origin;
+            let at = |x: f32, y: f32| gpui::point(origin.x + px(x), origin.y + px(y));
+            let r = RADIUS - 0.5;
+            let radii = gpui::point(px(r), px(r));
+            let mut fill = gpui::PathBuilder::fill();
+            fill.move_to(at(0.0, 0.0));
+            fill.line_to(at(RADIUS, 0.5));
+            fill.arc_to(radii, px(0.0), false, false, at(0.5, RADIUS));
+            fill.close();
+            if let Ok(path) = fill.build() {
+                window.paint_path(path, base);
+            }
+            let mut line = gpui::PathBuilder::stroke(px(1.0));
+            line.move_to(at(RADIUS, 0.5));
+            line.arc_to(radii, px(0.0), false, false, at(0.5, RADIUS));
+            if let Ok(path) = line.build() {
+                window.paint_path(path, stroke);
+            }
+        },
+    )
+    .absolute()
+    // Absolute children sit inside the 1px border; the arc starts at its outer edge.
+    .top(px(-1.0))
+    .left(px(-1.0))
+    .w(px(RADIUS))
+    .h(px(RADIUS))
+}
 
 pub struct AppShellView {
     _router_sub: gpui::Subscription,
@@ -108,6 +145,12 @@ impl Render for AppShellView {
                         v_flex()
                             .size_full()
                             .overflow_hidden()
+                            .relative()
+                            // Fluent: the content layer is a sheet over the base layer,
+                            // outlined on its left and top edges.
+                            .when(cx.shape().winui, |s| {
+                                s.border_l_1().border_t_1().border_color(cx.surface().card_stroke)
+                            })
                             .child(ConnectionBanner::new())
                             .child(
                                 div()
@@ -123,7 +166,10 @@ impl Render for AppShellView {
                                         motion::BASE_MS,
                                         10.0,
                                     )),
-                            ),
+                            )
+                            .when(cx.shape().winui, |s| {
+                                s.child(content_corner(cx.surface().window_fill, cx.surface().card_stroke))
+                            }),
                     ),
             )
             .child(self.call_overlay.clone())
@@ -134,18 +180,10 @@ impl Render for AppShellView {
 impl AppShellView {
     fn render_route_outlet(&self, route: &AppRoute, window: &Window, cx: &App) -> AnyElement {
         let theme = cx.app_theme();
-        let shape = cx.shape();
         let surface = cx.surface();
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
-        let page_background = if shape.adwaita {
-            surface.view
-        } else {
-            window_material::glass_fill(
-                theme.background,
-                ThemeManager::global(cx).window_transparency,
-            )
-        };
+        let page_background = surface.page_background;
 
         // Without a linked account the pages that show WhatsApp data give way
         // to the login; the navigation and the other pages stay usable.

@@ -173,13 +173,16 @@ impl RenderOnce for Switch {
         let checked_bg = self
             .color
             .map(Background::from)
-            .unwrap_or(if cx.theme().adwaita {
+            .unwrap_or(if cx.theme().adwaita || cx.theme().winui {
                             cx.theme().accent.into()
                         } else {
                             cx.theme().tokens.primary.into()
                         });
-        let adwaita = cx.theme().adwaita;
-        let unchecked_bg: Background = if adwaita {
+        let winui = cx.theme().winui;
+        let adwaita = cx.theme().adwaita || winui;
+        let unchecked_bg: Background = if winui {
+            cx.theme().winui_colors.alt_fill.into()
+        } else if adwaita {
             cx.theme().foreground.opacity(0.15).into()
         } else {
             cx.theme().tokens.switch.into()
@@ -189,14 +192,24 @@ impl RenderOnce for Switch {
         // would let the track show through the thumb. Fading the track alone
         // lands on the pixels a grouped fade would: the thumb is `background`.
         let disabled_bg = if checked { checked_bg } else { unchecked_bg }.opacity(0.5);
-        let toggle_bg: Background = if adwaita {
+        // Fluent: the knob is the secondary text color when off and the on-accent text
+        // color when on.
+        let toggle_bg: Background = if winui {
+            if checked {
+                cx.theme().accent_foreground.into()
+            } else {
+                cx.theme().muted_foreground.into()
+            }
+        } else if adwaita {
             gpui::rgb(0xffffff).into()
         } else {
             cx.theme().tokens.switch_thumb.into()
         };
         let disabled_label_color = cx.theme().muted_foreground;
 
-        let (bg_width, bg_height) = if adwaita {
+        let (bg_width, bg_height) = if winui {
+            (px(40.), px(20.))
+        } else if adwaita {
             (px(40.), px(24.))
         } else {
             match self.size {
@@ -205,7 +218,9 @@ impl RenderOnce for Switch {
                 _ => (px(36.), px(20.)),
             }
         };
-        let bar_width = if adwaita {
+        let bar_width = if winui {
+            px(12.)
+        } else if adwaita {
             px(20.)
         } else {
             match self.size {
@@ -214,7 +229,9 @@ impl RenderOnce for Switch {
                 _ => px(16.),
             }
         };
-        let inset = px(2.);
+        // Fluent's knob sits 4px from the left edge when off and 3px from the right
+        // edge when on.
+        let inset = if winui { px(4.) } else { px(2.) };
         let radius = if cx.theme().radius >= px(4.) {
             bg_height
         } else {
@@ -229,7 +246,11 @@ impl RenderOnce for Switch {
         let thumb_x = spring(
             (self.id.clone(), "thumb"),
             if checked {
-                bg_width - bar_width - inset * 2
+                if winui {
+                    bg_width - bar_width - inset - px(3.)
+                } else {
+                    bg_width - bar_width - inset * 2
+                }
             } else {
                 px(0.)
             },
@@ -281,10 +302,22 @@ impl RenderOnce for Switch {
                         // lands within a few values of `switch.background`
                         // in both default modes.
                         .border_1()
-                        .border_color(cx.theme().transparent)
+                        .border_color(if winui && !checked {
+                            cx.theme().winui_colors.strong_stroke
+                        } else {
+                            cx.theme().transparent
+                        })
                         .p(inset - px(1.))
                         .when(!checked, |this| this.bg(unchecked_bg))
-                        .when(adwaita && !checked, |this| {
+                        .when(winui && !checked, |this| {
+                            this.hover(|style| style.bg(cx.theme().winui_colors.alt_fill_hover))
+                                .active(|style| style.bg(cx.theme().winui_colors.alt_fill_pressed))
+                        })
+                        .when(winui && checked, |this| {
+                            this.hover(|style| style.bg(checked_bg.opacity(0.9)))
+                                .active(|style| style.bg(checked_bg.opacity(0.8)))
+                        })
+                        .when(adwaita && !winui && !checked, |this| {
                             this.hover(|style| {
                                 style.bg(cx.theme().foreground.opacity(0.225))
                             })

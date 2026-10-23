@@ -70,7 +70,7 @@ pub use boxed_list::boxed_list;
 pub use button::{
     Button, ButtonVariant, ButtonVariants, action_button, button, destructive_button, icon_button,
 };
-pub use card::{card, card_group};
+pub use card::{card, card_group, settings_group};
 pub use checkbox::Checkbox;
 pub use form_row::form_row;
 pub use input::{Input, InputEvent, InputState};

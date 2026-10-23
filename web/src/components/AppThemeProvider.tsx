@@ -21,20 +21,34 @@ export function useAppTheme() {
 }
 
 const GTK_STYLE_KEY = 'wa-bot-gtk-style';
+const WINUI_STYLE_KEY = 'wa-bot-winui-style';
 
 export function isGtkStyle() {
 	return typeof window !== 'undefined' && localStorage.getItem(GTK_STYLE_KEY) === '1';
 }
 
-function applyGtkStyle(enabled: boolean) {
+export function isWinUiStyle() {
+	return typeof window !== 'undefined' && localStorage.getItem(WINUI_STYLE_KEY) === '1';
+}
+
+function applyAppearanceStyle() {
 	const root = document.documentElement;
-	if (enabled) root.dataset.style = 'adwaita';
+	const style = isWinUiStyle() ? 'winui' : isGtkStyle() ? 'adwaita' : undefined;
+	if (style) root.dataset.style = style;
 	else delete root.dataset.style;
+	window.electron?.setWindowMaterial(style === 'winui' ? 'acrylic' : 'none');
 }
 
 export function setGtkStyle(enabled: boolean) {
 	localStorage.setItem(GTK_STYLE_KEY, enabled ? '1' : '0');
-	applyGtkStyle(enabled);
+	if (enabled) localStorage.setItem(WINUI_STYLE_KEY, '0');
+	applyAppearanceStyle();
+}
+
+export function setWinUiStyle(enabled: boolean) {
+	localStorage.setItem(WINUI_STYLE_KEY, enabled ? '1' : '0');
+	if (enabled) localStorage.setItem(GTK_STYLE_KEY, '0');
+	applyAppearanceStyle();
 }
 
 export function setAppTheme(name: string) {
@@ -50,7 +64,7 @@ export const AppThemeProvider: React.FC<AppThemeProviderProps> = ({ children }) 
 	}, [currentTheme]);
 
 	useEffect(() => {
-		applyGtkStyle(isGtkStyle());
+		applyAppearanceStyle();
 	}, []);
 
 	useEffect(() => {
@@ -93,33 +107,33 @@ export const AppThemeProvider: React.FC<AppThemeProviderProps> = ({ children }) 
 		set('--palette-input', c.input);
 		set('--palette-sidebar', c.background);
 		set('--palette-sidebar-border', c.border);
-		set('--background', 'var(--adw-background, var(--palette-background))');
+		set('--background', 'var(--adw-background, var(--winui-background, var(--palette-background)))');
 		set('--foreground', 'var(--palette-foreground)');
-		set('--card', 'var(--adw-card, var(--palette-card))');
+		set('--card', 'var(--adw-card, var(--winui-card, var(--palette-card)))');
 		set('--card-foreground', 'var(--palette-card-foreground)');
-		set('--popover', 'var(--adw-popover, var(--palette-card))');
+		set('--popover', 'var(--adw-popover, var(--winui-popover, var(--palette-card)))');
 		set('--popover-foreground', 'var(--palette-card-foreground)');
 		set('--primary', c.primary);
 		set('--primary-foreground', c.primaryForeground);
 		set('--secondary', c.secondary);
 		set('--secondary-foreground', c.secondaryForeground);
-		set('--muted', 'var(--adw-muted, var(--palette-muted))');
-		set('--muted-foreground', 'var(--adw-muted-foreground, var(--palette-muted-foreground))');
+		set('--muted', 'var(--adw-muted, var(--winui-muted, var(--palette-muted)))');
+		set('--muted-foreground', 'var(--adw-muted-foreground, var(--winui-muted-foreground, var(--palette-muted-foreground)))');
 		set('--accent', c.accent);
 		set('--accent-foreground', c.accentForeground);
 		set('--destructive', c.destructive);
 		set('--destructive-foreground', c.destructiveForeground);
-		set('--border', 'var(--adw-border, var(--palette-border))');
-		set('--input', 'var(--adw-input, var(--palette-input))');
+		set('--border', 'var(--adw-border, var(--winui-border, var(--palette-border)))');
+		set('--input', 'var(--adw-input, var(--winui-input, var(--palette-input)))');
 		set('--ring', c.ring);
 
-		set('--sidebar', 'var(--adw-sidebar, var(--palette-sidebar))');
+		set('--sidebar', 'var(--adw-sidebar, var(--winui-sidebar, var(--palette-sidebar)))');
 		set('--sidebar-foreground', c.foreground);
 		set('--sidebar-primary', c.primary);
 		set('--sidebar-primary-foreground', c.primaryForeground);
 		set('--sidebar-accent', c.secondary);
 		set('--sidebar-accent-foreground', c.foreground);
-		set('--sidebar-border', 'var(--adw-sidebar-border, var(--palette-sidebar-border))');
+		set('--sidebar-border', 'var(--adw-sidebar-border, var(--winui-sidebar-border, var(--palette-sidebar-border)))');
 		set('--sidebar-ring', c.ring);
 
 		root.classList.toggle('dark', getLuminance(c.background) < 0.5);

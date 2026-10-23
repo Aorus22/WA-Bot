@@ -1,6 +1,6 @@
 import { Check, Palette, LogOut, LogIn, Wifi, WifiOff, AlertCircle, Bot, Mic, Loader2, History, ChevronRight } from 'lucide-react'
 import { themes } from '@/data/themes'
-import { useAppTheme, setAppTheme, isGtkStyle, setGtkStyle } from '@/components/AppThemeProvider'
+import { useAppTheme, setAppTheme, isGtkStyle, setGtkStyle, isWinUiStyle, setWinUiStyle } from '@/components/AppThemeProvider'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -75,6 +75,7 @@ export function SettingsPage() {
 	const [logoutOpen, setLogoutOpen] = useState(false)
 	const [themeOpen, setThemeOpen] = useState(false)
 	const [gtkStyle, setGtkStyleState] = useState(isGtkStyle)
+	const [winuiStyle, setWinUiStyleState] = useState(isWinUiStyle)
 	const navigate = useNavigate()
 	const { isLoggedIn, isConnected, logout } = useAuth()
 
@@ -337,7 +338,7 @@ export function SettingsPage() {
 	return (
 		<>
 			<div className="flex flex-col items-center justify-start min-h-full p-4 md:p-8 overflow-y-auto pt-12">
-				<div className="w-full max-w-2xl space-y-8 pb-12">
+				<div data-settings-page className="w-full max-w-2xl space-y-8 pb-12">
 					<h1 className="text-2xl font-bold tracking-tight">Settings</h1>
 
 					<div className="space-y-4">
@@ -377,7 +378,23 @@ export function SettingsPage() {
 									checked={gtkStyle}
 									onCheckedChange={(v) => {
 										setGtkStyleState(Boolean(v))
+										if (v) setWinUiStyleState(false)
 										setGtkStyle(Boolean(v))
+									}}
+								/>
+							</div>
+							<div className="flex items-center gap-3 px-4 py-3">
+								<Palette className="h-4 w-4 text-muted-foreground" />
+								<div className="flex flex-col flex-1 min-w-0">
+									<span className="text-sm font-medium">WinUI style</span>
+									<span className="text-xs text-muted-foreground">Windows 11 Fluent shapes and Acrylic. Works with any colour theme</span>
+								</div>
+								<Switch
+									checked={winuiStyle}
+									onCheckedChange={(v) => {
+										setWinUiStyleState(Boolean(v))
+										if (v) setGtkStyleState(false)
+										setWinUiStyle(Boolean(v))
 									}}
 								/>
 							</div>

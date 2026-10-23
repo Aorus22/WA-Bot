@@ -11,28 +11,20 @@ impl ChatView {
         pages: bool,
         show_right: bool,
     ) -> impl IntoElement {
-        let theme = *cx.app_theme();
-        let shape = cx.shape();
         let surface = cx.surface();
-        let bg_color = theme.background;
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
-        let window_transparency = ThemeManager::global(cx).window_transparency;
         v_flex()
             .flex_1()
             .min_w(px(0.0))
             .h_full()
             .overflow_hidden()
             .when(!show_right, |el| el.hidden())
-            .bg(if shape.adwaita {
-                surface.view
-            } else {
-                window_material::glass_fill(
-                    theme.chat.map(|c| c.chat_bg).unwrap_or(bg_color),
-                    window_transparency,
-                )
+            .bg(surface.conversation_background)
+            .when(framed, |s| {
+                s.rounded_tr(px(window_material::corner_radius(cx)))
+                    .rounded_br(px(window_material::corner_radius(cx)))
             })
-            .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
             .children(if let Some(ref active_chat) = selected_chat {
                 let chat_jid = active_chat.id.clone();
 

@@ -6,6 +6,7 @@ declare global {
       close: () => void;
       getWindowState: () => Promise<"maximized" | "restored">;
       onWindowStateChange: (callback: (state: "maximized" | "restored") => void) => void;
+      setWindowMaterial: (material: "acrylic" | "none") => void;
       getBackendPort: () => Promise<number>;
       onBackendReady: (callback: (port: number) => void) => void;
       isElectron: boolean;
