@@ -15,10 +15,7 @@
 //! ```
 
 use gpui::{AnyWindowHandle, App, Global, SharedString};
-use gpui_component::{
-    notification::{Notification, NotificationType},
-    WindowExt as _,
-};
+use crate::components::ui::{WindowExt as _, sonner::{Notification, NotificationType}};
 
 /// Global bus holding the main window handle so toasts can be pushed without
 /// a `&mut Window` in scope. Registered in `main.rs` after the window opens.

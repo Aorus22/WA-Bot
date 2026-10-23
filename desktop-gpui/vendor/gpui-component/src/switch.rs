@@ -4,7 +4,8 @@ use crate::{
 };
 use gpui::{
     App, Background, ElementId, Hsla, InteractiveElement, IntoElement, ParentElement as _,
-    RenderOnce, SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
+    RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
+    div, prelude::FluentBuilder as _,
     px,
 };
 use gpui_base::{Switch as BaseSwitch, SwitchThumb, SwitchTrack, spring};
@@ -172,25 +173,46 @@ impl RenderOnce for Switch {
         let checked_bg = self
             .color
             .map(Background::from)
-            .unwrap_or(cx.theme().tokens.primary.into());
-        let unchecked_bg: Background = cx.theme().tokens.switch.into();
+            .unwrap_or(if cx.theme().adwaita {
+                            cx.theme().accent.into()
+                        } else {
+                            cx.theme().tokens.primary.into()
+                        });
+        let adwaita = cx.theme().adwaita;
+        let unchecked_bg: Background = if adwaita {
+            cx.theme().foreground.opacity(0.15).into()
+        } else {
+            cx.theme().tokens.switch.into()
+        };
         // GPUI's element opacity multiplies each primitive's alpha instead of
         // compositing the subtree as one group, so fading the whole control
         // would let the track show through the thumb. Fading the track alone
         // lands on the pixels a grouped fade would: the thumb is `background`.
         let disabled_bg = if checked { checked_bg } else { unchecked_bg }.opacity(0.5);
-        let toggle_bg: Background = cx.theme().tokens.switch_thumb.into();
+        let toggle_bg: Background = if adwaita {
+            gpui::rgb(0xffffff).into()
+        } else {
+            cx.theme().tokens.switch_thumb.into()
+        };
         let disabled_label_color = cx.theme().muted_foreground;
 
-        let (bg_width, bg_height) = match self.size {
-            Size::XSmall | Size::Small => (px(28.), px(16.)),
-            Size::Large => (px(44.), px(24.)),
-            _ => (px(36.), px(20.)),
+        let (bg_width, bg_height) = if adwaita {
+            (px(40.), px(24.))
+        } else {
+            match self.size {
+                Size::XSmall | Size::Small => (px(28.), px(16.)),
+                Size::Large => (px(44.), px(24.)),
+                _ => (px(36.), px(20.)),
+            }
         };
-        let bar_width = match self.size {
-            Size::XSmall | Size::Small => px(12.),
-            Size::Large => px(20.),
-            _ => px(16.),
+        let bar_width = if adwaita {
+            px(20.)
+        } else {
+            match self.size {
+                Size::XSmall | Size::Small => px(12.),
+                Size::Large => px(20.),
+                _ => px(16.),
+            }
         };
         let inset = px(2.);
         let radius = if cx.theme().radius >= px(4.) {
@@ -262,6 +284,14 @@ impl RenderOnce for Switch {
                         .border_color(cx.theme().transparent)
                         .p(inset - px(1.))
                         .when(!checked, |this| this.bg(unchecked_bg))
+                        .when(adwaita && !checked, |this| {
+                            this.hover(|style| {
+                                style.bg(cx.theme().foreground.opacity(0.225))
+                            })
+                            .active(|style| {
+                                style.bg(cx.theme().foreground.opacity(0.08))
+                            })
+                        })
                         .styles(|styles| {
                             styles
                                 .checked(|style| style.bg(checked_bg))

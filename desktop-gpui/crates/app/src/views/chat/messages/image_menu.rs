@@ -1,3 +1,4 @@
+
 use crate::views::chat::*;
 
 /// Container format of an image, from its first bytes.
@@ -54,12 +55,20 @@ impl ChatView {
     ) -> Option<impl IntoElement> {
         let menu = self.image_menu.clone()?;
         let theme = *cx.app_theme();
-        let hover_bg: Hsla = theme.foreground.opacity(0.12);
+        let shape = cx.shape();
+        let hover_bg: Hsla = theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 });
+        macro_rules! styled_menu_row {
+            ($($args:tt)*) => {
+                menu_row($($args)*)
+                    .when(shape.adwaita, |row| row.px_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+            };
+        }
         let (muted_text, text_color) = (theme.muted_foreground, theme.foreground);
 
-        let card = menu_surface(208.0, theme.card, theme.border)
+        let card = menu_surface(208.0, theme.card, theme.border, cx)
+            .when(shape.adwaita, |menu| menu.shadow_sm())
             .child(
-                menu_row(window, cx, "im-copy", COPY_SVG, "Copy image", muted_text, text_color, hover_bg)
+                styled_menu_row!(window, cx, "im-copy", COPY_SVG, "Copy image", muted_text, text_color, hover_bg)
                     .on_mouse_down(MouseButton::Left, cx.listener({
                         let url = menu.url.clone();
                         move |this, _, _, cx| {
@@ -70,7 +79,7 @@ impl ChatView {
                     })),
             )
             .child(
-                menu_row(window, cx, "im-save", DOWNLOAD_SVG, "Save image as…", muted_text, text_color, hover_bg)
+                styled_menu_row!(window, cx, "im-save", DOWNLOAD_SVG, "Save image as…", muted_text, text_color, hover_bg)
                     .on_mouse_down(MouseButton::Left, cx.listener({
                         let (url, name) = (menu.url.clone(), menu.file_name.clone());
                         move |this, _, _, cx| {

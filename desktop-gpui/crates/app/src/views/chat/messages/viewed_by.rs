@@ -1,3 +1,5 @@
+use crate::components::ui::boxed_list::boxed_list;
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 /// "Today at 22:03", "Yesterday at 22:03" or "7 September 2026 at 22:03".
@@ -19,6 +21,9 @@ impl ChatView {
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         let primary_color = theme.primary;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
         let framed = !crate::popover::is_popover(cx) && window_material::is_framed_window(window);
         let base_url = Self::compose_base_url(cx);
         let media_base = base_url.clone();
@@ -72,7 +77,7 @@ impl ChatView {
         };
         let member_row = {
             let name_of = name_of.clone();
-            move |jid: &str, at: Option<i64>| -> AnyElement {
+            move |jid: &str, at: Option<i64>| {
                 let name = name_of(jid);
                 h_flex()
                     .items_center()
@@ -88,7 +93,6 @@ impl ChatView {
                                 div().text_xs().text_color(muted_text).child(format_receipt_time(at))
                             })),
                     )
-                    .into_any_element()
             }
         };
 
@@ -231,22 +235,19 @@ impl ChatView {
             );
         } else {
             if !read.is_empty() {
-                body = body.child(section_header("Read by", CHECK_CHECK_SVG, rgb(0x53bdeb).into()));
-                for receipt in &read {
-                    body = body.child(member_row(&receipt.jid, Some(receipt.read_at)));
-                }
+                body = body
+                    .child(section_header("Read by", CHECK_CHECK_SVG, rgb(0x53bdeb).into()))
+                    .child(boxed_list(cx, read.iter().map(|receipt| member_row(&receipt.jid, Some(receipt.read_at)))));
             }
             if !delivered.is_empty() {
-                body = body.child(section_header("Delivered to", CHECK_CHECK_SVG, muted_text));
-                for receipt in &delivered {
-                    body = body.child(member_row(&receipt.jid, Some(receipt.delivered_at)));
-                }
+                body = body
+                    .child(section_header("Delivered to", CHECK_CHECK_SVG, muted_text))
+                    .child(boxed_list(cx, delivered.iter().map(|receipt| member_row(&receipt.jid, Some(receipt.delivered_at)))));
             }
             if !remaining.is_empty() {
-                body = body.child(section_header("Remaining", CHECK_SVG, muted_text));
-                for jid in &remaining {
-                    body = body.child(member_row(jid, None));
-                }
+                body = body
+                    .child(section_header("Remaining", CHECK_SVG, muted_text))
+                    .child(boxed_list(cx, remaining.iter().map(|jid| member_row(jid, None))));
             }
         }
 
@@ -257,26 +258,26 @@ impl ChatView {
             .h_full()
             .overflow_hidden()
             .border_l_1()
-            .border_color(border_color.opacity(0.4))
-            .bg(theme.background)
-            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
+            .border_color(sheet_border)
+            .bg(if shape.adwaita { surface.view } else { theme.background })
+            .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
             .flex_shrink_0()
             .child(
                 h_flex()
-                    .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                    .h(px(cx.shape().header_height))
                     .pl_4()
                     .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
                     .gap_3()
                     .items_center()
                     .border_b_1()
-                    .border_color(border_color.opacity(0.4))
-                    .bg(theme.muted.opacity(0.2))
+                    .border_color(sheet_border)
+                    .bg(if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) })
                     .child(
                         div()
                             .id("btn-close-message-info")
                             .cursor_pointer()
                             .p_1()
-                            .rounded_full()
+                            .rounded(px(cx.shape().radius_button))
                             .hover(|s| s.bg(theme.muted.opacity(0.65)))
                             .tooltip(move |window, cx| Tooltip::new("Close").build(window, cx))
                             .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))

@@ -1,4 +1,5 @@
 use crate::views::chat::*;
+use crate::theme::surface::SurfaceExt;
 
 impl ChatView {
     /// Archived entry shown first in the conversation list.
@@ -8,6 +9,8 @@ impl ChatView {
         archived_count: usize,
     ) -> Option<impl IntoElement> {
         let theme = *cx.app_theme();
+        let shape = cx.shape();
+        let radius_card = px(shape.radius_row);
         let text_color = theme.foreground;
         if !self.archived_mode && self.search_query.is_empty() {
             Some(
@@ -17,11 +20,17 @@ impl ChatView {
                     .mt_2()
                     .px_3()
                     .py_2p5()
-                    .rounded_xl()
+                    .rounded(radius_card)
                     .items_center()
                     .gap_3()
                     .cursor_pointer()
-                    .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                    .hover(|s| {
+                        s.bg(if shape.adwaita {
+                            theme.foreground.opacity(0.05)
+                        } else {
+                            theme.muted.opacity(0.4)
+                        })
+                    })
                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                         this.archived_mode = true;
                         cx.notify();
@@ -155,6 +164,8 @@ impl ChatView {
                     self.cached_filtered_chats.len(),
                     cx.processor(|this, range: Range<usize>, _window, cx| {
                         let theme = cx.app_theme();
+                        let shape = cx.shape();
+                        let surface = cx.surface();
                         let muted_text = theme.muted_foreground;
                         let text_color = theme.foreground;
                         let selected_chat_id = this.selected_chat_id.clone();
@@ -189,6 +200,7 @@ impl ChatView {
                                 let formatted_time = Self::format_chat_time(chat.last_time);
                                 let unread = chat.unread;
 
+                                let radius_card = px(shape.radius_row);
                                 let card = h_flex()
                                     .id(SharedString::from(chat.id.clone()))
                                     .w_full()
@@ -196,18 +208,26 @@ impl ChatView {
                                     .overflow_hidden()
                                     .px_3()
                                     .py_2p5()
-                                    .rounded_xl()
+                                    .rounded(radius_card)
                                     .gap_3()
                                     .items_center()
                                     .cursor_pointer()
                                     .relative()
-                                    .bg(if is_selected {
+                                    .bg(if shape.adwaita {
+                                        if is_selected {
+                                            surface.selection_unfocused
+                                        } else {
+                                            rgba(0x00000000).into()
+                                        }
+                                    } else if is_selected {
                                         theme.chat.map(|c| c.list_selected).unwrap_or(theme.primary.opacity(0.14))
                                     } else {
                                         rgba(0x00000000).into()
                                     })
                                     .hover(|s| {
-                                        if is_selected {
+                                        if shape.adwaita {
+                                            s.bg(theme.foreground.opacity(if is_selected { 0.08 } else { 0.03 }))
+                                        } else if is_selected {
                                             s.bg(theme.chat.map(|c| c.list_selected).unwrap_or(theme.primary.opacity(0.22)))
                                         } else {
                                             s.bg(theme.chat.map(|c| c.list_hover).unwrap_or(theme.muted.opacity(0.65)))

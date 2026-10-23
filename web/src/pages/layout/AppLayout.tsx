@@ -49,7 +49,7 @@ export function AppLayout() {
 			{/* ── Electron frameless title bar (drag region) ── */}
 			{isDesktop && (
 				<header
-					className="drag-region h-12 flex items-center justify-between px-3 bg-secondary/50 shrink-0 select-none"
+					data-app-titlebar className="drag-region h-[var(--titlebar-h)] flex items-center justify-between px-3 bg-secondary/50 shrink-0 select-none"
 					style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 				>
 					{/* Left: app name in drag area */}
@@ -61,7 +61,7 @@ export function AppLayout() {
 
 					{/* Custom window controls (Linux/macOS only) */}
 					{showCustomControls && (
-						<div className="flex items-center h-full">
+						<div data-window-controls className="flex items-center h-full">
 							<button
 								onClick={minimizeWindow}
 								className="no-drag flex items-center justify-center h-9 w-11 text-foreground/70 hover:bg-muted hover:text-foreground transition-all duration-200"
@@ -102,7 +102,7 @@ export function AppLayout() {
 
 			{/* ── Main content ── */}
 			<div className={cn("flex flex-1 bg-background text-foreground overflow-hidden", isMobileView && "flex-col")}
-				style={isDesktop ? { height: "calc(100vh - 48px)" } : { height: "100dvh" }}
+				style={isDesktop ? { height: "calc(100vh - var(--titlebar-h))" } : { height: "100dvh" }}
 			>
 				<div className="flex-1 flex w-full relative overflow-hidden min-h-0">
 					{!isMobileView && (

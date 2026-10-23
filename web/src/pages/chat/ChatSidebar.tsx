@@ -221,16 +221,16 @@ export const ChatSidebar = memo(({
     }
 
     return (
-        <div className={cn("flex flex-col h-full max-h-full bg-background border-r border-border/40 overflow-hidden", className)}>
+        <div data-chat-sidebar className={cn("flex flex-col h-full max-h-full bg-background border-r border-border/40 overflow-hidden", className)}>
             {/* Header */}
             <div className="flex flex-col p-5 space-y-4 shrink-0">
-                <div className="flex items-center justify-between">
+                <div data-chat-list-header className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         {archivedMode && (
                             <button
                                 aria-label="Back to messages"
                                 onClick={() => setArchivedMode(false)}
-                                className="rounded-full p-1.5 hover:bg-muted"
+                                className="rounded-button p-1.5 hover:bg-muted"
                             >
                                 <ChevronLeft className="h-5 w-5" />
                             </button>
@@ -243,21 +243,21 @@ export const ChatSidebar = memo(({
                                 aria-label="Starred messages"
                                 title="Starred messages"
                                 onClick={() => setStarredOpen(true)}
-                                className="rounded-full p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                                className="rounded-button p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
                             >
                                 <Star className="h-4.5 w-4.5" />
                             </button>
                             <button
                                 aria-label="New group"
                                 onClick={() => setNewGroupOpen(true)}
-                                className="rounded-full p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                                className="rounded-button p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
                             >
                                 <Users className="h-4.5 w-4.5" />
                             </button>
                             <button
                                 aria-label="Join via link"
                                 onClick={() => setJoinGroupOpen(true)}
-                                className="rounded-full p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                                className="rounded-button p-2 hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
                             >
                                 <LinkIcon className="h-4.5 w-4.5" />
                             </button>
@@ -282,7 +282,7 @@ export const ChatSidebar = memo(({
             {!archivedMode && !searchQuery && !loading && (
                 <button
                     onClick={() => setArchivedMode(true)}
-                    className="w-full flex items-center gap-4 px-4 py-3 rounded-2xl hover:bg-muted/50 text-left mb-1"
+                    className="w-full flex items-center gap-4 px-4 py-3 rounded-card hover:bg-muted/50 text-left mb-1"
                 >
                     <span className="h-11 w-11 rounded-full bg-muted flex items-center justify-center">
                         <Archive className="h-5 w-5 text-[#00a884]" />
@@ -321,8 +321,9 @@ export const ChatSidebar = memo(({
                             <div data-chat-item>
                             <button
                                 onClick={() => onChatSelect(chat)}
+                                data-selected={selectedChatId === chat.id}
                                 className={cn(
-                                    "w-full flex items-center gap-4 p-3.5 rounded-2xl transition-all duration-200 group text-left relative",
+                                    "w-full flex items-center gap-4 p-3.5 rounded-card transition-all duration-200 group text-left relative",
                                     selectedChatId === chat.id
                                         ? "bg-primary/10 shadow-sm"
                                         : "hover:bg-muted/50 active:scale-[0.98]"
@@ -330,7 +331,7 @@ export const ChatSidebar = memo(({
                             >
                                 {/* Active Indicator Line */}
                                 {selectedChatId === chat.id && (
-                                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r-full" />
+                                    <div data-adw-active-indicator className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r-full" />
                                 )}
 
                                 <div className="relative flex-shrink-0">

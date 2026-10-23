@@ -1,3 +1,4 @@
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 /// Pin lengths the context menu offers: seconds and label.
@@ -217,6 +218,8 @@ impl ChatView {
         let target = pin.message_id.clone();
 
         let theme = *cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
         let primary_color = theme.primary;
         let title = if count > 1 { format!("{count} pinned messages · {sender}") } else { sender };
 
@@ -226,13 +229,26 @@ impl ChatView {
                 .w_full()
                 .px_4()
                 .py_2()
+                .when(shape.adwaita, |row| {
+                    row.px(px(shape.spacing_unit)).py(px(shape.spacing_unit))
+                })
                 .gap_3()
                 .items_center()
                 .cursor_pointer()
                 .border_b_1()
                 .border_color(theme.border.opacity(0.4))
-                .bg(theme.card.opacity(0.9))
-                .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                .bg(if shape.adwaita {
+                    surface.pinned_banner
+                } else {
+                    theme.card.opacity(0.9)
+                })
+                .hover(|s| {
+                    if shape.adwaita {
+                        s.bg(surface.pinned_banner)
+                    } else {
+                        s.bg(theme.muted.opacity(0.5))
+                    }
+                })
                 .tooltip(move |window, cx| Tooltip::new("Go to pinned message").build(window, cx))
                 // A segment per pin, the current one lit, like WhatsApp's.
                 .when(count > 1, |row| {
@@ -261,6 +277,7 @@ impl ChatView {
                         .child(
                             div()
                                 .text_xs()
+                                .when(shape.adwaita, |text| text.font_weight(FontWeight::BOLD))
                                 .text_color(theme.foreground)
                                 .overflow_hidden()
                                 .line_clamp(1)

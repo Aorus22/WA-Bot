@@ -1,4 +1,6 @@
 use crate::views::chat::*;
+use crate::theme::shape::ShapeExt;
+use crate::theme::surface::SurfaceExt;
 
 pub(crate) fn prepare_mention_text(text: &str, group: Option<&GroupCache>) -> (String, Vec<String>) {
     let Some(group) = group else { return (text.to_string(), Vec::new()) };
@@ -160,16 +162,23 @@ pub(crate) fn preview_load_state(url: &str, window: &mut Window, cx: &mut App) -
 
 
 /// Card that holds a context menu's rows, in WhatsApp Web's style.
-pub(crate) fn menu_surface(width: f32, card_bg: Hsla, border: Hsla) -> Div {
-    v_flex()
-        .w(px(width))
-        .py_2()
-        .rounded_2xl()
-        .bg(card_bg)
-        .border_1()
-        .border_color(border.opacity(0.35))
-        .shadow_xl()
-        .occlude()
+pub(crate) fn menu_surface<T>(width: f32, card_bg: Hsla, border: Hsla, cx: &Context<T>) -> Div {
+    let shape = cx.shape();
+    let surface = cx.surface();
+    let base = v_flex().w(px(width)).py_2();
+    let menu = if shape.adwaita {
+        base.rounded(px(shape.radius_popover))
+            .bg(surface.popover)
+            .border_1()
+            .border_color(surface.border)
+    } else {
+        base.rounded_2xl()
+            .bg(card_bg)
+            .border_1()
+            .border_color(border.opacity(0.35))
+            .shadow_xl()
+    };
+    menu.occlude()
 }
 
 /// Thin rule between groups of rows.

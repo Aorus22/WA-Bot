@@ -150,6 +150,7 @@ export const WAAudioPlayer = ({
 		>
 			<button
 				type="button"
+				data-adw-round-control
 				onClick={togglePlay}
 				aria-label={isPlaying ? "Pause audio" : "Play audio"}
 				className={cn(

@@ -71,7 +71,7 @@ export default function ChannelsPage() {
 			<aside className="w-full md:w-[340px] shrink-0 flex flex-col border-r border-border/40 bg-background">
 				<div className="flex items-center justify-between p-5 pb-3">
 					<h2 className="text-2xl font-bold tracking-tight">Channels</h2>
-					<Button size="icon" variant="ghost" className="rounded-full" onClick={() => setDiscoverOpen(true)}>
+					<Button size="icon" variant="ghost" className="rounded-button" onClick={() => setDiscoverOpen(true)}>
 						<Plus className="h-5 w-5" />
 					</Button>
 				</div>
@@ -286,9 +286,9 @@ function ChannelConversation({ channel, onChange, onUnfollowed }: {
 
 	return (
 		<div className="flex-1 flex flex-col bg-background relative overflow-hidden">
-			<header className="h-16 flex items-center justify-between px-4 border-b border-border/40 bg-background/80 backdrop-blur-xl z-20">
+			<header data-channel-header className="h-16 flex items-center justify-between px-4 border-b border-border/40 bg-background/80 backdrop-blur-xl z-20">
 				<div className="flex items-center gap-3 min-w-0">
-					<Button variant="ghost" size="icon" className="md:hidden rounded-full -ml-2" onClick={() => onChange(null)}>
+					<Button variant="ghost" size="icon" className="md:hidden rounded-button -ml-2" onClick={() => onChange(null)}>
 						<ArrowLeft className="h-5 w-5" />
 					</Button>
 					<Avatar className="h-10 w-10 border-2 border-background shadow-sm">
@@ -307,10 +307,10 @@ function ChannelConversation({ channel, onChange, onUnfollowed }: {
 					</div>
 				</div>
 				<div className="flex items-center gap-1">
-					<Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-primary" onClick={toggleMute} title={channel.muted ? "Unmute" : "Mute"}>
+					<Button variant="ghost" size="icon" className="rounded-button text-muted-foreground hover:text-primary" onClick={toggleMute} title={channel.muted ? "Unmute" : "Mute"}>
 						{channel.muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
 					</Button>
-					<Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-destructive" onClick={() => setConfirmLeave(true)} title="Unfollow">
+					<Button variant="ghost" size="icon" className="rounded-button text-muted-foreground hover:text-destructive" onClick={() => setConfirmLeave(true)} title="Unfollow">
 						<UserMinus className="h-5 w-5" />
 					</Button>
 				</div>

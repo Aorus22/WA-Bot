@@ -20,6 +20,23 @@ export function useAppTheme() {
 	return stored || 'default-dark';
 }
 
+const GTK_STYLE_KEY = 'wa-bot-gtk-style';
+
+export function isGtkStyle() {
+	return typeof window !== 'undefined' && localStorage.getItem(GTK_STYLE_KEY) === '1';
+}
+
+function applyGtkStyle(enabled: boolean) {
+	const root = document.documentElement;
+	if (enabled) root.dataset.style = 'adwaita';
+	else delete root.dataset.style;
+}
+
+export function setGtkStyle(enabled: boolean) {
+	localStorage.setItem(GTK_STYLE_KEY, enabled ? '1' : '0');
+	applyGtkStyle(enabled);
+}
+
 export function setAppTheme(name: string) {
 	localStorage.setItem(STORAGE_KEY, name);
 	window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: name }));
@@ -31,6 +48,24 @@ export const AppThemeProvider: React.FC<AppThemeProviderProps> = ({ children }) 
 	const activeTheme = useMemo(() => {
 		return themes.find(t => t.name === currentTheme) || themes[0];
 	}, [currentTheme]);
+
+	useEffect(() => {
+		applyGtkStyle(isGtkStyle());
+	}, []);
+
+	useEffect(() => {
+		const root = document.documentElement;
+		const updateFocus = () => root.classList.toggle('app-focused', document.hasFocus());
+
+		updateFocus();
+		window.addEventListener('focus', updateFocus);
+		window.addEventListener('blur', updateFocus);
+		return () => {
+			window.removeEventListener('focus', updateFocus);
+			window.removeEventListener('blur', updateFocus);
+			root.classList.remove('app-focused');
+		};
+	}, []);
 
 	useEffect(() => {
 		const handler = (e: StorageEvent) => {
@@ -48,33 +83,43 @@ export const AppThemeProvider: React.FC<AppThemeProviderProps> = ({ children }) 
 
 		const set = (name: string, value: string) => root.style.setProperty(name, value);
 
-		set('--background', c.background);
-		set('--foreground', c.foreground);
-		set('--card', c.card);
-		set('--card-foreground', c.cardForeground);
-		set('--popover', c.card);
-		set('--popover-foreground', c.cardForeground);
+		set('--palette-background', c.background);
+		set('--palette-foreground', c.foreground);
+		set('--palette-card', c.card);
+		set('--palette-card-foreground', c.cardForeground);
+		set('--palette-muted', c.muted);
+		set('--palette-muted-foreground', c.mutedForeground);
+		set('--palette-border', c.border);
+		set('--palette-input', c.input);
+		set('--palette-sidebar', c.background);
+		set('--palette-sidebar-border', c.border);
+		set('--background', 'var(--adw-background, var(--palette-background))');
+		set('--foreground', 'var(--palette-foreground)');
+		set('--card', 'var(--adw-card, var(--palette-card))');
+		set('--card-foreground', 'var(--palette-card-foreground)');
+		set('--popover', 'var(--adw-popover, var(--palette-card))');
+		set('--popover-foreground', 'var(--palette-card-foreground)');
 		set('--primary', c.primary);
 		set('--primary-foreground', c.primaryForeground);
 		set('--secondary', c.secondary);
 		set('--secondary-foreground', c.secondaryForeground);
-		set('--muted', c.muted);
-		set('--muted-foreground', c.mutedForeground);
+		set('--muted', 'var(--adw-muted, var(--palette-muted))');
+		set('--muted-foreground', 'var(--adw-muted-foreground, var(--palette-muted-foreground))');
 		set('--accent', c.accent);
 		set('--accent-foreground', c.accentForeground);
 		set('--destructive', c.destructive);
 		set('--destructive-foreground', c.destructiveForeground);
-		set('--border', c.border);
-		set('--input', c.input);
+		set('--border', 'var(--adw-border, var(--palette-border))');
+		set('--input', 'var(--adw-input, var(--palette-input))');
 		set('--ring', c.ring);
 
-		set('--sidebar', c.background);
+		set('--sidebar', 'var(--adw-sidebar, var(--palette-sidebar))');
 		set('--sidebar-foreground', c.foreground);
 		set('--sidebar-primary', c.primary);
 		set('--sidebar-primary-foreground', c.primaryForeground);
 		set('--sidebar-accent', c.secondary);
 		set('--sidebar-accent-foreground', c.foreground);
-		set('--sidebar-border', c.border);
+		set('--sidebar-border', 'var(--adw-sidebar-border, var(--palette-sidebar-border))');
 		set('--sidebar-ring', c.ring);
 
 		root.classList.toggle('dark', getLuminance(c.background) < 0.5);

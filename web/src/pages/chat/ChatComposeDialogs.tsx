@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Plus, Trash2 } from "lucide-react"
 import { api, type Chat, type Message } from "@/lib/api"
 import { toast } from "sonner"
+import { BoxedList } from "@/components/ui/boxed-list"
 
 export function PollDialog({ open, onOpenChange, chatId }: {
 	open: boolean
@@ -267,24 +268,27 @@ export function ForwardDialog({ open, onOpenChange, message, chats, currentChatI
 					<DialogTitle>Forward message</DialogTitle>
 					<DialogDescription>Select up to 5 chats.</DialogDescription>
 				</DialogHeader>
-				<div className="max-h-[320px] overflow-y-auto flex flex-col gap-1">
-					{chats
-						.filter((c) => c.id !== currentChatId)
-						.map((c) => (
-							<button
-								key={c.id}
-								onClick={() => toggle(c.id)}
-								className={`flex items-center gap-3 p-2 rounded-lg text-left transition-colors ${selected.has(c.id) ? "bg-primary/10" : "hover:bg-muted"}`}
-							>
-								<div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center text-sm font-bold text-primary shrink-0">
-									{(c.name || c.id).charAt(0).toUpperCase()}
-								</div>
-								<span className="flex-1 truncate text-sm font-medium">{c.name || c.id}</span>
-								<div className={`flex h-5 w-5 items-center justify-center rounded border ${selected.has(c.id) ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40"}`}>
-									{selected.has(c.id) ? "✓" : ""}
-								</div>
-							</button>
-						))}
+				<div className="max-h-[320px] overflow-y-auto">
+					<BoxedList className="flex flex-col gap-1">
+						{chats
+							.filter((c) => c.id !== currentChatId)
+							.map((c) => (
+								<button
+									key={c.id}
+									onClick={() => toggle(c.id)}
+									data-selected={selected.has(c.id)}
+									className={`flex items-center gap-3 p-2 rounded-lg text-left transition-colors ${selected.has(c.id) ? "bg-primary/10" : "hover:bg-muted"}`}
+								>
+									<div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center text-sm font-bold text-primary shrink-0">
+										{(c.name || c.id).charAt(0).toUpperCase()}
+									</div>
+									<span className="flex-1 truncate text-sm font-medium">{c.name || c.id}</span>
+									<div className={`flex h-5 w-5 items-center justify-center rounded border ${selected.has(c.id) ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40"}`}>
+										{selected.has(c.id) ? "✓" : ""}
+									</div>
+								</button>
+							))}
+					</BoxedList>
 				</div>
 				<DialogFooter>
 					<Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

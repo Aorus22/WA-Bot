@@ -4,11 +4,8 @@ use gpui::{
     div, prelude::FluentBuilder as _, px, Context, InteractiveElement,
     IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window,
 };
-use gpui_component::{
-    button::Button,
-    h_flex, v_flex, Icon, IconName,
-};
-
+use crate::components::ui::{h_flex, v_flex, Icon, IconName};
+use crate::components::ui::button;
 use crate::state::auth::{AuthState, LoginTab};
 use crate::theme::manager::{AppThemeExt, ThemeManager};
 use crate::window_material;
@@ -46,7 +43,7 @@ impl Render for LoginView {
             .size_full()
             .bg(window_material::glass_fill(theme.background, window_transparency))
             // Sits beside the navigation sidebar, which owns the bottom-left corner.
-            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
+            .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
             .items_center()
             .p_4()
             // Scrolls when the column is taller than the window (popover,
@@ -212,7 +209,7 @@ impl Render for LoginView {
                                                     ),
                                             )
                                             .child(
-                                                Button::new("btn-back-qr")
+                                                button("btn-back-qr", cx)
                                                     .label("Back to QR code")
                                                     .on_click(|_, _, cx| {
                                                         if cx.has_global::<AuthState>() {

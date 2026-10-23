@@ -1038,10 +1038,10 @@ const handleReplyMessage = (message: Message) => {
 
     return (
         <div className={cn("flex-1 flex flex-col bg-background relative overflow-x-hidden", className)}>
-            <header className="h-16 flex items-center justify-between px-4 border-b border-border/40 bg-background/80 backdrop-blur-xl z-20 sticky top-0">
+            <header data-chat-header className="h-[var(--header-h)] flex items-center justify-between px-4 border-b border-border/40 bg-background/80 backdrop-blur-xl z-20 sticky top-0">
                 <div className="flex items-center gap-3">
                     {onBack && (
-                        <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onBack(); }} className="md:hidden -ml-2 rounded-full">
+                        <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onBack(); }} className="md:hidden -ml-2 rounded-button">
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                     )}
@@ -1083,7 +1083,7 @@ const handleReplyMessage = (message: Message) => {
                                 title="Group audio call"
                                 disabled={!!activeCall}
                                 onClick={(e) => { e.stopPropagation(); startGroupCall(chat.id, [], "group_audio").catch(() => toast.error("Failed to start group call")); }}
-                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                                className="rounded-button text-muted-foreground hover:text-primary transition-all active:scale-90"
                             >
                                 <Phone className="h-5 w-5" />
                             </Button>
@@ -1093,7 +1093,7 @@ const handleReplyMessage = (message: Message) => {
                                 title="Group video call"
                                 disabled={!!activeCall}
                                 onClick={(e) => { e.stopPropagation(); startGroupCall(chat.id, [], "group_video").catch(() => toast.error("Failed to start group call")); }}
-                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                                className="rounded-button text-muted-foreground hover:text-primary transition-all active:scale-90"
                             >
                                 <Video className="h-5 w-5" />
                             </Button>
@@ -1106,7 +1106,7 @@ const handleReplyMessage = (message: Message) => {
                                 title="Audio call"
                                 disabled={!!activeCall}
                                 onClick={(e) => { e.stopPropagation(); startCall(chat.id, "audio").catch(() => toast.error("Failed to start call")); }}
-                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                                className="rounded-button text-muted-foreground hover:text-primary transition-all active:scale-90"
                             >
                                 <Phone className="h-5 w-5" />
                             </Button>
@@ -1116,7 +1116,7 @@ const handleReplyMessage = (message: Message) => {
                                 title="Video call"
                                 disabled={!!activeCall}
                                 onClick={(e) => { e.stopPropagation(); startCall(chat.id, "video").catch(() => toast.error("Failed to start call")); }}
-                                className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                                className="rounded-button text-muted-foreground hover:text-primary transition-all active:scale-90"
                             >
                                 <Video className="h-5 w-5" />
                             </Button>
@@ -1126,14 +1126,14 @@ const handleReplyMessage = (message: Message) => {
                         variant="ghost" 
                         size="icon" 
                         onClick={(e) => { e.stopPropagation(); setIsSearchOpen(true); }}
-                        className="rounded-full text-muted-foreground hover:text-primary transition-all active:scale-90"
+                        className="rounded-button text-muted-foreground hover:text-primary transition-all active:scale-90"
                     >
                         <Search className="h-5 w-5" />
                     </Button>
                     <Button 
                         variant="ghost" 
                         size="icon" 
-                        className="rounded-full text-muted-foreground group-hover:text-primary transition-all"
+                        className="rounded-button text-muted-foreground group-hover:text-primary transition-all"
                     >
                         <MoreVertical className="h-5 w-5" />
                     </Button>
@@ -1233,7 +1233,7 @@ const handleReplyMessage = (message: Message) => {
                         onClick={handleScrollToBottom}
                         title="Scroll ke paling baru"
                         aria-label="Scroll to newest messages"
-                        className="absolute right-5 bottom-4 z-20 w-10 h-10 rounded-full bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground shadow-md hover:shadow-lg border border-border/60 flex items-center justify-center transition-all duration-200 active:scale-95 cursor-pointer backdrop-blur-sm animate-in fade-in zoom-in-75"
+                        className="absolute right-5 bottom-4 z-20 w-10 h-10 rounded-button bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground shadow-md hover:shadow-lg border border-border/60 flex items-center justify-center transition-all duration-200 active:scale-95 cursor-pointer backdrop-blur-sm animate-in fade-in zoom-in-75"
                     >
                         <ChevronDown className="h-5 w-5" />
                     </button>
@@ -1251,7 +1251,7 @@ const handleReplyMessage = (message: Message) => {
                                 <AvatarFallback>{typists[0].name.slice(0, 1).toUpperCase()}</AvatarFallback>
                             </Avatar>
                         )}
-                        <div className="flex items-center gap-1.5 rounded-2xl bg-card px-3 py-3 shadow-sm border border-border/40" title={`${typists[0].name} is ${typists[0].audio ? "recording audio" : "typing"}`}>
+                        <div data-chat-typing className="flex items-center gap-1.5 rounded-2xl bg-card px-3 py-3 shadow-sm border border-border/40" title={`${typists[0].name} is ${typists[0].audio ? "recording audio" : "typing"}`}>
                             {[0, 1, 2].map(i => (
                                 <span key={i} className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" style={{ animationDelay: `${i * 180}ms` }} />
                             ))}
@@ -1260,7 +1260,7 @@ const handleReplyMessage = (message: Message) => {
                 )
             })()}
 
-            <footer className="p-4 bg-background/80 backdrop-blur-xl border-t border-border/40 z-10">
+            <footer data-chat-composer className="p-4 bg-background/80 backdrop-blur-xl border-t border-border/40 z-10">
                 {(replyTo || editingMessage) && (
                     <div className="max-w-4xl mx-auto mb-2">
                         {replyTo && (
@@ -1303,7 +1303,7 @@ const handleReplyMessage = (message: Message) => {
                                     variant="ghost"
                                     size="icon"
                                     className={cn(
-                                        "rounded-full transition-all",
+                                        "rounded-button transition-all",
                                         plusOpen ? "text-primary bg-primary/10" : "text-muted-foreground hover:bg-muted"
                                     )}
                                 >
@@ -1357,7 +1357,7 @@ const handleReplyMessage = (message: Message) => {
                         </Popover>
                     </div>
                     {isRecording ? (
-                        <div className="flex-1 flex items-center gap-3 bg-muted/50 rounded-2xl px-4 min-h-[44px]">
+                        <div className="flex-1 flex items-center gap-3 bg-muted/50 rounded-input px-4 min-h-[44px]">
                             <span className="relative flex h-3 w-3 flex-shrink-0">
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
                                 <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
@@ -1365,16 +1365,16 @@ const handleReplyMessage = (message: Message) => {
                             <span className="text-sm font-bold tabular-nums tracking-tight">{formatRecordingTime(recordingSeconds)}</span>
                             <RecordingWaveform stream={recordingStream} />
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelRecording} title="Cancel recording">
+                                <Button size="icon" variant="ghost" className="h-9 w-9 rounded-button text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelRecording} title="Cancel recording">
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
-                                <Button size="icon" className="h-9 w-9 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 active:scale-90 transition-all" onClick={stopRecording} title="Stop and review">
+                                <Button size="icon" className="h-9 w-9 rounded-button bg-destructive text-destructive-foreground hover:bg-destructive/90 active:scale-90 transition-all" onClick={stopRecording} title="Stop and review">
                                     <Square className="h-4 w-4 fill-current" />
                                 </Button>
                             </div>
                         </div>
                     ) : pendingAudio ? (
-                        <div className="flex-1 flex items-center gap-3 bg-muted/50 rounded-2xl px-4 min-h-[44px]">
+                        <div className="flex-1 flex items-center gap-3 bg-muted/50 rounded-input px-4 min-h-[44px]">
                             <WAAudioPlayer
                                 src={pendingAudio.url}
                                 isMe
@@ -1384,7 +1384,7 @@ const handleReplyMessage = (message: Message) => {
                                 className="mx-0 mt-0 p-0 py-1.5 min-w-0 sm:min-w-0 flex-1"
                             />
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <Button size="icon" variant="ghost" className="h-9 w-9 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelPendingAudio} title="Discard recording">
+                                <Button size="icon" variant="ghost" className="h-9 w-9 rounded-button text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={cancelPendingAudio} title="Discard recording">
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                                 <Button size="icon" className="h-9 w-9 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 active:scale-90 transition-all" onClick={sendPendingAudio} disabled={sending} title="Send voice message">
@@ -1399,7 +1399,7 @@ const handleReplyMessage = (message: Message) => {
                                 size="icon"
                                 onClick={startRecording}
                                 disabled={sending}
-                                className="rounded-full text-muted-foreground hover:text-primary hover:bg-muted transition-all active:scale-90 mb-1"
+                                className="rounded-button text-muted-foreground hover:text-primary hover:bg-muted transition-all active:scale-90 mb-1"
                                 title="Record voice message"
                             >
                                 <Mic className="h-5 w-5" />
@@ -1464,7 +1464,7 @@ const handleReplyMessage = (message: Message) => {
                                     setInputMessage("")
                                 }
                             }}
-                            className="pr-12 min-h-[44px] max-h-[150px] resize-none overflow-y-hidden bg-muted/50 border-none focus-visible:ring-1 focus-visible:ring-primary/20 rounded-2xl py-3 text-sm"
+                            className="pr-12 min-h-[44px] max-h-[150px] resize-none overflow-y-hidden bg-muted/50 border-none focus-visible:ring-1 focus-visible:ring-primary/20 rounded-input py-3 text-sm"
                             disabled={sending}
                             rows={1}
                         />

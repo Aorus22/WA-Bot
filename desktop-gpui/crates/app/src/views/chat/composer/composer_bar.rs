@@ -1,4 +1,5 @@
 use crate::views::chat::*;
+use crate::theme::surface::SurfaceExt;
 
 impl ChatView {
     /// Bottom compose area: reply/edit banner, attach/emoji panels and the input row.
@@ -8,6 +9,10 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = *cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let radius_button = px(shape.radius_button);
+        let radius_input = px(shape.radius_input);
         let border_color = theme.border;
         let card_bg = theme.card;
         let primary_color = theme.primary;
@@ -25,7 +30,14 @@ impl ChatView {
         // No bar behind the pill: it floats over the chat, as in WhatsApp Web.
         v_flex()
             .relative()
-            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
+            .when(shape.adwaita, |s| s.bg(surface.window))
+            .when(framed, |s| {
+                s.rounded_br(px(if shape.adwaita {
+                    shape.radius_window
+                } else {
+                    window_material::corner_radius(cx)
+                }))
+            })
             // Reply Preview Banner
             .children(if let Some(ref r_msg) = self.reply_to {
                 let r_sender = if r_msg.from == "me" { "You" } else { r_msg.sender_name.as_deref().unwrap_or("Sender") };
@@ -74,7 +86,7 @@ impl ChatView {
                             div()
                                 .cursor_pointer()
                                 .p_1()
-                                .rounded_full()
+                                .rounded(radius_button)
                                 .hover(|s| s.bg(theme.muted.opacity(0.6)))
                                 .child(svg().data(X_SVG).size(px(14.0)).text_color(muted_text))
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
@@ -121,7 +133,7 @@ impl ChatView {
                             div()
                                 .cursor_pointer()
                                 .p_1()
-                                .rounded_full()
+                                .rounded(radius_button)
                                 .hover(|s| s.bg(theme.muted.opacity(0.6)))
                                 .child(svg().data(X_SVG).size(px(14.0)).text_color(muted_text))
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
@@ -185,7 +197,7 @@ impl ChatView {
                             .id("btn-remove-pending-attachment")
                             .cursor_pointer()
                             .p_1()
-                            .rounded_full()
+                            .rounded(radius_button)
                             .hover(|s| s.bg(theme.muted.opacity(0.6)))
                             .child(svg().data(X_SVG).size(px(14.0)).text_color(muted_text))
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
@@ -272,14 +284,28 @@ impl ChatView {
                     div()
                         .id(id)
                         .p_2()
-                        .rounded_full()
+                        .rounded(radius_button)
                         .flex()
                         .items_center()
                         .justify_center()
                         .flex_shrink_0()
                         .cursor_pointer()
-                        .bg(if active { primary_color.opacity(0.15) } else { rgba(0x00000000).into() })
-                        .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                        .bg(if active {
+                            if shape.adwaita {
+                                theme.foreground.opacity(0.10)
+                            } else {
+                                primary_color.opacity(0.15)
+                            }
+                        } else {
+                            rgba(0x00000000).into()
+                        })
+                        .hover(|s| {
+                            s.bg(if shape.adwaita {
+                                theme.foreground.opacity(0.15)
+                            } else {
+                                theme.muted.opacity(0.65)
+                            })
+                        })
                 };
                 h_flex()
                     .p_3()
@@ -289,10 +315,15 @@ impl ChatView {
                             .min_w(px(0.0))
                             .px_2()
                             .py_1()
-                            .rounded_3xl()
-                            .border_1()
-                            .border_color(border_color.opacity(0.2))
-                            .bg(theme.muted.opacity(0.5))
+                            .rounded(radius_input)
+                            .when(!shape.adwaita, |el| {
+                                el.border_1().border_color(border_color.opacity(0.2))
+                            })
+                            .bg(if shape.adwaita {
+                                theme.foreground.opacity(0.10)
+                            } else {
+                                theme.muted.opacity(0.5)
+                            })
                             .items_center()
                             .gap_1()
                             .cursor_text()

@@ -197,7 +197,7 @@ export function ContactBubble({ contact }: { contact: ContactMeta }) {
 								e.stopPropagation()
 								saveVcard(c)
 							}}
-							className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+							className="p-2 rounded-button hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
 							title="Save contact"
 						>
 							<Download className="h-4 w-4" />

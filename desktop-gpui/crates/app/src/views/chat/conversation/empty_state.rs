@@ -14,7 +14,7 @@ impl ChatView {
             // The strip where the window controls sit; drag the window by it.
             h_flex()
                 .w_full()
-                .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                .h(px(cx.shape().header_height))
                 .flex_shrink_0()
                 .pr(px(crate::components::titlebar::controls_room(cx)))
                 .child(crate::components::titlebar::drag_area()),

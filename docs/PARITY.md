@@ -33,6 +33,7 @@ change in the other, in the same commit or the same PR.
 | Backup | `views/settings_backup.rs` | `BackupSection.tsx` |
 | AI provider | `views/settings_ai.rs` | `SettingsPage.tsx` (AI) |
 | Theme picker | `settings.rs` (modal) | `SettingsPage.tsx` (dialog) |
+| GTK style (shape tokens) | `theme/shape.rs`, `ThemeManager::apply_gtk_style`, setting `gtk_style` | `--shape-*` vars in `index.css`, `data-style="adwaita"` set by `AppThemeProvider.tsx`, key `wa-bot-gtk-style` |
 | Typing indicator | `state/chat.rs`, `chat_list.rs`, `conversation/typing.rs` | `stores/typingStore.ts`, `ChatSidebar.tsx`, `ChatArea.tsx` |
 | Calls page | `views/calls.rs` | `src/pages/calls/CallHistoryPage.tsx` |
 | Message ticks | `state/chat.rs` (`MessageStatus`), `message_bubble.rs` | chat store, message bubble |
@@ -69,3 +70,32 @@ These exist because of the platform, not by accident. Keep this list short.
 - Call history rows show the contact's name and profile picture (the backend adds
   `peer_id` and `peer_name`), and no total count.
 - Progress bars show only while something runs; afterwards one summary line.
+
+## Shape and surface tokens (GTK style)
+
+The "GTK style" switch is a visual layer, not a colour theme: it preserves the active
+palette while applying Adwaita shapes, controls, surfaces, typography, and motion. With
+the switch off, both clients retain their existing styling.
+
+- gpui: add shape values to `ShapeTokens` (`theme/shape.rs`) with `DEFAULT` and `ADWAITA`
+  values, and read them via `cx.shape()`. Toggle groups use a 9px container, 6px selected
+  segment and palette-aware raised selection in Adwaita mode. Boxed-list row height,
+  padding, separator, flat corners and overlay scrims are also tokens. Text roles are
+  `cx.shape().typography`.
+  Palette-derived surfaces live in `SurfaceTokens` (`theme/surface.rs`) and are read
+  with `cx.surface()`; this includes the pinned-banner color, applied only when Adwaita
+  is enabled. Desktop (GTK) palette overrides are used only when that preset is active.
+  `gpui-component` widget overrides are gated by `Theme::adwaita` and documented
+  in `desktop-gpui/vendor/gpui-component/PATCHES.md`.
+- web: `--shape-*`, `--adw-*` (including `--adw-pinned-banner`), and `--adw-title-*`
+  variables live in `web/src/index.css`; the shared `BoxedList` component (`components/ui/boxed-list.tsx`)
+  provides boxed rows for call history, backup history, group members and message lists.
+  Adwaita overrides are scoped to
+  `:root[data-style="adwaita"]`.
+  `AppThemeProvider` sets that attribute from the shared `wa-bot-gtk-style` setting and
+  tracks window focus.
+
+Use a token instead of a literal radius, surface colour, or control/header height in a
+view. Adwaita reference values include 9px control radii, 12px cards and message bubbles,
+15px popovers/windows, 34px controls, and a 46px headerbar. They are based on
+`ricewind012/discord-gnome-theme` (`libadwaita-other.scss`, `controls.scss`).

@@ -8,7 +8,7 @@ use crate::{StyleSized as _, ThemeStyled as _};
 use gpui::{
     AnyElement, App, Axis, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder, relative, rems,
+    prelude::FluentBuilder, px, relative, rems,
 };
 use gpui_base::{Radio as BaseRadio, RadioGroup as BaseRadioGroup};
 
@@ -165,11 +165,15 @@ impl RenderOnce for Radio {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
         let has_content = self.label.is_some() || !self.children.is_empty();
-        let indicator_size = rems(match self.size {
-            Size::XSmall => 0.75,
-            Size::Small => 0.875,
-            Size::Large => 1.125,
-            _ => 1.,
+        let indicator_size = rems(if cx.theme().adwaita {
+            1.375
+        } else {
+            match self.size {
+                Size::XSmall => 0.75,
+                Size::Small => 0.875,
+                Size::Large => 1.125,
+                _ => 1.,
+            }
         });
         let focus_handle = window
             .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
@@ -182,7 +186,17 @@ impl RenderOnce for Radio {
             .clone()
             .or_else(|| self.label.as_ref().map(|label| label.get_text(cx)));
 
-        let (border_color, bg) = if checked {
+        let adwaita = cx.theme().adwaita;
+        let (border_color, bg) = if adwaita {
+            (
+                if checked {
+                    cx.theme().accent
+                } else {
+                    cx.theme().foreground.opacity(0.25)
+                },
+                gpui::rgb(0xffffff).into(),
+            )
+        } else if checked {
             (cx.theme().primary, cx.theme().primary)
         } else {
             (cx.theme().input, cx.theme().input.opacity(0.5))
@@ -230,15 +244,33 @@ impl RenderOnce for Radio {
                     .flex_shrink_0()
                     .rounded_full_style(cx)
                     .border_1()
+                    .when(adwaita, |this| {
+                                            if checked {
+                                                this.border(px(7.))
+                                            } else {
+                                                this.border_2()
+                                            }
+                                        })
                     .border_color(border_color)
-                    .map(|this| match self.checked {
-                        false => this.bg(cx.theme().input_background()),
-                        true if disabled => this.bg(bg),
-                        true => this.bg(cx.theme().tokens.primary),
+                    .map(|this| {
+                        if adwaita {
+                            this.bg(bg)
+                        } else {
+                            match self.checked {
+                                false => this.bg(cx.theme().input_background()),
+                                true if disabled => this.bg(bg),
+                                true => this.bg(cx.theme().tokens.primary),
+                            }
+                        }
                     })
-                    .child(checkbox_check_icon(
-                        self.id, self.size, checked, disabled, window, cx,
-                    )),
+                    .child(if adwaita {
+                        div().hidden().into_any_element()
+                    } else {
+                        checkbox_check_icon(
+                            self.id, self.size, checked, disabled, window, cx,
+                        )
+                        .into_any_element()
+                    }),
             )
             .when(!self.children.is_empty() || self.label.is_some(), |this| {
                 this.child(

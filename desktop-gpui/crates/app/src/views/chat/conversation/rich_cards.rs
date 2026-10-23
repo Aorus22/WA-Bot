@@ -1,4 +1,4 @@
-use crate::components::rich_bubbles::{ContactHelper, LocationHelper, PollHelper};
+use super::rich_bubbles::{ContactHelper, LocationHelper, PollHelper};
 use crate::views::chat::*;
 use wabot_backend_client::dto::{ContactMeta, LinkPreviewMeta, LocationMeta, PollMeta, StatusReplyMeta};
 

@@ -1,9 +1,11 @@
 use crate::views::chat::*;
+use crate::theme::surface::SurfaceExt;
 
 impl ChatView {
     /// Left column: header, filter chips, archived/pinned rows and the conversation list.
     pub(crate) fn render_sidebar(
         &mut self,
+        window: &Window,
         cx: &mut Context<Self>,
         pages: bool,
         show_list: bool,
@@ -15,14 +17,30 @@ impl ChatView {
         let border_color = theme.border;
         let bg_color = theme.background;
         let window_transparency = ThemeManager::global(cx).window_transparency;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let background = if shape.adwaita {
+            if window.is_window_active() {
+                surface.secondary_sidebar
+            } else {
+                surface.secondary_sidebar_backdrop
+            }
+        } else {
+            window_material::glass_fill(bg_color, window_transparency)
+        };
+        let border = if shape.adwaita {
+            surface.sidebar_border
+        } else {
+            border_color.opacity(0.4)
+        };
         let sidebar = v_flex()
             .w(px(self.sidebar_width))
             .when(pages, |el| el.w_full())
             .when(!show_list, |el| el.hidden())
             .h_full()
             .border_r_1()
-            .border_color(border_color.opacity(0.4))
-            .bg(window_material::glass_fill(bg_color, window_transparency))
+            .border_color(border)
+            .bg(background)
             .flex_shrink_0()
             // Sidebar Header
             .child(self.render_sidebar_header(cx, pages, has_selection))

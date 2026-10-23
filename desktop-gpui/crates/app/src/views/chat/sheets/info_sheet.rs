@@ -1,3 +1,5 @@
+use crate::components::ui::boxed_list::boxed_list;
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
@@ -202,8 +204,12 @@ impl ChatView {
         full_width: bool,
     ) -> AnyElement {
         let theme = *cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
         let border_color = theme.border;
-        let bg_color = theme.background;
+        let bg_color = if shape.adwaita { surface.view } else { theme.background };
+        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
+        let header_bg = if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) };
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -221,19 +227,19 @@ impl ChatView {
                 .h_full()
                 .overflow_hidden()
                 .border_l_1()
-                .border_color(border_color.opacity(0.4))
+                .border_color(sheet_border)
                 .bg(bg_color)
-                .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
+                .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
                 .flex_shrink_0()
                 // Header
                 .child(
                     h_flex()
-                        .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                        .h(px(cx.shape().header_height))
                         .pl_4()
                         .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
                         .border_b_1()
-                        .border_color(border_color.opacity(0.4))
-                        .bg(theme.muted.opacity(0.2))
+                        .border_color(sheet_border)
+                        .bg(header_bg)
                         .justify_between()
                         .items_center()
                         .child(
@@ -254,7 +260,14 @@ impl ChatView {
                                 .id("btn-close-info-sheet")
                                 .cursor_pointer()
                                 .p_1()
-                                .rounded_full()
+                                .when(shape.adwaita, |s| {
+                                    s.w(px(shape.control_size))
+                                        .h(px(shape.control_size))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                })
+                                .rounded(px(shape.radius_button))
                                 .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                 .tooltip(move |window, cx| {
                                     Tooltip::new(if media_page { "Back" } else { "Close" }).build(window, cx)
@@ -465,16 +478,12 @@ impl ChatView {
                                             })
                                             .collect();
 
-                                        v_flex()
-                                            .gap_3()
-                                            .children(docs.into_iter().map(|(url, date)| {
+                                        boxed_list(cx, docs.into_iter().map(|(url, date)| {
                                                 h_flex()
                                                     .gap_3()
                                                     .p_3()
-                                                    .rounded_xl()
-                                                    .border_1()
-                                                    .border_color(border_color.opacity(0.4))
-                                                    .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                    .when(!shape.adwaita, |row| row.rounded_xl().border_1().border_color(border_color.opacity(0.4)))
+                                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
                                                     .cursor_pointer()
                                                     .on_mouse_down(MouseButton::Left, cx.listener({
                                                         let u = url.clone();
@@ -509,8 +518,8 @@ impl ChatView {
                                                             )
                                                             .child(div().text_xs().text_color(muted_text).child(date)),
                                                     )
-                                                    .into_any_element()
                                             }))
+                                            .when(!shape.adwaita, |list| list.gap_3())
                                             .into_any_element()
                                     }
                                 }
@@ -539,16 +548,13 @@ impl ChatView {
                                             })
                                             .collect();
 
-                                        v_flex()
-                                            .gap_3()
-                                            .children(links.into_iter().map(|(url, date)| {
+                                        boxed_list(cx, links.into_iter().map(|(url, date)| {
                                                 h_flex()
                                                     .gap_3()
                                                     .p_3()
-                                                    .rounded_xl()
-                                                    .border_1()
-                                                    .border_color(border_color.opacity(0.4))
-                                                    .hover(|s| s.bg(theme.muted.opacity(0.5)))
+                                                    .when(!shape.adwaita, |row| row.rounded_xl().border_1().border_color(border_color.opacity(0.4)))
+                                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
+                                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
                                                     .cursor_pointer()
                                                     .on_mouse_down(MouseButton::Left, cx.listener({
                                                         let u = url.clone();
@@ -580,8 +586,8 @@ impl ChatView {
                                                             )
                                                             .child(div().text_xs().text_color(muted_text).child(date)),
                                                     )
-                                                    .into_any_element()
                                             }))
+                                            .when(!shape.adwaita, |list| list.gap_3())
                                             .into_any_element()
                                     }
                                 }

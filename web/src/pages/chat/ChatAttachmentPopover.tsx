@@ -18,7 +18,7 @@ export function ChatAttachmentPopover({ onPickMedia, onPickDocument, open: contr
 	return (
 		<Popover open={isOpen} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
-				<Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:bg-muted">
+				<Button variant="ghost" size="icon" className="rounded-button text-muted-foreground hover:bg-muted">
 					<Paperclip className="h-5 w-5" />
 				</Button>
 			</PopoverTrigger>

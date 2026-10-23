@@ -8,6 +8,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { BoxedList } from "@/components/ui/boxed-list"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Switch } from "@/components/ui/switch"
@@ -136,7 +137,7 @@ export function GroupMembersTab({ chat, getAvatarUrl }: {
 				<p className="text-xs font-bold text-muted-foreground uppercase tracking-wide mb-2">
 					{group.participantCount} members
 				</p>
-				<div className="space-y-1">
+				<BoxedList className="flex flex-col space-y-1">
 					{group.participants.map((p) => (
 						<MemberRow
 							key={p.jid}
@@ -146,7 +147,7 @@ export function GroupMembersTab({ chat, getAvatarUrl }: {
 							onAction={participantAction}
 						/>
 					))}
-				</div>
+				</BoxedList>
 			</div>
 
 			<Button variant="destructive" size="sm" className="w-full" onClick={leaveGroup}>

@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::rc::Rc;
 use std::sync::Arc;
 use gpui::{
-    point, px, size, AnyWindowHandle, App, AppContext, Application, Bounds, Styled, TitlebarOptions,
+    point, px, size, AnyWindowHandle, App, AppContext, Application, BorrowAppContext, Bounds, Styled, TitlebarOptions,
     WindowBounds, WindowDecorations, WindowKind, WindowOptions,
 };
 use gpui_reqwest_client::ReqwestClient;
@@ -88,7 +88,7 @@ fn main() {
             let theme_manager = ThemeManager::init_from_settings(&settings);
             let is_dark = theme_manager.is_dark();
             cx.set_global(theme_manager);
-            cx.set_global(wabot_app::layout_pref::ChatLayoutPref(settings.chat_layout));
+            cx.set_global(wabot_app::views::chat::layout_pref::ChatLayoutPref(settings.chat_layout));
             cx.set_global(wabot_app::notifications::NotificationPref(
                 settings.notifications_enabled,
             ));
@@ -115,7 +115,7 @@ fn main() {
                 gpui_component::ThemeMode::Light
             };
             gpui_component::Theme::change(gpui_mode, None, cx);
-            ThemeManager::global(cx).clone().sync_font_size(cx);
+            cx.update_global::<ThemeManager, _>(|theme, cx| theme.sync_font_size(cx));
 
             // Toasts appear top-center like the web app's
             // `<Toaster position="top-center" />` (sonner).
@@ -246,6 +246,7 @@ fn main() {
                         // surface has actually been focused once.
                         let was_active = Rc::new(std::cell::Cell::new(false));
                         cx.observe_window_activation(window, move |_, window, cx| {
+                            cx.refresh_windows();
                             if window.is_window_active() {
                                 was_active.set(true);
                             } else if was_active.get() {
@@ -253,6 +254,9 @@ fn main() {
                             }
                         })
                         .detach();
+                    } else {
+                        cx.observe_window_activation(window, |_, _, cx| cx.refresh_windows())
+                            .detach();
                     }
                     view
                 });
@@ -573,5 +577,3 @@ fn detect_backend_url() -> String {
 
     "http://127.0.0.1:3090/api".to_string()
 }
-
-

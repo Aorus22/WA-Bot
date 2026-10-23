@@ -101,6 +101,8 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
             cx.theme().input.mix_oklab(cx.theme().transparent, 0.8),
             cx.theme().muted_foreground,
         )
+    } else if cx.theme().adwaita {
+        (cx.theme().foreground.opacity(0.10), cx.theme().foreground)
     } else {
         (cx.theme().input_background(), cx.theme().foreground)
     }
@@ -748,7 +750,13 @@ impl RenderOnce for Input {
                 styles.focused(|style| {
                     style.when(
                         self.appearance && self.bordered && self.focus_bordered,
-                        |style| style.border_1().border_color(cx.theme().ring),
+                        |style| {
+                            if cx.theme().adwaita {
+                                style.border_2().border_color(cx.theme().ring.opacity(0.5))
+                            } else {
+                                style.border_1().border_color(cx.theme().ring)
+                            }
+                        },
                     )
                 })
             })
@@ -784,7 +792,7 @@ impl RenderOnce for Input {
             .when(self.appearance, |this| {
                 this.bg(bg)
                     .rounded(cx.theme().radius)
-                    .when(self.bordered, |this| {
+                    .when(self.bordered && !cx.theme().adwaita, |this| {
                         this.border_1().border_color(cx.theme().input)
                     })
             })

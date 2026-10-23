@@ -10,7 +10,7 @@ export function NavigationSidebar() {
 	const isActive = (path: string) => location.pathname.startsWith(path)
 
 	return (
-		<div className="w-[68px] h-full flex flex-col items-center py-6 bg-background border-r border-border/40 flex-shrink-0 z-50">
+		<div data-navigation-sidebar className="w-[68px] h-full flex flex-col items-center py-6 bg-background border-r border-border/40 flex-shrink-0 z-50">
 			<div className="flex flex-col gap-4 flex-1">
 				<NavButton
 					icon={<MessageSquare className="h-5 w-5" />}
@@ -79,6 +79,8 @@ function NavButton({ icon, label, isActive, onClick }: { icon: React.ReactNode; 
 		<Tooltip delayDuration={0}>
 			<TooltipTrigger asChild>
 				<button
+					data-adw-icon-button
+					data-selected={isActive}
 					onClick={onClick}
 					className={cn(
 						"p-3.5 rounded-2xl transition-all duration-200 group relative",
@@ -89,7 +91,7 @@ function NavButton({ icon, label, isActive, onClick }: { icon: React.ReactNode; 
 				>
 					{icon}
 					{isActive && (
-						<div className="absolute -left-[14px] top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r-full" />
+						<div data-adw-active-indicator className="absolute -left-[14px] top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r-full" />
 					)}
 				</button>
 			</TooltipTrigger>

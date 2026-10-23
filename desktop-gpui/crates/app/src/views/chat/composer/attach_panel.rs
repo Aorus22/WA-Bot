@@ -1,4 +1,5 @@
 use crate::views::chat::*;
+use crate::theme::surface::SurfaceExt;
 
 impl ChatView {
     /// One row of the attach (+) menu: tinted lucide icon + label, matching
@@ -42,6 +43,8 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let hover_bg = theme.foreground.opacity(0.12);
+        let shape = cx.shape();
+        let surface = cx.surface();
         // Floats above the compose bar: absolute so it never takes flow space
         // (an in-flow panel would stretch the compose container over the chat).
         // Eases up from the compose bar; keyed per panel so switching between
@@ -73,6 +76,8 @@ impl ChatView {
         // Emoji / sticker switch at the bottom of both pickers, as in WhatsApp Web.
         let picker_switch = |sticker_active: bool, cx: &mut Context<Self>| -> AnyElement {
             let segment = |id: &'static str, icon: &'static [u8], active: bool| {
+                let active_bg = if shape.adwaita { surface.active_toggle_bg } else { theme.muted.opacity(0.9) };
+                let hover_bg = if shape.adwaita && !active { theme.foreground.opacity(0.05) } else { active_bg };
                 div()
                     .id(id)
                     .cursor_pointer()
@@ -81,9 +86,10 @@ impl ChatView {
                     .justify_center()
                     .w(px(52.0))
                     .h(px(30.0))
-                    .rounded_full()
-                    .bg(if active { theme.muted.opacity(0.9) } else { rgba(0x00000000).into() })
-                    .hover(move |s| s.bg(theme.muted.opacity(0.9)))
+                    .rounded(px(if active { shape.radius_toggle_selected } else { shape.radius_button }))
+                    .bg(if active { active_bg } else { rgba(0x00000000).into() })
+                    .when(active && shape.adwaita, |segment| segment.shadow_sm())
+                    .hover(move |s| s.bg(hover_bg))
                     .child(svg().data(icon).size(px(17.0)).text_color(if active { text_color } else { muted_text }))
             };
             h_flex()
@@ -94,8 +100,8 @@ impl ChatView {
                     h_flex()
                         .p(px(3.0))
                         .gap_0p5()
-                        .rounded_full()
-                        .bg(theme.muted.opacity(0.45))
+                        .rounded(px(shape.radius_button))
+                        .bg(if shape.adwaita { theme.foreground.opacity(0.10) } else { theme.muted.opacity(0.45) })
                         .child(segment("picker-emoji", SMILE_SVG, !sticker_active)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.open_emoji_panel(cx))))
                         .child(segment("picker-sticker", STICKER_SVG, sticker_active)
@@ -319,7 +325,7 @@ impl ChatView {
                             div()
                                 .cursor_pointer()
                                 .p_1()
-                                .rounded_full()
+                                .rounded(px(cx.shape().radius_button))
                                 .hover(move |s| s.bg(hover_bg))
                                 .child(svg().data(X_SVG).size(px(13.0)).text_color(muted_text))
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {

@@ -216,11 +216,15 @@ impl RenderOnce for Checkbox {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
         let has_content = self.label.is_some() || !self.children.is_empty();
-        let indicator_size = rems(match self.size {
-            Size::XSmall => 0.75,
-            Size::Small => 0.875,
-            Size::Large => 1.125,
-            _ => 1.,
+        let indicator_size = rems(if cx.theme().adwaita {
+            1.375
+        } else {
+            match self.size {
+                Size::XSmall => 0.75,
+                Size::Small => 0.875,
+                Size::Large => 1.125,
+                _ => 1.,
+            }
         });
 
         let base = self.base;
@@ -235,8 +239,16 @@ impl RenderOnce for Checkbox {
             .clone();
         let is_focused = focus_handle.is_focused(window);
 
-        let unchecked_border = cx.theme().input;
-        let checked_color = cx.theme().primary;
+        let unchecked_border = if cx.theme().adwaita {
+            cx.theme().foreground.opacity(0.25)
+        } else {
+            cx.theme().input
+        };
+        let checked_color = if cx.theme().adwaita {
+            cx.theme().accent
+        } else {
+            cx.theme().primary
+        };
         let disabled_indicator_color = if checked {
             checked_color.opacity(0.5)
         } else {
@@ -293,15 +305,22 @@ impl RenderOnce for Checkbox {
                     .border_1()
                     .rounded(radius)
                     .when(!checked, |this| {
-                        this.bg(cx.theme().input_background())
-                            .when(!self.disabled, |this| this.border_color(unchecked_border))
+                        this.bg(if cx.theme().adwaita {
+                            cx.theme().background
+                        } else {
+                            cx.theme().input_background()
+                        })
+                        .when(!self.disabled, |this| this.border_color(unchecked_border))
                     })
                     .styles(|styles| {
                         styles
                             .checked(|style| {
-                                style
-                                    .border_color(checked_color)
-                                    .bg(cx.theme().tokens.primary)
+                                let style = style.border_color(checked_color);
+                                if cx.theme().adwaita {
+                                    style.bg(cx.theme().accent)
+                                } else {
+                                    style.bg(cx.theme().tokens.primary)
+                                }
                             })
                             .disabled(|style| {
                                 style

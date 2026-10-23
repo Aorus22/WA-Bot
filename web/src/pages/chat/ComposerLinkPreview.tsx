@@ -27,7 +27,7 @@ export function ComposerLinkPreview({ preview, onDismiss }: { preview: LinkPrevi
 				onClick={onDismiss}
 				title="Remove link preview"
 				aria-label="Remove link preview"
-				className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+				className="p-1.5 rounded-button text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
 			>
 				<X className="h-4 w-4" />
 			</button>

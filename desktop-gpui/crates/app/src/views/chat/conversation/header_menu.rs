@@ -1,3 +1,4 @@
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
@@ -37,12 +38,20 @@ impl ChatView {
     pub(crate) fn render_header_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let menu_state = self.header_menu.clone()?;
         let theme = *cx.app_theme();
-        let border_color = theme.border;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let border_color = if shape.adwaita { surface.border } else { theme.border };
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
-        let hover_bg: Hsla = theme.foreground.opacity(0.12);
+        let hover_bg: Hsla = theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 });
         let danger: Hsla = rgb(0xef4444).into();
+        macro_rules! styled_menu_row {
+            ($($args:tt)*) => {
+                menu_row($($args)*)
+                    .when(shape.adwaita, |row| row.px_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+            };
+        }
 
         let chat: Option<Chat> = self.selected_chat_id.as_ref().and_then(|id| {
             cx.has_global::<ChatStore>()
@@ -50,7 +59,8 @@ impl ChatView {
                 .flatten()
         });
 
-        let mut menu = menu_surface(252.0, theme.card, border_color)
+        let mut menu = menu_surface(252.0, theme.card, border_color, cx)
+            .when(shape.adwaita, |menu| menu.shadow_sm())
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                 if let Some(open) = this.header_menu.take() {
                     this.header_menu_dismissed = Some((open.kind, std::time::Instant::now()));
@@ -62,14 +72,14 @@ impl ChatView {
             HeaderMenuKind::Call => {
                 menu = menu
                     .child(
-                        menu_row(window, cx, "hm-voice", PHONE_SVG, "Voice call", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "hm-voice", PHONE_SVG, "Voice call", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                 this.header_menu = None;
                                 this.start_call(false, cx);
                             })),
                     )
                     .child(
-                        menu_row(window, cx, "hm-video", VIDEO_SVG, "Video call", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "hm-video", VIDEO_SVG, "Video call", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                 this.header_menu = None;
                                 this.start_call(true, cx);
@@ -85,7 +95,7 @@ impl ChatView {
                 if is_group {
                     let cid = chat_id.clone();
                     menu = menu.child(
-                        menu_row(window, cx, "hm-add", PLUS_SVG, "Add member", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "hm-add", PLUS_SVG, "Add member", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                                 this.open_add_members(cid.clone(), cx);
                             })),
@@ -93,7 +103,7 @@ impl ChatView {
                 }
                 menu = menu
                     .child(
-                        menu_row(
+                        styled_menu_row!(
                             window,
                             cx,
                             "hm-info",
@@ -111,14 +121,14 @@ impl ChatView {
                         })),
                     )
                     .child(
-                        menu_row(window, cx, "hm-search", SEARCH_SVG, "Search", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "hm-search", SEARCH_SVG, "Search", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                 this.header_menu = None;
                                 this.toggle_search_sheet(window, cx);
                             })),
                     )
                     .child(
-                        menu_row(window, cx, "hm-select", CHECK_SVG, "Select messages", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "hm-select", CHECK_SVG, "Select messages", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                 this.enter_select_mode(None, cx);
                             })),
@@ -128,7 +138,7 @@ impl ChatView {
                 if muted {
                     let cid = chat_id.clone();
                     menu = menu.child(
-                        menu_row(window, cx, "hm-unmute", VOLUME_X_SVG, "Unmute notifications", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "hm-unmute", VOLUME_X_SVG, "Unmute notifications", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                                 this.set_mute(cid.clone(), "off".to_string(), cx);
                                 this.header_menu = None;
@@ -137,7 +147,7 @@ impl ChatView {
                     );
                 } else {
                     menu = menu.child(
-                        menu_row(window, cx, "hm-mute", VOLUME_X_SVG, "Mute notifications", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "hm-mute", VOLUME_X_SVG, "Mute notifications", muted_text, text_color, hover_bg)
                             .child(div().flex_1())
                             .child(svg().data(CHEVRON_RIGHT_SVG).size(px(13.0)).text_color(muted_text))
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
@@ -156,10 +166,17 @@ impl ChatView {
                             let cid = chat_id.clone();
                             menu = menu.child(
                                 with_hover_fade(
-                                    h_flex().id(id).cursor_pointer().pl_12().pr_5().py_2().items_center(),
+                                    h_flex()
+                                        .id(id)
+                                        .cursor_pointer()
+                                        .pl_12()
+                                        .pr_5()
+                                        .py_2()
+                                        .when(shape.adwaita, |row| row.pr_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                                        .items_center(),
                                     id,
                                     hover_bg,
-                                    px(0.0),
+                                    px(if shape.adwaita { shape.radius_button } else { 0.0 }),
                                     window,
                                     cx,
                                 )
@@ -175,7 +192,7 @@ impl ChatView {
                 }
 
                 menu = menu.child(
-                    menu_row(window, cx, "hm-disappearing", HOURGLASS_SVG, "Disappearing messages", muted_text, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "hm-disappearing", HOURGLASS_SVG, "Disappearing messages", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                             this.header_menu = None;
                             if !this.is_info_sheet_open || this.info_sheet_closing {
@@ -188,13 +205,13 @@ impl ChatView {
                     let (cid, name) = (chat_id.clone(), chat.name.clone());
                     menu = menu
                         .child(
-                            menu_row(window, cx, "hm-export", DOWNLOAD_SVG, "Export chat", muted_text, text_color, hover_bg)
+                            styled_menu_row!(window, cx, "hm-export", DOWNLOAD_SVG, "Export chat", muted_text, text_color, hover_bg)
                                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                                     this.export_chat(cid.clone(), name.clone(), cx);
                                 })),
                         )
                         .child(
-                            menu_row(window, cx, "hm-close", X_SVG, "Close chat", muted_text, text_color, hover_bg)
+                            styled_menu_row!(window, cx, "hm-close", X_SVG, "Close chat", muted_text, text_color, hover_bg)
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                     this.header_menu = None;
                                     this.back_to_list(cx);
@@ -206,7 +223,7 @@ impl ChatView {
                     let cid = chat_id.clone();
                     let confirming = menu_state.confirm_exit;
                     menu = menu.child(menu_separator(border_color)).child(
-                        menu_row(
+                        styled_menu_row!(
                             window,
                             cx,
                             "hm-exit",
@@ -232,7 +249,7 @@ impl ChatView {
             HeaderMenuKind::Sidebar => {
                 menu = menu
                     .child(
-                        menu_row(window, cx, "sm-new-group", USERS_SVG, "New group", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "sm-new-group", USERS_SVG, "New group", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                 this.header_menu = None;
                                 this.add_members_for = None;
@@ -244,7 +261,7 @@ impl ChatView {
                             })),
                     )
                     .child(
-                        menu_row(window, cx, "sm-join", LINK_SVG, "Join group via link", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "sm-join", LINK_SVG, "Join group via link", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                 this.header_menu = None;
                                 this.is_join_group_open = true;
@@ -255,27 +272,27 @@ impl ChatView {
                             })),
                     )
                     .child(
-                        menu_row(window, cx, "sm-starred", STAR_SVG, "Starred messages", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "sm-starred", STAR_SVG, "Starred messages", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                 this.header_menu = None;
                                 this.toggle_starred_sheet(cx);
                             })),
                     )
                     .child(
-                        menu_row(window, cx, "sm-select", CHECK_SVG, "Select chats", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "sm-select", CHECK_SVG, "Select chats", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                 this.enter_chat_select_mode(cx);
                             })),
                     )
                     .child(
-                        menu_row(window, cx, "sm-read-all", CHECK_CHECK_SVG, "Mark all as read", primary_color, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "sm-read-all", CHECK_CHECK_SVG, "Mark all as read", primary_color, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                 this.mark_all_read(cx);
                             })),
                     )
                     .child(menu_separator(border_color))
                     .child(
-                        menu_row(window, cx, "sm-logout", ARROW_LEFT_SVG, "Log out", danger, danger, hover_bg)
+                        styled_menu_row!(window, cx, "sm-logout", ARROW_LEFT_SVG, "Log out", danger, danger, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                 this.open_logout(window, cx);
                             })),

@@ -3,6 +3,7 @@ import { DatabaseBackup, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, type BackupEntry, type BackupStatus } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { BoxedList } from '@/components/ui/boxed-list'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -150,13 +151,15 @@ export function BackupSection() {
 				</div>
 			)}
 			{newest.length > 0 && (
-				<div className="space-y-0.5">
+				<div className="space-y-1.5">
 					<p className="text-xs font-medium">{newest.length} backups in this folder</p>
-					{newest.slice(0, 5).map((b) => (
-						<p key={`${b.account}/${b.id}`} className="text-xs text-muted-foreground">
-							{new Date(b.createdAt).toLocaleString()} · {b.account}
-						</p>
-					))}
+					<BoxedList className="flex flex-col space-y-0.5">
+						{newest.slice(0, 5).map((b) => (
+							<div key={`${b.account}/${b.id}`} className="flex items-center text-xs text-muted-foreground">
+								{new Date(b.createdAt).toLocaleString()} · {b.account}
+							</div>
+						))}
+					</BoxedList>
 				</div>
 			)}
 		</div>

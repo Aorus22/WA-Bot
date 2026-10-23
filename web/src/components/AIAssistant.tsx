@@ -87,7 +87,7 @@ export function AIAssistant({ currentCode, onApplyCode }: AIAssistantProps) {
 				<Button
 					onClick={() => setIsOpen(true)}
 					size='icon'
-					className='h-12 w-12 rounded-full shadow-2xl hover:scale-110 active:scale-90 transition-all duration-300 bg-primary text-primary-foreground relative border border-primary/20 overflow-hidden group'
+					className='h-12 w-12 rounded-button shadow-2xl hover:scale-110 active:scale-90 transition-all duration-300 bg-primary text-primary-foreground relative border border-primary/20 overflow-hidden group'
 				>
 					<div className='absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity' />
 					<Sparkles className='h-6 w-6 group-hover:rotate-12 transition-transform duration-300' />
@@ -108,7 +108,7 @@ export function AIAssistant({ currentCode, onApplyCode }: AIAssistantProps) {
 							</div>
 							<SheetTitle className='text-base font-bold'>AI Assistant</SheetTitle>
 						</div>
-						<Button variant='ghost' size='icon' onClick={() => setIsOpen(false)} className='h-8 w-8 rounded-full'>
+						<Button variant='ghost' size='icon' onClick={() => setIsOpen(false)} className='h-8 w-8 rounded-button'>
 							<X className='h-4 w-4' />
 						</Button>
 					</SheetHeader>

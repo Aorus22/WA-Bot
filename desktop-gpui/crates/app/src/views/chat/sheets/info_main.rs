@@ -1,4 +1,5 @@
 use crate::views::chat::*;
+use crate::components::ui::boxed_list::boxed_list;
 
 /// Thumbnails in the inline media strip; four fit the drawer's width.
 const MEDIA_STRIP: usize = 4;
@@ -60,6 +61,7 @@ impl ChatView {
         let muted_text = theme.muted_foreground;
         let base_url = Self::compose_base_url(cx);
         let is_group = chat.is_group;
+        let shape = cx.shape();
 
         let member_count = self
             .group_info
@@ -95,7 +97,7 @@ impl ChatView {
                         .justify_center()
                         .w(px(48.0))
                         .h(px(48.0))
-                        .rounded_full()
+                        .rounded(px(shape.radius_button))
                         .bg(theme.muted.opacity(0.5))
                         .hover({
                             let hover_bg = theme.muted.opacity(0.85);
@@ -357,8 +359,7 @@ impl ChatView {
                     .child(div().text_sm().text_color(muted_text).child("Loading members…"))
                     .into_any_element()
             } else if let Some(group) = self.group_info.as_ref().filter(|g| g.jid == chat.id) {
-                v_flex()
-                    .children(group.participants.iter().map(|participant| {
+                boxed_list(cx, group.participants.iter().map(|participant| {
                         let name = participant
                             .name
                             .as_deref()
@@ -390,7 +391,7 @@ impl ChatView {
                                     .child("Group admin")
                             }))
                     }))
-                    .into_any_element()
+                .into_any_element()
             } else {
                 div().py_4().px_2().text_sm().text_color(muted_text).child("Group members unavailable").into_any_element()
             };

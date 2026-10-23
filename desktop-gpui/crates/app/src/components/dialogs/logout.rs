@@ -1,12 +1,9 @@
 //! Confirmation dialog for WhatsApp logout.
 
 use gpui::{App, Window};
-use gpui_component::{
-    button::ButtonVariant,
-    dialog::DialogButtonProps,
-    WindowExt as _,
+use crate::components::ui::{
+    ButtonVariant, WindowExt as _, alert_dialog::DialogButtonProps,
 };
-
 use std::rc::Rc;
 
 /// Open the logout confirmation dialog.

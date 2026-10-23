@@ -15,7 +15,7 @@ use gpui::{
     percentage, px, Animation, AnimationExt as _, AnimationElement, ElementId, Hsla, IntoElement,
     Rgba, Styled, Transformation,
 };
-use gpui_component::Icon;
+use crate::components::ui::Icon;
 
 /// Hover-adjacent feedback: menus, popovers, small chips.
 pub const FAST_MS: u64 = 140;

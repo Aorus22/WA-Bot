@@ -4,8 +4,8 @@ use gpui::{
     canvas, div, hsla, px, App, Bounds, IntoElement, ParentElement, Pixels, Point,
     RenderOnce, Size, Styled, Window,
 };
-use gpui_component::{button::Button, h_flex, v_flex, Icon, IconName};
-
+use crate::components::ui::{h_flex, v_flex, Icon, IconName};
+use crate::components::ui::button;
 use crate::state::auth::AuthState;
 use crate::theme::manager::AppThemeExt;
 
@@ -69,7 +69,7 @@ impl RenderOnce for QrCodeView {
                                         .child(err),
                                 )
                                 .child(
-                                    Button::new("btn-retry")
+                                    button("btn-retry", cx)
                                         .label("Retry")
                                         .on_click(|_, _, cx| {
                                             trigger_qr_refresh(cx);
@@ -95,7 +95,7 @@ impl RenderOnce for QrCodeView {
             )
             .child(
                 // Refresh QR button
-                Button::new("btn-refresh-qr")
+                button("btn-refresh-qr", cx)
                     .label("Refresh QR")
                     .on_click(|_, _, cx| {
                         trigger_qr_refresh(cx);
@@ -240,4 +240,3 @@ fn trigger_qr_refresh(cx: &mut App) {
         .detach();
     }
 }
-

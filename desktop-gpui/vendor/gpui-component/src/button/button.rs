@@ -10,10 +10,10 @@ use crate::{
     tooltip::{ManagedTooltipExt as _, Tooltip},
 };
 use gpui::{
-    AnyElement, App, Background, ClickEvent, Corners, Edges, ElementId, Hsla, InteractiveElement,
+    AnyElement, App, Background, ClickEvent, Corners, Edges, ElementId, FontWeight, Hsla, InteractiveElement,
     Interactivity, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _, relative, transparent_white,
+    prelude::FluentBuilder as _, px, relative, transparent_white,
 };
 
 /// Ink of the focus line a filled button draws inside its fill: its own
@@ -617,6 +617,7 @@ impl RenderOnce for Button {
             _ => self.size,
         });
         let has_content = self.icon.is_some() || self.label.is_some() || !children.is_empty();
+        let icon_only = self.icon.is_some() && self.label.is_none() && children.is_empty();
         // Only borderless variants use this; the others tint their border.
         let focus_line = if style.no_padding() {
             FocusLine::Outside
@@ -632,12 +633,20 @@ impl RenderOnce for Button {
             .clone();
         let is_focused = focus_handle.is_focused(window);
 
-        let rounding = match self.rounded {
-            ButtonRounded::Small => cx.theme().radius * 0.5,
-            ButtonRounded::Medium => cx.theme().radius,
-            ButtonRounded::Large => cx.theme().radius * 2.0,
-            ButtonRounded::Size(px) => px,
-            ButtonRounded::None => Pixels::ZERO,
+        let rounding = if cx.theme().adwaita {
+            match self.rounded {
+                ButtonRounded::None => Pixels::ZERO,
+                ButtonRounded::Size(px) => px,
+                _ => cx.theme().radius,
+            }
+        } else {
+            match self.rounded {
+                ButtonRounded::Small => cx.theme().radius * 0.5,
+                ButtonRounded::Medium => cx.theme().radius,
+                ButtonRounded::Large => cx.theme().radius * 2.0,
+                ButtonRounded::Size(px) => px,
+                ButtonRounded::None => Pixels::ZERO,
+            }
         };
 
         let root = base
@@ -684,6 +693,16 @@ impl RenderOnce for Button {
                     }
                 }
             })
+            .when(cx.theme().adwaita && !style.no_padding(), |this| {
+                if icon_only {
+                    this.size(px(34.))
+                } else {
+                    this.h(px(34.)).px_2p5()
+                }
+            })
+            .when(cx.theme().adwaita && self.label.is_some(), |this| {
+                this.font_weight(FontWeight::BOLD)
+            })
             .when(self.border_corners.top_left, |this| {
                 this.rounded_tl(rounding)
             })
@@ -696,7 +715,7 @@ impl RenderOnce for Button {
             .when(self.border_corners.bottom_right, |this| {
                 this.rounded_br(rounding)
             })
-            .when(self.variant.is_default() || self.outline, |this| {
+            .when((self.variant.is_default() || self.outline) && !cx.theme().adwaita, |this| {
                 this.when(self.border_edges.left, |this| this.border_l_1())
                     .when(self.border_edges.right, |this| this.border_r_1())
                     .when(self.border_edges.top, |this| this.border_t_1())
@@ -800,6 +819,7 @@ impl RenderOnce for Button {
                         .text_color(disabled_style.fg)
                         .border_color(disabled_style.border)
                         .shadow_none()
+                        .when(cx.theme().adwaita, |style| style.opacity(0.5))
                         .refine_style(&instance_style)
                 })
         })
@@ -889,7 +909,7 @@ struct ButtonVariantStyle {
     shadow: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum ButtonStyleState {
     Normal,
     Hovered,
@@ -1097,7 +1117,84 @@ impl ButtonVariant {
         }
     }
 
+    fn adwaita_style(&self, state: ButtonStyleState, cx: &mut App) -> ButtonVariantStyle {
+        let foreground = cx.theme().foreground;
+        let black = Hsla::from(gpui::rgb(0x000000));
+        let tint = match state {
+            ButtonStyleState::Normal => 0.10,
+            ButtonStyleState::Hovered => 0.15,
+            ButtonStyleState::Active => 0.30,
+        };
+        let (bg, fg) = match self {
+            Self::Default | Self::Secondary => (foreground.opacity(tint).into(), foreground),
+            Self::Primary => {
+                let color = cx.theme().accent;
+                let bg = match state {
+                    ButtonStyleState::Normal => color,
+                    ButtonStyleState::Hovered => color.mix_oklab(black, 0.05),
+                    ButtonStyleState::Active => color.mix_oklab(black, 0.30),
+                };
+                (bg.into(), cx.theme().accent_foreground)
+            }
+            Self::Danger => {
+                let opacity = match state {
+                    ButtonStyleState::Normal => 0.15,
+                    ButtonStyleState::Hovered => 0.20,
+                    ButtonStyleState::Active => 0.35,
+                };
+                (foreground.opacity(opacity).into(), cx.theme().danger)
+            }
+            Self::Warning | Self::Success | Self::Info => {
+                let color = match self {
+                    Self::Warning => cx.theme().warning,
+                    Self::Success => cx.theme().success,
+                    _ => cx.theme().info,
+                };
+                let bg = match state {
+                    ButtonStyleState::Normal => color.opacity(0.15),
+                    ButtonStyleState::Hovered => color.opacity(0.20),
+                    ButtonStyleState::Active => color.opacity(0.30),
+                };
+                (bg.into(), color)
+            }
+            Self::Ghost | Self::Text => (
+                if state == ButtonStyleState::Normal {
+                    cx.theme().transparent.into()
+                } else {
+                    foreground.opacity(tint).into()
+                },
+                foreground,
+            ),
+            Self::Link => (
+                cx.theme().transparent.into(),
+                match state {
+                    ButtonStyleState::Normal => cx.theme().link,
+                    ButtonStyleState::Hovered => cx.theme().link_hover,
+                    ButtonStyleState::Active => cx.theme().link_active,
+                },
+            ),
+            Self::Custom(colors) => {
+                let bg = match state {
+                    ButtonStyleState::Normal => colors.color,
+                    ButtonStyleState::Hovered => colors.hover,
+                    ButtonStyleState::Active => colors.active,
+                };
+                (bg.into(), colors.foreground)
+            }
+        };
+        ButtonVariantStyle {
+            bg,
+            border: cx.theme().transparent,
+            fg,
+            underline: self.underline(cx),
+            shadow: false,
+        }
+    }
+
     fn normal(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
+        if cx.theme().adwaita {
+            return self.adwaita_style(ButtonStyleState::Normal, cx);
+        }
         let bg = self.bg_color(outline, cx);
         let border = self.border_color(outline, cx);
         let fg = self.text_color(outline, cx);
@@ -1114,6 +1211,9 @@ impl ButtonVariant {
     }
 
     fn hovered(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
+        if cx.theme().adwaita {
+            return self.adwaita_style(ButtonStyleState::Hovered, cx);
+        }
         let bg: Background = match self {
             Self::Default => {
                 if outline {
@@ -1198,6 +1298,9 @@ impl ButtonVariant {
     }
 
     fn active(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
+        if cx.theme().adwaita {
+            return self.adwaita_style(ButtonStyleState::Active, cx);
+        }
         let bg = match self {
             Self::Default => {
                 if outline {
@@ -1272,6 +1375,9 @@ impl ButtonVariant {
     }
 
     fn selected(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
+        if cx.theme().adwaita {
+            return self.adwaita_style(ButtonStyleState::Active, cx);
+        }
         if outline {
             let active_style = self.active(outline, cx);
 
@@ -1314,6 +1420,9 @@ impl ButtonVariant {
     }
 
     fn disabled(&self, outline: bool, cx: &mut App) -> ButtonVariantStyle {
+        if cx.theme().adwaita {
+            return self.normal(outline, cx);
+        }
         let bg = match self {
             Self::Default | Self::Link | Self::Ghost | Self::Text => cx.theme().transparent.into(),
             Self::Primary => cx.theme().tokens.button_primary.background.opacity(0.15),

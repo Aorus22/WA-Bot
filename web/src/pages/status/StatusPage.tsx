@@ -78,7 +78,7 @@ export default function StatusPage() {
 			<aside className="w-full md:w-[340px] shrink-0 flex flex-col border-r border-border/40 bg-background">
 				<div className="flex items-center justify-between p-5 pb-3">
 					<h2 className="text-2xl font-bold tracking-tight">Status</h2>
-					<Button size="icon" variant="ghost" className="rounded-full" onClick={() => setComposerOpen(true)}>
+					<Button size="icon" variant="ghost" className="rounded-button" onClick={() => setComposerOpen(true)}>
 						<Plus className="h-5 w-5" />
 					</Button>
 				</div>
@@ -327,7 +327,7 @@ function StatusViewerPane({ state, onClose, onNavigate }: {
 						<Button
 							type="submit"
 							size="icon"
-							className="rounded-full shrink-0"
+							className="rounded-button shrink-0"
 							disabled={replying || !replyText.trim()}
 							aria-label="Send reply"
 							title="Send reply"

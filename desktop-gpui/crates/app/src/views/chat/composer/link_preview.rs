@@ -196,7 +196,7 @@ impl ChatView {
                         .id("btn-dismiss-link-preview")
                         .cursor_pointer()
                         .p_1()
-                        .rounded_full()
+                        .rounded(px(cx.shape().radius_button))
                         .hover(|s| s.bg(theme.muted.opacity(0.6)))
                         .tooltip(move |window, cx| Tooltip::new("Send without preview").build(window, cx))
                         .child(svg().data(X_SVG).size(px(14.0)).text_color(theme.muted_foreground))

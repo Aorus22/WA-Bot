@@ -231,8 +231,11 @@ export const ChatMessageItem = memo(({
 						</div>
 					) : (
 						<div
+							data-message-bubble
+							data-message-owner={isMe ? "outgoing" : "incoming"}
+							data-message-failed={isFailed || undefined}
 							className={cn(
-								"px-3.5 py-2 rounded-2xl text-[14.5px] relative transition-all duration-200 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)]",
+								"px-3.5 py-2 rounded-bubble text-[14.5px] relative transition-all duration-200 shadow-[var(--shape-shadow)]",
 								isRevoked && "opacity-75 ring-1 ring-destructive/30",
 								// As wide as the picture, so a caption wraps to it instead of widening the bubble.
 								isImage && isMedia && "w-[340px] max-w-full",
@@ -452,7 +455,7 @@ export const ChatMessageItem = memo(({
 								{isMe && !isSticker && !isRevoked && (
 								        <div className="absolute top-1/2 -translate-y-1/2 -left-2 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block z-20">										<Popover>
 											<PopoverTrigger asChild>
-												<Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground bg-background/80 backdrop-blur-sm rounded-full shadow-sm">
+												<Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground bg-background/80 backdrop-blur-sm rounded-button shadow-sm">
 													<MoreVertical className="h-3 w-3" />
 												</Button>
 											</PopoverTrigger>
@@ -523,7 +526,7 @@ export const ChatMessageItem = memo(({
 								</Popover>
 
 								{!isMe && !isSticker && (
-								        <div className="absolute top-1/2 -translate-y-1/2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block z-20">										<Button variant="ghost" size="icon" onClick={onReply} className="h-6 w-6 text-muted-foreground hover:text-primary bg-background/80 backdrop-blur-sm rounded-full shadow-sm"><Reply className="h-3 w-3" /></Button>
+								        <div className="absolute top-1/2 -translate-y-1/2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block z-20">										<Button variant="ghost" size="icon" onClick={onReply} className="h-6 w-6 text-muted-foreground hover:text-primary bg-background/80 backdrop-blur-sm rounded-button shadow-sm"><Reply className="h-3 w-3" /></Button>
 									</div>
 								)}
 								</div>

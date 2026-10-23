@@ -156,18 +156,22 @@ impl RenderOnce for Slider {
         };
         let rem_size = window.rem_size();
 
+        let adwaita = cx.theme().adwaita;
         let bar_color = self
             .style
             .background
             .clone()
             .and_then(|bg| bg.color())
             .unwrap_or(cx.theme().tokens.slider_bar.into());
-        let thumb_bg: Background = self
-            .style
-            .text
-            .color
-            .map(Into::into)
-            .unwrap_or_else(|| cx.theme().tokens.slider_thumb.into());
+        let thumb_bg: Background = if adwaita {
+            gpui::rgb(0xffffff).into()
+        } else {
+            self.style
+                .text
+                .color
+                .map(Into::into)
+                .unwrap_or_else(|| cx.theme().tokens.slider_thumb.into())
+        };
         let corner_radii = self.style.corner_radii.clone();
         // The track is a pill by default, and square when the theme squares its
         // corners. A caller's own corner radii still win.
@@ -216,6 +220,7 @@ impl RenderOnce for Slider {
                         .rounded_full_style(cx)
                         .bg(bar_color.opacity(0.5))
                         .size_4()
+                        .when(adwaita, |this| this.size_5())
                         .p(px(1.))
                         .on_hover({
                             let interaction = ring.interaction.clone();
@@ -287,6 +292,8 @@ impl RenderOnce for Slider {
                             .relative()
                             .when(axis.is_horizontal(), |this| this.w_full().h_1p5())
                             .when(axis.is_vertical(), |this| this.h_full().w_1p5())
+                            .when(adwaita && axis.is_horizontal(), |this| this.h(px(4.)))
+                            .when(adwaita && axis.is_vertical(), |this| this.w(px(4.)))
                             .bg(bar_color.opacity(0.2))
                             .active(|this| this.bg(bar_color.opacity(0.4)))
                             .corner_radii(radius)

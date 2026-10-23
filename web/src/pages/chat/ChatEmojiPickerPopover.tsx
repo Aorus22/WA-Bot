@@ -53,7 +53,7 @@ export function ChatEmojiPickerPopover({ onEmojiSelect, open: controlledOpen, on
 	return (
 		<Popover open={isOpen} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
-				<Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:bg-muted" aria-hidden={controlledOpen !== undefined}>
+				<Button variant="ghost" size="icon" className="rounded-button text-muted-foreground hover:bg-muted" aria-hidden={controlledOpen !== undefined}>
 					<Smile className="h-5 w-5" />
 				</Button>
 			</PopoverTrigger>

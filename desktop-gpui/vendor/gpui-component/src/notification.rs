@@ -435,6 +435,15 @@ impl Render for Notification {
             .px_4()
             .gap_3()
             .refine_style(&self.style)
+            .when(cx.theme().adwaita, |this| {
+                this.border_color(gpui::rgb(0xffffff).opacity(0.10))
+                    .bg(gpui::rgb(0x505053))
+                    .text_color(gpui::rgb(0xffffff))
+                    .rounded(cx.theme().radius_full())
+                    .shadow_none()
+                    .py_1p5()
+                    .px_3()
+            })
             .when_some(icon, |this, icon| {
                 this.child(div().absolute().top(px(18.)).left_4().child(icon))
             })

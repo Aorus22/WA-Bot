@@ -124,6 +124,14 @@ impl Render for Tooltip {
                 .text_sm()
                 .gap_3()
                 .refine_style(&self.style)
+                .when(cx.theme().adwaita, |this| {
+                    this.bg(gpui::rgb(0x000000).opacity(0.8))
+                        .text_color(gpui::rgb(0xffffff))
+                        .border_color(gpui::rgb(0xffffff).opacity(0.10))
+                        .shadow_none()
+                        .py_1p5()
+                        .px_2p5()
+                })
                 .map(|this| {
                     this.child(div().map(|this| match self.content {
                         TooltipContext::Text(ref text) => this.child(text.clone()),

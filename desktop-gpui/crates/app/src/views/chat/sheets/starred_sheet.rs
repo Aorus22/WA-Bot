@@ -1,3 +1,5 @@
+use crate::components::ui::boxed_list::boxed_list;
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 use messages::star_pin::{sender_label, snippet_of};
 
@@ -106,7 +108,11 @@ impl ChatView {
     /// usual right-hand column (the chat list page has no column to spare).
     pub(crate) fn render_starred_sheet(&self, full_width: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = *cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
         let border_color = theme.border;
+        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
+        let header_bg = if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) };
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -122,17 +128,17 @@ impl ChatView {
             .h_full()
             .overflow_hidden()
             .border_l_1()
-            .border_color(border_color.opacity(0.4))
-            .bg(theme.background)
+            .border_color(sheet_border)
+            .bg(if shape.adwaita { surface.view } else { theme.background })
             .flex_shrink_0()
             .child(
                 h_flex()
-                    .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                    .h(px(shape.header_height))
                     .pl_4()
                     .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
                     .border_b_1()
-                    .border_color(border_color.opacity(0.4))
-                    .bg(theme.muted.opacity(0.2))
+                    .border_color(sheet_border)
+                    .bg(header_bg)
                     .justify_between()
                     .items_center()
                     .child(
@@ -153,7 +159,14 @@ impl ChatView {
                             .id("btn-close-starred-sheet")
                             .cursor_pointer()
                             .p_1()
-                            .rounded_full()
+                            .when(shape.adwaita, |s| {
+                                s.w(px(shape.control_size))
+                                    .h(px(shape.control_size))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                            })
+                            .rounded(px(shape.radius_button))
                             .hover(|s| s.bg(theme.muted.opacity(0.65)))
                             .tooltip(move |window, cx| Tooltip::new("Close").build(window, cx))
                             .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
@@ -206,7 +219,7 @@ impl ChatView {
                     .overflow_y_scroll()
                     .p_2()
                     .gap_1()
-                    .children(self.starred_messages.iter().map(|m| {
+                    .child(boxed_list(cx, self.starred_messages.iter().map(|m| {
                         let (chat_id, msg_id) = (m.chat_id.clone(), m.id.clone());
                         let chat_name = m
                             .chat_name
@@ -221,9 +234,8 @@ impl ChatView {
                             .cursor_pointer()
                             .p_3()
                             .rounded_xl()
-                            .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                            .border_b_1()
-                            .border_color(border_color.opacity(0.15))
+                            .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
+                            .when(!shape.adwaita, |row| row.border_b_1().border_color(border_color.opacity(0.15)))
                             .gap_1()
                             .tooltip(move |window, cx| Tooltip::new("Click to jump to message").build(window, cx))
                             .on_mouse_down(MouseButton::Left, cx.listener({
@@ -286,7 +298,14 @@ impl ChatView {
                                         div()
                                             .id(SharedString::from(format!("unstar-{}", m.id)))
                                             .p_1()
-                                            .rounded_full()
+                                            .when(shape.adwaita, |s| {
+                                                s.w(px(shape.control_size))
+                                                    .h(px(shape.control_size))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                            })
+                                            .rounded(px(shape.radius_button))
                                             .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                             .tooltip(move |window, cx| Tooltip::new("Unstar").build(window, cx))
                                             .child(svg().data(STAR_FILLED_SVG).size(px(13.0)).text_color(primary_color))
@@ -299,8 +318,7 @@ impl ChatView {
                                             })),
                                     ),
                             )
-                            .into_any_element()
-                    }))
+                    })).when(!shape.adwaita, |list| list.gap_1()))
                     .when(self.starred_has_more, |list| {
                         list.child(
                             div()

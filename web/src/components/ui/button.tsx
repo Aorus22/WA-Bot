@@ -49,12 +49,19 @@ function Button({
     asChild?: boolean
   }) {
   const Comp = asChild ? Slot.Root : "button"
+  const classTokens = className?.split(/\s+/) ?? []
+  const hasCustomHeight = classTokens.some(token => /^(?:[\w-]+:)*!?h-/.test(token) || /^(?:[\w-]+:)*!?min-h-/.test(token))
+  const hasCustomWidth = classTokens.some(token => /^(?:[\w-]+:)*!?w-/.test(token) || /^(?:[\w-]+:)*!?min-w-/.test(token))
+  const hasCustomBackground = classTokens.some(token => token.startsWith("bg-") || token.startsWith("!bg-"))
 
   return (
     <Comp
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      data-custom-height={hasCustomHeight || undefined}
+      data-custom-width={hasCustomWidth || undefined}
+      data-custom-background={hasCustomBackground || undefined}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

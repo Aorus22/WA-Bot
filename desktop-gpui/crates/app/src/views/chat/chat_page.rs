@@ -74,7 +74,7 @@ pub struct ChatView {
     // Context menu popup on message right click
     pub context_menu: Option<MessageContextMenu>,
     /// Right-click menu for a link or selected text inside a bubble.
-    pub text_menu: Option<crate::components::mention_text::TextMenuRequest>,
+    pub text_menu: Option<super::TextMenuRequest>,
     pub edit_history: Option<EditHistoryPopover>,
     pub image_menu: Option<ImageMenu>,
     /// Message being forwarded: (source chat id, message).
@@ -201,7 +201,7 @@ pub struct ChatView {
     pub preview_drag: Option<(f32, f32, f32, f32)>,
     pub preview_focus: FocusHandle,
     /// Full-screen video player, while one is open.
-    pub(crate) video_view: Option<super::video_viewer::VideoView>,
+    pub(crate) video_view: Option<super::media::VideoView>,
     pub(crate) video_focus: FocusHandle,
     pub(crate) video_needs_focus: bool,
     pub preview_needs_focus: bool,
@@ -555,7 +555,7 @@ impl Render for ChatView {
             // ====================================================
             // LEFT SIDEBAR: CONVERSATIONS LIST
             // ====================================================
-            .child(self.render_sidebar(cx, pages, show_list, has_selection, archived_count, pinned_count))
+            .child(self.render_sidebar(window, cx, pages, show_list, has_selection, archived_count, pinned_count))
             // ====================================================
             // RIGHT PANE: ACTIVE CHAT CONVERSATION OR EMPTY STATE
             // ====================================================

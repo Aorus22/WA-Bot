@@ -1,19 +1,45 @@
 use crate::views::chat::*;
+use crate::theme::surface::SurfaceExt;
 
 impl ChatView {
     /// Conversation header: back/collapse, avatar + title (opens the info sheet), call/search/more actions.
     pub(crate) fn render_chat_header(
         &mut self,
+        window: &Window,
         cx: &mut Context<Self>,
         pages: bool,
         active_chat: &Chat,
     ) -> impl IntoElement {
         let theme = *cx.app_theme();
-        let border_color = theme.border;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let radius_button = px(shape.radius_button);
+        let border_color = if shape.adwaita {
+            surface.border
+        } else {
+            theme.border.opacity(0.4)
+        };
+        let icon_hover = if shape.adwaita {
+            theme.foreground.opacity(0.15)
+        } else {
+            theme.muted.opacity(0.65)
+        };
         let bg_color = theme.background;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         let window_transparency = ThemeManager::global(cx).window_transparency;
+        let header_background = if shape.adwaita {
+            if window.is_window_active() {
+                surface.headerbar
+            } else {
+                surface.headerbar_backdrop
+            }
+        } else {
+            window_material::glass_fill(
+                theme.chat.map(|c| c.header).unwrap_or(bg_color),
+                window_transparency,
+            )
+        };
         let base_url = if cx.has_global::<AuthState>() {
             AuthState::global(cx).base_url.clone()
         } else {
@@ -25,16 +51,13 @@ impl ChatView {
         let disappearing_secs = active_chat.disappearing_secs;
         let controls_room = if self.controls_over_conversation() { crate::components::titlebar::controls_room(cx) } else { 12.0 };
         h_flex()
-            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+            .h(px(cx.shape().header_height))
             .flex_shrink_0()
             .pl_5()
             .pr(px(controls_room))
             .border_b_1()
-            .border_color(border_color.opacity(0.4))
-            .bg(window_material::glass_fill(
-                theme.chat.map(|c| c.header).unwrap_or(bg_color),
-                window_transparency,
-            ))
+            .border_color(border_color)
+            .bg(header_background)
             .items_center()
             .justify_between()
             .gap_1()
@@ -48,9 +71,9 @@ impl ChatView {
                     .flex_shrink_0()
                     .w(px(34.0))
                     .h(px(34.0))
-                    .rounded_full()
+                    .rounded(radius_button)
                     .cursor_pointer()
-                    .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                    .hover(|s| s.bg(icon_hover))
                     .tooltip(move |window, cx| {
                         Tooltip::new(if pages {
                             "Back to chats"
@@ -173,8 +196,8 @@ impl ChatView {
                             .gap_0p5()
                             .px_2()
                             .py_2()
-                            .rounded_full()
-                            .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                            .rounded(radius_button)
+                            .hover(|s| s.bg(icon_hover))
                             .tooltip(move |window, cx| {
                                 Tooltip::new(if is_group_chat { "Group call" } else { "Call" }).build(window, cx)
                             })
@@ -190,8 +213,8 @@ impl ChatView {
                             .id("btn-header-search")
                             .cursor_pointer()
                             .p_2()
-                            .rounded_full()
-                            .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                            .rounded(radius_button)
+                            .hover(|s| s.bg(icon_hover))
                             .tooltip(move |window, cx| {
                                 Tooltip::new("Search in conversation").build(window, cx)
                             })
@@ -205,8 +228,8 @@ impl ChatView {
                             .id("btn-header-more")
                             .cursor_pointer()
                             .p_2()
-                            .rounded_full()
-                            .hover(|s| s.bg(theme.muted.opacity(0.65)))
+                            .rounded(radius_button)
+                            .hover(|s| s.bg(icon_hover))
                             .tooltip(move |window, cx| {
                                 Tooltip::new("Menu").build(window, cx)
                             })

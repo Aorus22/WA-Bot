@@ -1,4 +1,6 @@
 use crate::views::chat::*;
+use crate::theme::surface::SurfaceExt;
+use gpui_component::theme::Colorize as _;
 
 impl ChatView {
     /// One message bubble row (avatar/sender in groups, quoted reply, media, text, ticks, reactions).
@@ -10,6 +12,8 @@ impl ChatView {
         is_group_chat: bool,
     ) -> AnyElement {
         let theme = *cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
         let chat_scale = ThemeManager::global(cx).chat_font_scale;
         let primary_color = theme.primary;
         let muted_text = theme.muted_foreground;
@@ -106,6 +110,15 @@ impl ChatView {
             let link_color: Hsla = if is_dark_bg { rgb(0x53bdeb).into() } else { rgb(0x027eb5).into() };
             let (bubble_bg, bubble_text) = if is_sticker {
                 (rgba(0x00000000), if is_dark_bg { rgb(0xe9edef) } else { rgb(0x303030) })
+            } else if shape.adwaita {
+                if is_from_me {
+                    (
+                                            theme.accent.mix_oklab(surface.view, 0.20).into(),
+                                            theme.foreground.into(),
+                                        )
+                } else {
+                    (surface.card.into(), theme.foreground.into())
+                }
             } else if let Some(c) = theme.chat {
                 // Preset-defined bubbles (WhatsApp theme).
                 if is_from_me {
@@ -250,9 +263,15 @@ impl ChatView {
                     .px_3p5()
                     .py_2()
             }
-                .rounded_2xl()
+                .rounded(px(shape.radius_bubble))
+                .when(shape.adwaita && is_from_me, |bubble| {
+                    bubble.rounded_br(px(shape.radius_bubble_tail))
+                })
+                .when(shape.adwaita && !is_from_me, |bubble| {
+                    bubble.rounded_bl(px(shape.radius_bubble_tail))
+                })
                 .bg(final_bubble_bg)
-                .shadow_sm()
+                .when(shape.shadows, |b| b.shadow_sm())
                 .gap_1();
             if is_highlighted {
                 bubble = bubble.border_2().border_color(primary_color);

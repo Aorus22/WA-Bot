@@ -8,13 +8,14 @@ use gpui::{
     DispatchPhase, Entity, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
     ParentElement, Pixels, Point, Render, ResizeEdge, Size, Styled, Tiling, Window,
 };
-use gpui_component::{v_flex, Icon, IconName};
-
+use crate::components::ui::{v_flex, Icon, IconName};
 use crate::components::motion;
 use crate::state::auth::{AuthState, AuthStatus};
 use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::theme::shape::ShapeExt;
+use crate::theme::surface::SurfaceExt;
 use crate::window_material;
-use crate::views::shell::AppShellView;
+use crate::components::shell::AppShellView;
 
 pub struct RootGateView {
     shell_view: Entity<AppShellView>,
@@ -40,6 +41,16 @@ impl RootGateView {
 impl Render for RootGateView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let window_background = if shape.adwaita {
+            if window.is_window_active() { surface.window } else { surface.window_backdrop }
+        } else {
+            window_material::glass_fill(
+                theme.background,
+                ThemeManager::global(cx).window_transparency,
+            )
+        };
         window.set_background_appearance(window_material::background_appearance(
             ThemeManager::global(cx).window_blur_enabled,
         ));
@@ -56,7 +67,7 @@ impl Render for RootGateView {
             let viewport = window.viewport_size();
             let (corner_radius, inset) = if framed {
                 (
-                    window_material::WINDOW_CORNER_RADIUS,
+                    window_material::corner_radius(cx),
                     window_material::WINDOW_SHADOW_MARGIN,
                 )
             } else {
@@ -72,7 +83,6 @@ impl Render for RootGateView {
                 ),
             );
         }
-        let window_transparency = ThemeManager::global(cx).window_transparency;
         let status = if cx.has_global::<AuthState>() {
             AuthState::global(cx).status
         } else {
@@ -83,8 +93,8 @@ impl Render for RootGateView {
             AuthStatus::Checking => {
                 v_flex()
                     .size_full()
-                    .bg(window_material::glass_fill(theme.background, window_transparency))
-                    .when(framed, |s| s.rounded(px(window_material::WINDOW_CORNER_RADIUS)))
+                    .bg(window_background)
+                    .when(framed, |s| s.rounded(px(window_material::corner_radius(cx))))
                     .child(crate::components::titlebar::AppTitleBar::new())
                     .child(
                         v_flex()
@@ -132,9 +142,9 @@ impl Render for RootGateView {
                         div()
                             .relative()
                             .size_full()
-                            .rounded(px(window_material::WINDOW_CORNER_RADIUS))
+                            .rounded(px(window_material::corner_radius(cx)))
                             .border_1()
-                            .border_color(theme.border)
+                            .border_color(if shape.adwaita { surface.border } else { theme.border })
                             .overflow_hidden()
                             .shadow(window_material::frame_shadow())
                             .child(content),

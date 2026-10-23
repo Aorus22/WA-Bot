@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chatStore"
 import { GroupMembersTab } from "./GroupPanels"
 import { DISAPPEARING_OPTIONS, disappearingTimerLabel } from "./disappearing"
+import { BoxedList } from "@/components/ui/boxed-list"
 
 interface ChatInfoSheetModalProps {
 	open: boolean
@@ -291,7 +292,7 @@ export function ChatInfoSheetModal({
 								onScroll={handleScrollDocs}
 							>
 								{docs.length > 0 ? (
-									<div className="space-y-3">
+									<BoxedList className="space-y-3">
 										{docs.map(m => (
 											<a
 												key={m.id}
@@ -309,7 +310,7 @@ export function ChatInfoSheetModal({
 												</div>
 											</a>
 										))}
-									</div>
+									</BoxedList>
 								) : loadingDocs ? (
 									<div className="flex flex-col items-center justify-center h-full py-12 text-muted-foreground">
 										<Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
@@ -336,7 +337,7 @@ export function ChatInfoSheetModal({
 								onScroll={handleScrollLinks}
 							>
 								{links.length > 0 ? (
-									<div className="space-y-3">
+									<BoxedList className="space-y-3">
 										{links.map(m => {
 											const urls = m.content.match(/(https?:\/\/[^\s]+)/g)
 											return urls?.map((url, i) => (
@@ -357,7 +358,7 @@ export function ChatInfoSheetModal({
 												</a>
 											))
 										})}
-									</div>
+									</BoxedList>
 								) : loadingLinks ? (
 									<div className="flex flex-col items-center justify-center h-full py-12 text-muted-foreground">
 										<Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />

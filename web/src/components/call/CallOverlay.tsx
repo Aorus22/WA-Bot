@@ -210,6 +210,7 @@ export function CallOverlay() {
 					<div className="flex items-end justify-center gap-5">
 						<div className="flex flex-col items-center gap-2">
 							<Button
+								data-adw-round-control
 								aria-label={media.isMuted ? "Unmute" : "Mute"}
 								onClick={media.toggleMute}
 								variant="outline"
@@ -225,6 +226,7 @@ export function CallOverlay() {
 
 						<div className="flex flex-col items-center gap-2">
 							<Button
+								data-adw-round-control
 								aria-label={speakerOn ? "Speaker off" : "Speaker on"}
 								onClick={() => setSpeakerOn((v) => !v)}
 								variant="outline"
@@ -241,6 +243,7 @@ export function CallOverlay() {
 						{!isVideo && (
 							<div className="flex flex-col items-center gap-2">
 								<Button
+									data-adw-round-control
 									aria-label={cameraOn ? "Stop video" : "Start video"}
 									onClick={handleCamera}
 									disabled={cameraBusy}
@@ -258,6 +261,7 @@ export function CallOverlay() {
 
 						<div className="flex flex-col items-center gap-2">
 							<Button
+								data-adw-round-control
 								aria-label="End call"
 								onClick={handleEnd}
 								disabled={ending}

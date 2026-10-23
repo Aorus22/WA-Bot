@@ -4,6 +4,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { api, type Message } from "@/lib/api"
+import { BoxedList } from "@/components/ui/boxed-list"
 
 interface ChatSearchSheetProps {
     chatId: string
@@ -67,7 +68,7 @@ export const ChatSearchSheet: React.FC<ChatSearchSheetProps> = ({
                             <Search className="h-5 w-5 text-primary" />
                             Search Messages
                         </SheetTitle>
-                        <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full h-8 w-8">
+                        <Button variant="ghost" size="icon" onClick={onClose} className="rounded-button h-8 w-8">
                             <X className="h-4 w-4" />
                         </Button>
                     </div>
@@ -83,7 +84,7 @@ export const ChatSearchSheet: React.FC<ChatSearchSheetProps> = ({
                         {query && (
                             <button 
                                 onClick={() => setQuery("")}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded-full transition-colors"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded-button transition-colors"
                             >
                                 <X className="h-3 w-3 text-muted-foreground" />
                             </button>
@@ -98,7 +99,7 @@ export const ChatSearchSheet: React.FC<ChatSearchSheetProps> = ({
                             <p className="text-sm text-muted-foreground animate-pulse">Searching history...</p>
                         </div>
                     ) : results.length > 0 ? (
-                        <div className="flex flex-col">
+                        <BoxedList className="flex flex-col">
                             {results.map((msg) => (
                                 <button
                                     key={msg.id}
@@ -123,7 +124,7 @@ export const ChatSearchSheet: React.FC<ChatSearchSheetProps> = ({
                                     </div>
                                 </button>
                             ))}
-                        </div>
+                        </BoxedList>
                     ) : query.trim() ? (
                         <div className="flex flex-col items-center justify-center h-64 p-8 text-center gap-4">
                             <div className="w-16 h-16 bg-muted rounded-3xl flex items-center justify-center">

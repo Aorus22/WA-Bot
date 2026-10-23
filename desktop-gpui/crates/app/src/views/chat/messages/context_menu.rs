@@ -1,3 +1,4 @@
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 use super::star_pin::{DEFAULT_PIN_SECS, PIN_DURATIONS};
 
@@ -9,7 +10,9 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
         let theme = *cx.app_theme();
-        let border_color = theme.border;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let border_color = if shape.adwaita { surface.border } else { theme.border };
         let card_bg = theme.card;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
@@ -35,7 +38,15 @@ impl ChatView {
                     msg_content.as_str(),
                     "[Image]" | "[Sticker]" | "[Video]" | "[Audio]" | "[Document]"
                 );
-            let hover_bg: Hsla = theme.foreground.opacity(0.12);
+            let hover_bg: Hsla = theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 });
+            let popover_bg = if shape.adwaita { surface.popover } else { card_bg };
+            let popover_border = if shape.adwaita { surface.border } else { border_color.opacity(0.35) };
+            macro_rules! styled_menu_row {
+                ($($args:tt)*) => {
+                    menu_row($($args)*)
+                        .when(shape.adwaita, |row| row.px_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                };
+            }
             let picker_open = ctx.reaction_picker;
             let pin_picker_open = ctx.pin_picker;
             // A message still on its way has no id the backend knows yet.
@@ -52,7 +63,8 @@ impl ChatView {
                 }};
             }
 
-            let mut card = menu_surface(if picker_open { 308.0 } else { 224.0 }, card_bg, border_color);
+            let mut card = menu_surface(if picker_open { 308.0 } else { 224.0 }, card_bg, border_color, cx)
+                .when(shape.adwaita, |menu| menu.shadow_sm());
             let mut pill = None;
             if picker_open {
                 // Full emoji list, opened from the pill's "+" or the React row.
@@ -72,7 +84,8 @@ impl ChatView {
                                     .items_center()
                                     .justify_center()
                                     .rounded_lg()
-                                    .hover(|s| s.bg(theme.muted.opacity(0.6)))
+                                    .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
+                                    .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.15) } else { theme.muted.opacity(0.6) }))
                                     .text_lg()
                                     .child(emoji)
                                     .on_mouse_down(MouseButton::Left, react!(emoji, cx))
@@ -92,7 +105,7 @@ impl ChatView {
                 );
                 for (id, (secs, label)) in ["mm-pin-1d", "mm-pin-7d", "mm-pin-30d"].into_iter().zip(PIN_DURATIONS) {
                     card = card.child(
-                        menu_row(window, cx, id, CLOCK_SVG, label, muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, id, CLOCK_SVG, label, muted_text, text_color, hover_bg)
                             .when(secs == DEFAULT_PIN_SECS, |row| row.bg(theme.primary.opacity(0.12)))
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let m = msg_obj.clone();
@@ -110,17 +123,18 @@ impl ChatView {
                         .gap_0p5()
                         .items_center()
                         .rounded_full()
-                        .bg(card_bg)
+                        .bg(popover_bg)
                         .border_1()
-                        .border_color(border_color.opacity(0.35))
-                        .shadow_xl()
+                        .border_color(popover_border)
+                        .when(!shape.adwaita, |pill| pill.shadow_xl())
+                        .when(shape.adwaita, |pill| pill.shadow_sm())
                         .children(["👍", "❤️", "😂", "😮", "😢", "🙏"].into_iter().map(|emoji| {
                             let key = SharedString::from(format!("mm-react-{emoji}"));
                             with_hover_fade(
-                                div().id(key.clone()).cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded_full(),
+                                div().id(key.clone()).cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded(px(cx.shape().radius_button)),
                                 key,
-                                theme.foreground.opacity(0.12),
-                                px(17.0),
+                                theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 }),
+                                px(if shape.adwaita { shape.radius_button } else { 17.0 }),
                                 window,
                                 cx,
                             )
@@ -130,10 +144,10 @@ impl ChatView {
                         }))
                         .child(
                             with_hover_fade(
-                                div().id("mm-more-reactions").cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded_full(),
+                                div().id("mm-more-reactions").cursor_pointer().w(px(34.0)).h(px(34.0)).flex().items_center().justify_center().rounded(px(cx.shape().radius_button)),
                                 "mm-more-reactions",
-                                theme.foreground.opacity(0.12),
-                                px(17.0),
+                                theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 }),
+                                px(if shape.adwaita { shape.radius_button } else { 17.0 }),
                                 window,
                                 cx,
                             )
@@ -149,7 +163,7 @@ impl ChatView {
 
                 // Reply
                 card = card.child(
-                    menu_row(window, cx, "mm-reply", REPLY_SVG, "Reply", muted_text, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "mm-reply", REPLY_SVG, "Reply", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener({
                             let m = msg_obj.clone();
                             move |this, _, window, cx| this.start_reply(m.clone(), window, cx)
@@ -158,7 +172,7 @@ impl ChatView {
 
                 // React (full emoji list)
                 card = card.child(
-                    menu_row(window, cx, "mm-react", SMILE_SVG, "React", muted_text, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "mm-react", SMILE_SVG, "React", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                             if let Some(menu) = this.context_menu.as_mut() {
                                 menu.reaction_picker = true;
@@ -169,7 +183,7 @@ impl ChatView {
 
                 if is_from_me {
                     card = card.child(
-                        menu_row(window, cx, "mm-viewed-by", EYE_SVG, "Message info", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-viewed-by", EYE_SVG, "Message info", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let message = msg_obj.clone();
                                 move |this, _, _, cx| this.open_viewed_by(message.clone(), cx)
@@ -179,7 +193,7 @@ impl ChatView {
 
                 // Select (starts select-messages mode with this one ticked)
                 card = card.child(
-                    menu_row(window, cx, "mm-select", CHECK_SVG, "Select", muted_text, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "mm-select", CHECK_SVG, "Select", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener({
                             let mid = msg_obj.id.clone();
                             move |this, _, _, cx| this.enter_select_mode(Some(mid.clone()), cx)
@@ -188,7 +202,7 @@ impl ChatView {
 
                 // Forward
                 card = card.child(
-                    menu_row(window, cx, "mm-forward", FORWARD_SVG, "Forward", muted_text, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "mm-forward", FORWARD_SVG, "Forward", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener({
                             let m = msg_obj.clone();
                             let cid = chat_id.clone();
@@ -199,13 +213,13 @@ impl ChatView {
                 // Pin / Star
                 if settled {
                     card = card.child(if is_pinned {
-                        menu_row(window, cx, "mm-pin", PIN_SVG, "Unpin", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-pin", PIN_SVG, "Unpin", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let m = msg_obj.clone();
                                 move |this, _, _, cx| this.set_message_pinned(m.clone(), false, 0, cx)
                             }))
                     } else {
-                        menu_row(window, cx, "mm-pin", PIN_SVG, "Pin", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-pin", PIN_SVG, "Pin", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                 if let Some(menu) = this.context_menu.as_mut() {
                                     menu.pin_picker = true;
@@ -214,7 +228,7 @@ impl ChatView {
                             }))
                     });
                     card = card.child(
-                        menu_row(
+                        styled_menu_row!(
                             window,
                             cx,
                             "mm-star",
@@ -234,7 +248,7 @@ impl ChatView {
                 // Copy (text only)
                 if copyable {
                     card = card.child(
-                        menu_row(window, cx, "mm-copy", COPY_SVG, "Copy", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-copy", COPY_SVG, "Copy", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let text = msg_content.clone();
                                 move |this, _, _, cx| this.copy_message_text(text.clone(), cx)
@@ -245,7 +259,7 @@ impl ChatView {
                 // Copy the picture itself (a still-uploading local preview has nothing to fetch)
                 if settled && has_media && ctx_is_image {
                     card = card.child(
-                        menu_row(window, cx, "mm-copy-image", COPY_SVG, "Copy image", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-copy-image", COPY_SVG, "Copy image", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let url = media_full_url.clone();
                                 move |this, _, _, cx| {
@@ -260,7 +274,7 @@ impl ChatView {
                 // Save media / favourite sticker
                 if has_media && settled {
                     card = card.child(
-                        menu_row(window, cx, "mm-save", DOWNLOAD_SVG, "Save as…", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-save", DOWNLOAD_SVG, "Save as…", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let m = msg_obj.clone();
                                 move |this, _, _, cx| this.save_message_media(&m, cx)
@@ -269,7 +283,7 @@ impl ChatView {
                 }
                 if is_sticker && has_media {
                     card = card.child(
-                        menu_row(window, cx, "mm-fav", STICKER_SVG, "Add to favourites", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-fav", STICKER_SVG, "Add to favourites", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let m = msg_obj.clone();
                                 move |this, _, _, cx| this.favorite_message_sticker(&m, cx)
@@ -280,7 +294,7 @@ impl ChatView {
                 // Edit (own text messages)
                 if is_from_me && !has_media && msg_obj.revoked_at.is_none() {
                     card = card.child(
-                        menu_row(window, cx, "mm-edit", EDIT_SVG, "Edit", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-edit", EDIT_SVG, "Edit", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let m = msg_obj.clone();
                                 move |this, _, window, cx| this.start_edit(m.clone(), window, cx)
@@ -291,7 +305,7 @@ impl ChatView {
                 // Delete (own messages that are not already deleted)
                 if is_from_me && msg_obj.revoked_at.is_none() {
                     card = card.child(menu_separator(border_color)).child(
-                        menu_row(window, cx, "mm-delete", TRASH_SVG, "Delete", muted_text, text_color, hover_bg)
+                        styled_menu_row!(window, cx, "mm-delete", TRASH_SVG, "Delete", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let cid = chat_id.clone();
                                 let mid = msg_id.clone();

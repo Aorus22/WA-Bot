@@ -11,12 +11,13 @@ impl ChatView {
         let deletable = self.selection_deletable();
         let confirming = self.select_confirm_delete;
         let danger: Hsla = rgb(0xef4444).into();
+        let radius_button = px(cx.shape().radius_button);
 
         let action = |id: &'static str, icon: &'static [u8], tip: &'static str, enabled: bool, color: Hsla| {
             let button = div()
                 .id(id)
                 .p_2()
-                .rounded_full()
+                .rounded(radius_button)
                 .when(enabled, |el| {
                     el.cursor_pointer().hover({
                         let hover_bg = theme.muted.opacity(0.65);
@@ -31,7 +32,7 @@ impl ChatView {
 
         let controls_room = if self.controls_over_conversation() { crate::components::titlebar::controls_room(cx) } else { 12.0 };
         h_flex()
-            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+            .h(px(cx.shape().header_height))
             .flex_shrink_0()
             .pl_4()
             .pr(px(controls_room))

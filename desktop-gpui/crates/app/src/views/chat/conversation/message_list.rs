@@ -118,7 +118,7 @@ impl ChatView {
                     .right(px(16.0))
                     .w(px(40.0))
                     .h(px(40.0))
-                    .rounded_full()
+                    .rounded(px(cx.shape().radius_button))
                     .bg(theme.card)
                     .border_1()
                     .border_color(border_color.opacity(0.7))

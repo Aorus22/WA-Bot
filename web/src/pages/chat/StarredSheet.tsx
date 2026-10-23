@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { api, type StarredMessage } from "@/lib/api"
 import { subscribeWS } from "@/lib/ws-bus"
 import { messageSnippet } from "./messageSnippet"
+import { BoxedList } from "@/components/ui/boxed-list"
 
 interface StarredSheetProps {
 	open: boolean
@@ -48,7 +49,7 @@ export function StarredSheet({ open, onClose, onSelect }: StarredSheetProps) {
 							<Star className="h-5 w-5 text-primary" />
 							Starred messages
 						</SheetTitle>
-						<Button variant="ghost" size="icon" onClick={onClose} className="rounded-full h-8 w-8">
+						<Button variant="ghost" size="icon" onClick={onClose} className="rounded-button h-8 w-8">
 							<X className="h-4 w-4" />
 						</Button>
 					</div>
@@ -60,7 +61,7 @@ export function StarredSheet({ open, onClose, onSelect }: StarredSheetProps) {
 							<Loader2 className="h-6 w-6 animate-spin text-primary" />
 						</div>
 					) : items.length > 0 ? (
-						<div className="flex flex-col">
+						<BoxedList className="flex flex-col">
 							{items.map((msg) => (
 								<button
 									key={`${msg.chatId}-${msg.id}`}
@@ -81,7 +82,7 @@ export function StarredSheet({ open, onClose, onSelect }: StarredSheetProps) {
 									<p className="text-sm line-clamp-2 text-foreground/80">{messageSnippet(msg)}</p>
 								</button>
 							))}
-						</div>
+						</BoxedList>
 					) : (
 						<div className="flex flex-col items-center justify-center h-64 p-8 text-center gap-4 text-muted-foreground/40">
 							<Star className="h-12 w-12 stroke-[1px]" />

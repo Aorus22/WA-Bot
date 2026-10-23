@@ -1,6 +1,6 @@
 import { Check, Palette, LogOut, LogIn, Wifi, WifiOff, AlertCircle, Bot, Mic, Loader2, History, ChevronRight } from 'lucide-react'
 import { themes } from '@/data/themes'
-import { useAppTheme, setAppTheme } from '@/components/AppThemeProvider'
+import { useAppTheme, setAppTheme, isGtkStyle, setGtkStyle } from '@/components/AppThemeProvider'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -74,6 +74,7 @@ export function SettingsPage() {
 	})
 	const [logoutOpen, setLogoutOpen] = useState(false)
 	const [themeOpen, setThemeOpen] = useState(false)
+	const [gtkStyle, setGtkStyleState] = useState(isGtkStyle)
 	const navigate = useNavigate()
 	const { isLoggedIn, isConnected, logout } = useAuth()
 
@@ -340,8 +341,8 @@ export function SettingsPage() {
 					<h1 className="text-2xl font-bold tracking-tight">Settings</h1>
 
 					<div className="space-y-4">
-						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Appearance</h2>
-						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+						<h2 data-settings-section-title className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Appearance</h2>
+						<div className="bg-card rounded-group border divide-y overflow-hidden">
 							<button
 								type="button"
 								onClick={() => setThemeOpen(true)}
@@ -366,12 +367,26 @@ export function SettingsPage() {
 									<ChevronRight className="h-4 w-4 text-muted-foreground" />
 								</div>
 							</button>
+							<div className="flex items-center gap-3 px-4 py-3">
+								<Palette className="h-4 w-4 text-muted-foreground" />
+								<div className="flex flex-col flex-1 min-w-0">
+									<span className="text-sm font-medium">GTK style</span>
+									<span className="text-xs text-muted-foreground">Flat, rounded shapes like a GNOME app. Works with any colour theme</span>
+								</div>
+								<Switch
+									checked={gtkStyle}
+									onCheckedChange={(v) => {
+										setGtkStyleState(Boolean(v))
+										setGtkStyle(Boolean(v))
+									}}
+								/>
+							</div>
 						</div>
 					</div>
 
 					<div className="space-y-4">
-						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Account</h2>
-						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+						<h2 data-settings-section-title className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Account</h2>
+						<div className="bg-card rounded-group border divide-y overflow-hidden">
 							<div className="flex items-center justify-between px-4 py-3">
 								<div className="flex items-center gap-3">
 									{isConnected ? (
@@ -515,8 +530,8 @@ export function SettingsPage() {
 					</div>
 
 					<div className="space-y-4">
-						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">AI</h2>
-						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+						<h2 data-settings-section-title className="text-sm font-medium text-muted-foreground uppercase tracking-wider">AI</h2>
+						<div className="bg-card rounded-group border divide-y overflow-hidden">
 							<div className="flex items-center justify-between gap-4 px-4 py-3">
 								<div className="flex items-center gap-3">
 									<Bot className="h-4 w-4 text-muted-foreground" />
@@ -611,8 +626,8 @@ export function SettingsPage() {
 					</div>
 
 					<div className="space-y-4">
-						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Messages</h2>
-						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+						<h2 data-settings-section-title className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Messages</h2>
+						<div className="bg-card rounded-group border divide-y overflow-hidden">
 							<div className="flex items-center gap-3 px-4 py-3.5">
 								<div className="flex flex-col flex-1 min-w-0">
 									<span className="text-sm font-medium">Format message text</span>
@@ -650,8 +665,8 @@ export function SettingsPage() {
 					</div>
 
 					<div className="space-y-4">
-						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Privacy</h2>
-						<div className="bg-card rounded-lg border overflow-hidden">
+						<h2 data-settings-section-title className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Privacy</h2>
+						<div className="bg-card rounded-group border overflow-hidden">
 							<div className="flex items-center gap-3 px-4 py-3.5">
 								<Check className="h-4 w-4 text-primary" />
 								<div className="flex flex-col flex-1 min-w-0">
@@ -668,8 +683,8 @@ export function SettingsPage() {
 					</div>
 
 					<div className="space-y-4">
-						<h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Call TTS</h2>
-						<div className="bg-card rounded-lg border divide-y overflow-hidden">
+						<h2 data-settings-section-title className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Call TTS</h2>
+						<div className="bg-card rounded-group border divide-y overflow-hidden">
 							<div className="flex items-center gap-3 px-4 py-3">
 								<Mic className="h-4 w-4 text-muted-foreground" />
 								<div className="flex flex-col">
@@ -830,8 +845,8 @@ export function SettingsPage() {
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
-						<AlertDialogCancel className="rounded-full">Cancel</AlertDialogCancel>
-						<AlertDialogAction onClick={logout} className="bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-full">
+						<AlertDialogCancel className="rounded-button">Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={logout} className="bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-button">
 							Log Out
 						</AlertDialogAction>
 					</AlertDialogFooter>

@@ -76,12 +76,13 @@ impl ChatView {
     pub(crate) fn render_chat_selection_bar(&mut self, cx: &mut Context<Self>, pages: bool) -> AnyElement {
         let theme = *cx.app_theme();
         let muted_text = theme.muted_foreground;
+        let radius_button = px(cx.shape().radius_button);
         let count = self.selected_chats.len();
         let action = |id: &'static str, icon: &'static [u8], tip: &'static str| {
             div()
                 .id(id)
                 .p_2()
-                .rounded_full()
+                .rounded(radius_button)
                 .when(count > 0, |el| {
                     el.cursor_pointer().hover({
                         let hover_bg = theme.muted.opacity(0.65);
@@ -94,7 +95,7 @@ impl ChatView {
         };
         let controls_room = if pages { crate::components::titlebar::controls_room(cx) } else { 0.0 };
         h_flex()
-            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+            .h(px(cx.shape().header_height))
             .pl_4()
             .pr(px(16.0 + controls_room))
             .gap_1()
@@ -103,7 +104,7 @@ impl ChatView {
                 div()
                     .id("btn-chat-select-cancel")
                     .p_2()
-                    .rounded_full()
+                    .rounded(radius_button)
                     .cursor_pointer()
                     .hover(|s| s.bg(theme.muted.opacity(0.65)))
                     .tooltip(move |window, cx| Tooltip::new("Cancel").build(window, cx))

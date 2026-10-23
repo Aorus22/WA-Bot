@@ -20,6 +20,7 @@ import { subscribeWS } from "@/lib/ws-bus"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { BoxedList } from "@/components/ui/boxed-list"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
 	Drawer,
@@ -245,14 +246,15 @@ function CallRow({
 	return (
 		<button
 			data-call-item
+			data-selected={selected}
 			onClick={() => onSelect(log)}
 			className={cn(
-				"w-full flex items-center gap-4 p-3.5 rounded-2xl transition-all duration-200 group text-left relative",
+				"w-full flex items-center gap-4 p-3.5 transition-all duration-200 group text-left relative",
 				selected ? "bg-primary/10 shadow-sm" : "hover:bg-muted/50 active:scale-[0.98]"
 			)}
 		>
 			{selected && (
-				<div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r-full" />
+				<div data-call-selection-indicator className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r-full" />
 			)}
 
 			{/* Who it was with, with the way the call went at the corner */}
@@ -450,7 +452,7 @@ export function CallHistoryPage() {
 		<div className="flex flex-col h-full max-h-full bg-background overflow-hidden">
 			{/* Header */}
 			<div className="flex flex-col p-5 space-y-4 shrink-0">
-				<div className="flex items-center justify-between">
+				<div data-call-list-header className="flex items-center justify-between">
 					<div className="flex items-baseline gap-2.5">
 						<h2 className="text-2xl font-bold tracking-tight">Calls</h2>
 					</div>
@@ -480,7 +482,7 @@ export function CallHistoryPage() {
 							key={f.key}
 							onClick={() => setFilter(f.key)}
 							className={cn(
-								"px-3.5 py-1.5 rounded-full text-sm font-semibold transition-all duration-200 shrink-0",
+								"px-3.5 py-1.5 rounded-button text-sm font-semibold transition-all duration-200 shrink-0",
 								filter === f.key
 									? "bg-primary text-primary-foreground shadow-sm"
 									: "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -560,7 +562,7 @@ export function CallHistoryPage() {
 											{label}
 										</span>
 									</div>
-									<div className="space-y-1">
+									<BoxedList>
 										{items.map((log) => (
 											<CallRow
 												key={log.id}
@@ -569,7 +571,7 @@ export function CallHistoryPage() {
 												onSelect={setSelected}
 											/>
 										))}
-									</div>
+									</BoxedList>
 								</div>
 							))}
 

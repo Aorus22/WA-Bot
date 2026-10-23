@@ -4,12 +4,14 @@ use gpui::{
     div, prelude::FluentBuilder as _, px, rgb, svg, App, InteractiveElement, IntoElement, MouseButton, ParentElement,
     RenderOnce, Styled, Window, WindowControlArea,
 };
-use gpui_component::h_flex;
+use crate::components::ui::h_flex;
 #[cfg(target_os = "windows")]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::icons::{MAXIMIZE_SVG, MINIMIZE_SVG, RESTORE_SVG, X_SVG};
 use crate::theme::manager::{AppThemeExt, ThemeManager};
+use crate::theme::shape::ShapeExt;
+use crate::theme::surface::SurfaceExt;
 use crate::window_material;
 
 pub const TITLEBAR_HEIGHT: f32 = 48.0;
@@ -96,8 +98,6 @@ pub fn toggle_maximize(window: &mut Window) -> bool {
     !was_max
 }
 
-/// Height of the chat headers that carry the window controls.
-pub const HEADER_HEIGHT: f32 = 52.0;
 const MINIMIZE_WIDTH: f32 = 34.0;
 const MAXIMIZE_WIDTH: f32 = 34.0;
 const CLOSE_WIDTH: f32 = 36.0;
@@ -133,6 +133,12 @@ pub fn drag_area() -> gpui::Div {
 /// Minimize, maximize/restore and close.
 fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
     let theme = cx.app_theme();
+    let shape = cx.shape();
+    let hover_bg = if shape.adwaita {
+        theme.foreground.opacity(0.15)
+    } else {
+        theme.muted
+    };
     let is_max = is_window_maximized(window);
     let framed = window_material::is_framed_window(window);
     h_flex()
@@ -146,9 +152,24 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 .justify_center()
                 .w(px(MINIMIZE_WIDTH))
                 .h_full()
+                .when(shape.adwaita, |s| {
+                    s.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(shape.titlebar_control_size))
+                            .rounded_full()
+                            .text_color(theme.foreground)
+                            .hover(|s| s.bg(hover_bg))
+                            .child(svg().data(MINIMIZE_SVG).size(px(12.0))),
+                    )
+                })
+                .when(!shape.adwaita, |s| {
+                    s.hover(|s| s.bg(hover_bg))
+                        .child(svg().data(MINIMIZE_SVG).size(px(12.0)).text_color(theme.foreground))
+                })
                 .cursor_pointer()
-                .hover(|s| s.bg(theme.muted))
-                .child(svg().data(MINIMIZE_SVG).size(px(12.0)).text_color(theme.foreground))
                 .on_mouse_down(MouseButton::Left, |_, window, _| {
                     window.minimize_window();
                 }),
@@ -161,14 +182,32 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 .justify_center()
                 .w(px(MAXIMIZE_WIDTH))
                 .h_full()
+                .when(shape.adwaita, |s| {
+                    s.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(shape.titlebar_control_size))
+                            .rounded_full()
+                            .text_color(theme.foreground)
+                            .hover(|s| s.bg(hover_bg))
+                            .child(
+                                svg()
+                                    .data(if is_max { RESTORE_SVG } else { MAXIMIZE_SVG })
+                                    .size(px(12.0)),
+                            ),
+                    )
+                })
+                .when(!shape.adwaita, |s| {
+                    s.hover(|s| s.bg(hover_bg)).child(
+                        svg()
+                            .data(if is_max { RESTORE_SVG } else { MAXIMIZE_SVG })
+                            .size(px(12.0))
+                            .text_color(theme.foreground),
+                    )
+                })
                 .cursor_pointer()
-                .hover(|s| s.bg(theme.muted))
-                .child(
-                    svg()
-                        .data(if is_max { RESTORE_SVG } else { MAXIMIZE_SVG })
-                        .size(px(12.0))
-                        .text_color(theme.foreground),
-                )
                 .on_mouse_down(MouseButton::Left, |_, window, _| {
                     toggle_maximize(window);
                 }),
@@ -181,10 +220,25 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                 .justify_center()
                 .w(px(CLOSE_WIDTH))
                 .h_full()
+                .when(shape.adwaita, |s| {
+                    s.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(shape.titlebar_control_size))
+                            .rounded_full()
+                            .text_color(theme.foreground)
+                            .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
+                            .child(svg().data(X_SVG).size(px(13.0))),
+                    )
+                })
+                .when(!shape.adwaita, |s| {
+                    s.when(framed, |s| s.rounded_tr(px(shape.radius_window)))
+                        .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
+                        .child(svg().data(X_SVG).size(px(13.0)).text_color(theme.foreground))
+                })
                 .cursor_pointer()
-                .when(framed, |s| s.rounded_tr(px(window_material::WINDOW_CORNER_RADIUS)))
-                .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
-                .child(svg().data(X_SVG).size(px(13.0)).text_color(theme.foreground))
                 .on_mouse_down(MouseButton::Left, |_, window, _| {
                     window.remove_window();
                 }),
@@ -202,11 +256,11 @@ pub fn controls_overlay(window: &Window, cx: &App) -> gpui::AnyElement {
         .absolute()
         .top_0()
         .right_0()
-        .h(px(HEADER_HEIGHT))
+        .h(px(cx.shape().header_height))
         .w(px(CONTROLS_WIDTH))
         .items_center()
         .occlude()
-        .child(div().w(px(1.0)).h(px(24.0)).bg(theme.border.opacity(0.7)))
+        .child(div().w(px(1.0)).h(px(24.0)).bg(if cx.shape().adwaita { cx.surface().border } else { theme.border.opacity(0.7) }))
         .child(control_buttons(window, cx))
         .into_any_element()
 }
@@ -227,23 +281,32 @@ impl RenderOnce for AppTitleBar {
             return div().into_any_element();
         }
         let theme = cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
         let window_transparency = ThemeManager::global(cx).window_transparency;
         let framed = window_material::is_framed_window(window);
+        let window_active = window.is_window_active();
+        let header_background = if shape.adwaita {
+            if window_active { surface.headerbar } else { surface.headerbar_backdrop }
+        } else {
+            window_material::glass_fill(theme.background, window_transparency)
+        };
+        let border = if shape.adwaita { surface.border } else { theme.border.opacity(0.4) };
 
         h_flex()
             .id("app-titlebar")
             .w_full()
-            .h(px(TITLEBAR_HEIGHT))
-            .bg(window_material::glass_fill(theme.background, window_transparency))
+            .h(px(shape.titlebar_height))
+            .bg(header_background)
             .border_b_1()
-            .border_color(theme.border.opacity(0.4))
+            .border_color(border)
             .items_center()
             .justify_between()
             .pl_3()
             .flex_shrink_0()
             .when(framed, |s| {
-                s.rounded_tl(px(window_material::WINDOW_CORNER_RADIUS))
-                    .rounded_tr(px(window_material::WINDOW_CORNER_RADIUS))
+                s.rounded_tl(px(shape.radius_window))
+                    .rounded_tr(px(shape.radius_window))
             })
             // NOTE: Do not set window_control_area(Drag) here so children remain interactive!
             .child(
@@ -252,7 +315,11 @@ impl RenderOnce for AppTitleBar {
                         .text_sm()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(theme.foreground)
-                        .opacity(0.7)
+                        .opacity(if shape.adwaita {
+                            if window_active { 1.0 } else { 0.5 }
+                        } else {
+                            0.7
+                        })
                         .child("WA Bot"),
                 ),
             )

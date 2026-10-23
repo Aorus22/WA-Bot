@@ -88,7 +88,7 @@ const StickerPicker = memo(({ onStickerSelect }: { onStickerSelect: (sticker: an
 							</button>
 							<button
 								onClick={(e) => deleteSticker(e, sticker.id)}
-								className="absolute -top-1 -right-1 p-1 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover/sticker-item:opacity-100 transition-opacity shadow-sm z-10"
+								className="absolute -top-1 -right-1 p-1 bg-destructive text-destructive-foreground rounded-button opacity-0 group-hover/sticker-item:opacity-100 transition-opacity shadow-sm z-10"
 							>
 								<Trash2 className="h-3 w-3" />
 							</button>
@@ -116,7 +116,7 @@ export function ChatStickerPickerPopover({ onStickerSelect, open: controlledOpen
 	return (
 		<Popover open={isOpen} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
-				<Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:bg-muted">
+				<Button variant="ghost" size="icon" className="rounded-button text-muted-foreground hover:bg-muted">
 					<Sticker className="h-5 w-5" />
 				</Button>
 			</PopoverTrigger>

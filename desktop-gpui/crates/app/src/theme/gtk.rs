@@ -14,12 +14,26 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use gpui::Rgba;
+use gpui::{Hsla, Rgba};
 
 use super::preset::{ThemeColors, ThemePreset};
+use super::surface::SurfaceOverrides;
 
 pub const GTK_PRESET_NAME: &str = "gtk";
 pub const GTK_PRESET_LABEL: &str = "Desktop (GTK)";
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GtkFont {
+    pub family: String,
+    /// Pango/GTK font size in points.
+    pub size_points: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GtkPreferences {
+    pub font: Option<GtkFont>,
+    pub enable_animations: Option<bool>,
+}
 
 /// Files that make up the palette, **lowest priority first**.
 const USER_CSS_FILES: [(&str, &str); 4] = [
@@ -222,6 +236,108 @@ fn user_css_paths() -> Vec<PathBuf> {
         .collect()
 }
 
+fn gtk_settings_paths() -> Vec<PathBuf> {
+    let Some(config) = config_dir() else {
+        return Vec::new();
+    };
+    ["gtk-3.0", "gtk-4.0"]
+        .into_iter()
+        .map(|version| config.join(version).join("settings.ini"))
+        .collect()
+}
+
+/// Reads GTK preferences with GTK 4 taking precedence over GTK 3.
+pub fn preferences() -> GtkPreferences {
+    let mut out = GtkPreferences::default();
+    for path in gtk_settings_paths() {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            parse_settings_ini_into(&contents, &mut out);
+        }
+    }
+    out
+}
+
+fn parse_settings_ini_into(contents: &str, out: &mut GtkPreferences) {
+    let mut in_settings = false;
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_settings = line[1..line.len() - 1].trim().eq_ignore_ascii_case("Settings");
+            continue;
+        }
+        if !in_settings {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "gtk-font-name" => {
+                if let Some(font) = parse_gtk_font_name(value) {
+                    out.font = Some(font);
+                }
+            }
+            "gtk-enable-animations" => {
+                if let Some(enabled) = parse_ini_bool(value.trim()) {
+                    out.enable_animations = Some(enabled);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn parse_ini_bool(value: &str) -> Option<bool> {
+    match value
+        .trim()
+        .trim_matches(|c: char| (c as u32) == 39 || (c as u32) == 34)
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_gtk_font_name(value: &str) -> Option<GtkFont> {
+    let value = value
+        .trim()
+        .trim_matches(|c: char| (c as u32) == 39 || (c as u32) == 34)
+        .trim();
+    let split = value.rfind(char::is_whitespace)?;
+    let family = value[..split].trim();
+    let size_points = value[split..].trim().parse::<f32>().ok()?;
+    if family.is_empty() || !size_points.is_finite() || size_points <= 0.0 {
+        return None;
+    }
+    Some(GtkFont {
+        family: family.to_string(),
+        size_points,
+    })
+}
+
+/// Surface colors published by the active GTK palette, if present.
+pub fn surface_overrides() -> Option<SurfaceOverrides> {
+    let css = load_user_css();
+    if css.is_empty() {
+        return None;
+    }
+    let color = |names: &[&str]| css.get_any(names).map(Hsla::from);
+    Some(SurfaceOverrides {
+        window: color(&["window_bg_color", "theme_bg_color"]),
+        view: color(&["view_bg_color", "theme_base_color"]),
+        sidebar: color(&["sidebar_bg_color", "sidebar_bg_color_breeze"]),
+        headerbar: color(&["headerbar_bg_color", "headerbar_bg_color_breeze"]),
+        card: color(&["card_bg_color", "theme_card_bg_color"]),
+        dialog: color(&["dialog_bg_color"]),
+        popover: color(&["popover_bg_color"]),
+    })
+}
+
 fn load_user_css() -> UserCss {
     let mut out = UserCss::default();
     for path in user_css_paths() {
@@ -242,6 +358,7 @@ pub fn current_key() -> ThemeKey {
     ThemeKey(
         user_css_paths()
             .into_iter()
+            .chain(gtk_settings_paths())
             .filter_map(|path| {
                 let target = std::fs::canonicalize(&path).ok()?;
                 let mtime = std::fs::metadata(&target)
@@ -449,6 +566,43 @@ mod tests {
         let mut out = UserCss::default();
         parse_css_into(text, &mut out);
         out
+    }
+
+    #[test]
+    fn parses_gtk_settings_and_font_names() {
+        let mut prefs = GtkPreferences::default();
+        let contents = [
+            "[Other]",
+            "gtk-font-name=Wrong 8",
+            "[Settings]",
+            "gtk-font-name=Cantarell 11",
+            "gtk-enable-animations=false",
+        ]
+        .join("\n");
+        parse_settings_ini_into(&contents, &mut prefs);
+        assert_eq!(
+            prefs.font,
+            Some(GtkFont {
+                family: "Cantarell".to_string(),
+                size_points: 11.0,
+            })
+        );
+        assert_eq!(prefs.enable_animations, Some(false));
+        parse_settings_ini_into(
+            "[Settings]\ngtk-font-name=Invalid\ngtk-enable-animations=unknown",
+            &mut prefs,
+        );
+        assert_eq!(
+            prefs.font,
+            Some(GtkFont {
+                family: "Cantarell".to_string(),
+                size_points: 11.0,
+            })
+        );
+        assert_eq!(prefs.enable_animations, Some(false));
+        assert_eq!(parse_ini_bool("yes"), Some(true));
+        assert_eq!(parse_gtk_font_name("Sans"), None);
+        assert_eq!(parse_gtk_font_name("Sans 0"), None);
     }
 
     #[test]

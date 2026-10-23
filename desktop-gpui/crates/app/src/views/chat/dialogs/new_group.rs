@@ -1,3 +1,5 @@
+use crate::components::ui::boxed_list::boxed_list;
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
@@ -12,6 +14,11 @@ impl ChatView {
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let scrim = if shape.adwaita { surface.scrim } else { surface.scrim_default };
+        let dialog_bg = if shape.adwaita { surface.dialog } else { card_bg };
+        let dialog_border = if shape.adwaita { surface.border } else { border_color };
         if self.is_new_group_open {
             let adding = self.add_members_for.is_some();
             let already_in: HashSet<String> = if adding {
@@ -37,7 +44,7 @@ impl ChatView {
                     .absolute()
                     .occlude()
                     .inset_0()
-                    .bg(rgba(0x00000088))
+                    .bg(scrim)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -46,22 +53,25 @@ impl ChatView {
                             .w(px(400.0))
                             .p_5()
                             .rounded_2xl()
-                            .bg(card_bg)
+                            .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                            .bg(dialog_bg)
                             .border_1()
-                            .border_color(border_color)
-                            .shadow_2xl()
+                            .border_color(dialog_border)
+                            .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
+                            .when(shape.adwaita, |dialog| dialog.shadow_md())
                             .gap_4()
                             // Header
                             .child(
                                 h_flex()
                                     .justify_between()
                                     .items_center()
+                                    .when(shape.adwaita, |header| header.h(px(shape.header_height)).bg(surface.headerbar))
                                     .child(div().text_lg().font_weight(FontWeight::BOLD).text_color(text_color).child(if adding { "Add members" } else { "New group" }))
                                     .child(
                                         div()
                                             .cursor_pointer()
                                             .p_1()
-                                            .rounded_full()
+                                            .rounded(px(cx.shape().radius_button))
                                             .hover(|s| s.bg(theme.muted.opacity(0.5)))
                                             .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
                                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
@@ -72,25 +82,27 @@ impl ChatView {
                                     ),
                             )
                             // Group Name Input
-                            .children((!adding).then(|| self.new_group_field.as_ref().map(|field| field.element(&theme, None))).flatten())
+                            .children((!adding).then(|| self.new_group_field.as_ref().map(|field| field.element(&theme, cx.shape(), None))).flatten())
                             // Contact Picker Scroll
                             .child(
                                 v_flex()
                                     .id("new-group-contacts-scroll")
                                     .max_h(px(220.0))
                                     .overflow_y_scroll()
-                                    .gap_1()
-                                    .children(contacts.into_iter().map(|c| {
+                                    .child(boxed_list(cx, contacts.into_iter().map(|c| {
                                         let is_checked = self.new_group_selected.contains(&c.id);
                                         let cid = c.id.clone();
                                         h_flex()
                                             .cursor_pointer()
-                                            .p_2()
-                                            .rounded_lg()
+                                            .when(!shape.adwaita, |row| row.p_2().rounded_lg())
                                             .items_center()
                                             .justify_between()
-                                            .bg(if is_checked { theme.primary.opacity(0.12) } else { rgba(0x00000000).into() })
-                                            .hover(|s| s.bg(theme.muted.opacity(0.4)))
+                                            .bg(if is_checked {
+                                                if shape.adwaita { surface.card_shade } else { theme.primary.opacity(0.12) }
+                                            } else {
+                                                rgba(0x00000000).into()
+                                            })
+                                            .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.4) }))
                                             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                                                 if this.new_group_selected.contains(&cid) {
                                                     this.new_group_selected.remove(&cid);
@@ -117,8 +129,8 @@ impl ChatView {
                                                         None
                                                     }),
                                             )
-                                            .into_any_element()
-                                    }))
+                                    })))
+                                    .when(!shape.adwaita, |list| list.gap_1())
                             )
                             // Actions
                             .child(
@@ -131,8 +143,9 @@ impl ChatView {
                                             .px_4()
                                             .py_2()
                                             .rounded_xl()
+                                            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
                                             .border_1()
-                                            .border_color(border_color)
+                                            .border_color(dialog_border)
                                             .text_xs()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(text_color)
@@ -149,6 +162,7 @@ impl ChatView {
                                             .px_4()
                                             .py_2()
                                             .rounded_xl()
+                                            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
                                             .bg(primary_color)
                                             .text_xs()
                                             .font_weight(FontWeight::BOLD)

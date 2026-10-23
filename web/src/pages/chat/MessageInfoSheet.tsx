@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import type { GroupCache, Message, MessageReceipt } from "@/lib/api"
 import { isMarkdownContent } from "./renderMd"
+import { BoxedList } from "@/components/ui/boxed-list"
 
 interface MessageInfoSheetProps {
     message: Message | null
@@ -82,7 +83,7 @@ export const MessageInfoSheet: React.FC<MessageInfoSheetProps> = ({ message, rec
             <SheetContent showCloseButton={false} side="right" className="w-full sm:max-w-md p-0 flex flex-col gap-0 border-l border-border/40 bg-background/95 backdrop-blur-xl">
                 <SheetHeader className="p-4 border-b border-border/40">
                     <div className="flex items-center gap-3">
-                        <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full h-8 w-8"><X className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" onClick={onClose} className="rounded-button h-8 w-8"><X className="h-4 w-4" /></Button>
                         <SheetTitle className="text-lg font-bold">Message info</SheetTitle>
                     </div>
                 </SheetHeader>
@@ -105,19 +106,19 @@ export const MessageInfoSheet: React.FC<MessageInfoSheetProps> = ({ message, rec
                             {read.length > 0 && (
                                 <section>
                                     {header("Read by", <CheckCheck className="h-4 w-4 text-sky-400" />)}
-                                    {read.map(r => row(r.jid, r.readAt))}
+                                    <BoxedList>{read.map(r => row(r.jid, r.readAt))}</BoxedList>
                                 </section>
                             )}
                             {delivered.length > 0 && (
                                 <section>
                                     {header("Delivered to", <CheckCheck className="h-4 w-4" />)}
-                                    {delivered.map(r => row(r.jid, r.deliveredAt))}
+                                    <BoxedList>{delivered.map(r => row(r.jid, r.deliveredAt))}</BoxedList>
                                 </section>
                             )}
                             {remaining.length > 0 && (
                                 <section>
                                     {header("Remaining", <Check className="h-4 w-4" />)}
-                                    {remaining.map(jid => row(jid))}
+                                    <BoxedList>{remaining.map(jid => row(jid))}</BoxedList>
                                 </section>
                             )}
                         </>

@@ -4,8 +4,7 @@ use gpui::{
     div, px, AnimationExt as _, AnyElement, App, Global, IntoElement, ParentElement, RenderOnce,
     Styled, Window,
 };
-use gpui_component::{h_flex, Icon, IconName};
-
+use crate::components::ui::{h_flex, Icon, IconName};
 use crate::components::motion;
 
 use crate::theme::manager::AppThemeExt;

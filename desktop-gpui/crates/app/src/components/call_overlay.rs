@@ -1,14 +1,15 @@
 //! Full-screen call UI matching the Web `CallOverlay` and `IncomingCallOverlay`.
 //!
-//! The overlay is mounted once by [`crate::views::shell::AppShellView`] and reads
+//! The overlay is mounted once by [`crate::components::shell::AppShellView`] and reads
 //! the global [`CallManager`], so an active call covers whichever route is open —
 //! exactly like the Web client's `fixed inset-0 z-[90]` dialog.
 
 use std::time::Duration;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_component::spinner::Spinner;
-use gpui_component::{h_flex, v_flex};
+use crate::components::ui::Spinner;
+use crate::components::ui::{h_flex, v_flex};
 use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::dto::CallType;
 
@@ -17,6 +18,8 @@ use crate::state::auth::AuthState;
 use crate::state::call::{format_duration, now_millis, CallManager};
 use crate::state::chat::ChatStore;
 use crate::theme::manager::{ActiveTokens, AppThemeExt};
+use crate::theme::shape::ShapeExt;
+use crate::theme::surface::SurfaceExt;
 use crate::TOKIO_RT;
 
 /// Async action currently in flight, used to disable the controls.
@@ -675,6 +678,10 @@ impl CallOverlayView {
         let is_video = matches!(call.call_type, CallType::Video | CallType::GroupVideo);
         let upgrade = mgr.video_upgrade_requested;
         let busy = self.action.is_some();
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let dialog_background = if shape.adwaita { surface.dialog } else { theme.card };
+        let dialog_border = if shape.adwaita { surface.border } else { theme.border };
 
         v_flex()
             .id("incoming-call-overlay")
@@ -688,7 +695,11 @@ impl CallOverlayView {
                     .id("incoming-call-backdrop")
                     .absolute()
                     .inset_0()
-                    .bg(rgb(0x0a0a0a).opacity(0.7))
+                    .bg(if shape.adwaita {
+                        rgb(0x000000).opacity(0.5)
+                    } else {
+                        rgb(0x0a0a0a).opacity(0.7)
+                    })
                     .on_mouse_down(MouseButton::Left, |_, _, _| {}),
             )
             .child(
@@ -698,10 +709,11 @@ impl CallOverlayView {
                     .gap_4()
                     .items_center()
                     .rounded_2xl()
-                    .bg(theme.card)
+                    .when(shape.adwaita, |card| card.rounded(px(shape.radius_popover)))
+                    .bg(dialog_background)
                     .border_1()
-                    .border_color(theme.border)
-                    .shadow_xl()
+                    .border_color(dialog_border)
+                    .when(!shape.adwaita, |card| card.shadow_xl())
                     .child(
                         h_flex()
                             .items_center()

@@ -1,5 +1,5 @@
 use crate::views::chat::*;
-use crate::voice_recorder::{format_timer, VoiceRecorder, MAX_SECONDS, MIN_SECONDS};
+use crate::views::chat::media::voice_recorder::{format_timer, VoiceRecorder, MAX_SECONDS, MIN_SECONDS};
 
 impl ChatView {
     /// The mic button: open the microphone and switch the composer to its
@@ -172,7 +172,7 @@ impl ChatView {
                         div()
                             .id("btn-voice-cancel")
                             .p_2()
-                            .rounded_full()
+                            .rounded(px(cx.shape().radius_button))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -218,7 +218,7 @@ impl ChatView {
                         div()
                             .id("btn-voice-send")
                             .p_2()
-                            .rounded_full()
+                            .rounded(px(cx.shape().radius_button))
                             .flex()
                             .items_center()
                             .justify_center()

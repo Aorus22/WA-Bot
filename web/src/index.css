@@ -15,6 +15,14 @@
     --radius-2xl: calc(var(--radius) + 8px);
     --radius-3xl: calc(var(--radius) + 12px);
     --radius-4xl: calc(var(--radius) + 16px);
+    --radius-card: var(--shape-card);
+    --radius-bubble: var(--shape-bubble);
+    --radius-button: var(--shape-button);
+    --radius-input: var(--shape-input);
+    --radius-group: var(--shape-group);
+    --radius-popover: var(--shape-popover);
+    --radius-window: var(--shape-window);
+    --radius-row: var(--shape-row);
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -50,6 +58,26 @@
 
 :root {
     --radius: 0.625rem;
+    /* Shape tokens. `data-style="adwaita"` (GTK style setting) overrides them below. */
+    --shape-card: 1rem;
+    --shape-bubble: 1rem;
+    --shape-button: 9999px;
+    --shape-group: 0.625rem;
+    --shape-input: 1rem;
+    --shape-popover: 1rem;
+    --shape-window: 1rem;
+    --shape-row: 0.75rem;
+    --shape-round: 9999px;
+    --shape-call-row: 0px;
+    --shape-viewer-image: 12px;
+    --viewer-scrim: rgb(0 0 0 / 85%);
+    --viewer-osd-background: rgb(0 0 0 / 30%);
+    --viewer-osd-hover-background: rgb(0 0 0 / 50%);
+    --viewer-osd-foreground: white;
+    --viewer-image-shadow: 0 25px 50px -12px rgb(0 0 0 / 50%);
+    --header-h: 4rem;
+    --titlebar-h: 3rem;
+    --shape-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -81,6 +109,16 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    --palette-background: oklch(1 0 0);
+    --palette-foreground: oklch(0.145 0 0);
+    --palette-card: oklch(1 0 0);
+    --palette-card-foreground: oklch(0.145 0 0);
+    --palette-muted: oklch(0.97 0 0);
+    --palette-muted-foreground: oklch(0.556 0 0);
+    --palette-border: oklch(0.922 0 0);
+    --palette-input: oklch(0.922 0 0);
+    --palette-sidebar: oklch(0.985 0 0);
+    --palette-sidebar-border: oklch(0.922 0 0);
 }
 
 .dark {
@@ -115,6 +153,154 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+}
+
+:root[data-style="adwaita"] {
+    /* shadcn controls use `rounded-md` = radius - 2px, so 11px gives 9px */
+    --radius: 0.6875rem;
+    --shape-group: 12px;
+    --shape-card: 12px;
+    --shape-bubble: 12px;
+    --shape-button: 9px;
+    --shape-input: 9px;
+    --shape-popover: 15px;
+    --shape-window: 15px;
+    --shape-window-control: 9999px;
+    --shape-bubble-tail: 4px;
+    --shape-scrollbar-thumb: 8px;
+    --shape-round: 9999px;
+    --shape-row: 6px;
+    --shape-call-row: 6px;
+    --shape-toggle-selected: 6px;
+    --header-h: 46px;
+    --titlebar-h: 46px;
+    --shape-shadow: none;
+
+    --adw-window: var(--palette-background);
+    --adw-pinned-banner: color-mix(in oklab, var(--adw-window) 70%, #7d7d83 30%);
+    --adw-view: color-mix(in oklab, var(--palette-background) 96%, black);
+    --adw-sidebar: color-mix(in oklab, var(--palette-background) 94%, white);
+    --adw-secondary-sidebar: color-mix(in oklab, var(--palette-background) 97%, white);
+    --adw-headerbar: color-mix(in oklab, var(--palette-background) 92%, white);
+    --adw-card: color-mix(in oklab, var(--palette-foreground) 8%, var(--adw-view));
+    --adw-dialog: color-mix(in oklab, var(--adw-sidebar) 98%, white);
+    --adw-popover: color-mix(in oklab, var(--adw-sidebar) 98%, white);
+    --adw-window-backdrop: var(--palette-background);
+    --adw-view-backdrop: color-mix(in oklab, var(--palette-background) 96%, black);
+    --adw-card-backdrop: var(--adw-card);
+    --adw-dialog-backdrop: var(--adw-dialog);
+    --adw-popover-backdrop: var(--adw-popover);
+    --adw-sidebar-backdrop: color-mix(in oklab, var(--palette-background) 96%, black);
+    --adw-secondary-sidebar-backdrop: color-mix(in oklab, var(--palette-background) 97%, black);
+    --adw-headerbar-backdrop: color-mix(in oklab, var(--palette-background) 96%, black);
+    --adw-background: var(--adw-view);
+    --adw-muted: var(--adw-secondary-sidebar);
+    --adw-muted-foreground: color-mix(in srgb, var(--palette-foreground) 50%, transparent);
+    --adw-border: color-mix(in srgb, var(--palette-foreground) 15%, transparent);
+    --adw-card-shade: color-mix(in srgb, var(--palette-foreground) 8%, transparent);
+    --adw-sidebar-border: color-mix(in srgb, black 36%, transparent);
+    --adw-input: color-mix(in srgb, var(--palette-foreground) 10%, var(--adw-window));
+    --adw-tint-03: color-mix(in srgb, var(--palette-foreground) 3%, transparent);
+    --adw-tint-05: color-mix(in srgb, var(--palette-foreground) 5%, transparent);
+    --adw-tint-08: color-mix(in srgb, var(--palette-foreground) 8%, transparent);
+    --adw-tint-10: color-mix(in srgb, var(--palette-foreground) 10%, transparent);
+    --adw-tint-15: color-mix(in srgb, var(--palette-foreground) 15%, transparent);
+    --adw-tint-20: color-mix(in srgb, var(--palette-foreground) 20%, transparent);
+    --adw-tint-25: color-mix(in srgb, var(--palette-foreground) 25%, transparent);
+    --adw-tint-225: color-mix(in srgb, var(--palette-foreground) 22.5%, transparent);
+    --adw-tint-30: color-mix(in srgb, var(--palette-foreground) 30%, transparent);
+    --adw-active-toggle-bg: color-mix(in srgb, var(--palette-foreground) 20%, var(--adw-view));
+    --adw-control-border: transparent;
+    --adw-control-height: 34px;
+    --adw-checkbox-size: 22px;
+    --adw-radio-size: 22px;
+    --adw-radio-ring: 2px;
+    --adw-radio-dot-border: 7px;
+    --adw-scrollbar-size: 8px;
+    --adw-input-padding-x: 9px;
+    --adw-input-padding-y: 8px;
+    --adw-menu-padding-x: 12px;
+    --adw-menu-padding-y: 6px;
+    --adw-tooltip-padding-x: 10px;
+    --adw-tooltip-padding-y: 6px;
+    --adw-chat-row-min-height: 54px;
+    --adw-chat-row-padding-x: 16px;
+    --adw-chat-row-padding-y: 10px;
+    --adw-tooltip-background: rgb(0 0 0 / 80%);
+    --adw-tooltip-foreground: white;
+    --adw-tooltip-border: rgb(255 255 255 / 10%);
+    --adw-toast-border: rgb(255 255 255 / 10%);
+    --adw-control-thumb-background: white;
+    --adw-window-control-fill: color-mix(in srgb, currentColor 10%, transparent);
+    --adw-window-control-hover-fill: color-mix(in srgb, currentColor 15%, transparent);
+    --adw-icon-button-size: 34px;
+    --adw-control-padding-x: 10px;
+    --adw-control-padding-y: 5px;
+    --adw-switch-width: 40px;
+    --adw-switch-height: 24px;
+    --adw-switch-thumb-size: 20px;
+    --adw-slider-track-size: 4px;
+    --adw-slider-thumb-size: 20px;
+    --adw-chat-avatar-size: 44px;
+    --adw-spacing-unit: 6px;
+    --adw-ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    --adw-transition-duration: 200ms;
+    --adw-control-transition: all var(--adw-transition-duration) var(--adw-ease);
+    --adw-focus-outline-color: color-mix(in srgb, var(--primary) 50%, transparent);
+    --adw-focus-outline-width: 2px;
+    --adw-focus-outline-offset: -2px;
+    --adw-toast-background: #505053;
+    --adw-toast-foreground: white;
+    --adw-toast-radius: 150px;
+    --adw-scrim: rgb(0 0 0 / 50%);
+    --adw-shadow-low: 0 1px color-mix(in srgb, var(--adw-headerbar-shade) 50%, transparent), 0 2px 4px color-mix(in srgb, var(--adw-headerbar-shade) 50%, transparent);
+    --adw-shadow-medium: 0 0 0 1px rgb(0 0 6 / 3%), 0 1px 3px 1px rgb(0 0 6 / 7%), 0 2px 6px 2px rgb(0 0 6 / 3%);
+    --adw-shadow-high: 0 0 14px 2px rgb(0 0 6 / 3%), 0 0 5px 2px rgb(0 0 6 / 10%), 0 0 0 1px rgb(0 0 6 / 5%);
+    --adw-headerbar-shade: color-mix(in srgb, black 18%, transparent);
+    --adw-headerbar-foreground: var(--foreground);
+}
+
+
+:root[data-style="adwaita"]:not(.dark) {
+    --adw-view: color-mix(in oklab, var(--palette-background) 96%, white);
+    --adw-sidebar: color-mix(in oklab, var(--palette-background) 94%, black);
+    --adw-secondary-sidebar: color-mix(in oklab, var(--palette-background) 97%, black);
+    --adw-headerbar: color-mix(in oklab, var(--palette-background) 92%, white);
+    --adw-card: color-mix(in oklab, var(--palette-background) 96%, white);
+    --adw-dialog: color-mix(in oklab, var(--adw-sidebar) 98%, white);
+    --adw-popover: color-mix(in oklab, var(--adw-sidebar) 98%, white);
+    --adw-window-backdrop: var(--palette-background);
+    --adw-view-backdrop: color-mix(in oklab, var(--palette-background) 96%, white);
+    --adw-card-backdrop: var(--adw-card);
+    --adw-dialog-backdrop: var(--adw-dialog);
+    --adw-popover-backdrop: var(--adw-popover);
+    --adw-sidebar-backdrop: color-mix(in oklab, var(--palette-background) 96%, white);
+    --adw-secondary-sidebar-backdrop: color-mix(in oklab, var(--palette-background) 97%, white);
+    --adw-headerbar-backdrop: color-mix(in oklab, var(--palette-background) 96%, white);
+    --adw-sidebar-border: color-mix(in srgb, var(--palette-foreground) 7%, transparent);
+    --adw-active-toggle-bg: color-mix(in srgb, white 94%, var(--adw-view));
+    --adw-headerbar-shade: color-mix(in srgb, black 9%, transparent);
+}
+
+:root[data-style="adwaita"]:not(.app-focused) {
+    --adw-headerbar: var(--adw-headerbar-backdrop);
+    --adw-sidebar: var(--adw-sidebar-backdrop);
+    --adw-secondary-sidebar: var(--adw-secondary-sidebar-backdrop);
+    --adw-headerbar-foreground: var(--adw-muted-foreground);
+}
+
+:root[data-style="adwaita"] {
+    --font-sans: "Adwaita Sans", Cantarell, system-ui, sans-serif;
+    --radius: 0.6875rem;
+    --adw-caption-size: 0.82rem;
+    --adw-caption-opacity: 50%;
+    --adw-body-size: 1rem;
+    --adw-heading-size: 1rem;
+    --adw-title-4-size: 1.18rem;
+    --adw-title-3-size: 1.36rem;
+    --adw-title-2-size: 1.36rem;
+    --adw-heading-weight: 700;
+    --adw-title-2-weight: 800;
 }
 
 @layer base {
@@ -272,4 +458,659 @@ div[class*="language-"] {
 @keyframes status-progress {
   from { width: 0; }
   to { width: 100%; }
+}
+
+:root [data-call-item] {
+  border-radius: var(--shape-call-row);
+}
+
+:root [data-image-viewer-osd] {
+  border-radius: var(--shape-round);
+  color: var(--viewer-osd-foreground);
+  background-color: var(--viewer-osd-background);
+}
+
+:root [data-image-viewer-osd]:hover {
+  background-color: var(--viewer-osd-hover-background);
+}
+
+/* GTK-style overrides are deliberately isolated; the default style keeps the existing cascade. */
+:root[data-style="adwaita"] body {
+  font-family: var(--font-sans);
+  background-color: var(--adw-window);
+}
+
+:root[data-style="adwaita"] [data-settings-section-title] {
+  color: var(--foreground);
+  font-size: var(--adw-title-4-size);
+  font-weight: var(--adw-heading-weight);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+:root[data-style="adwaita"] .text-xs.text-muted-foreground {
+  color: color-mix(in srgb, var(--foreground) var(--adw-caption-opacity), transparent);
+  font-size: var(--adw-caption-size);
+}
+
+:root[data-style="adwaita"] button,
+:root[data-style="adwaita"] [role="button"] {
+  border-radius: var(--shape-button);
+  transition-duration: var(--adw-transition-duration);
+  transition-timing-function: var(--adw-ease);
+}
+
+:root[data-style="adwaita"] [data-slot="button"] {
+  border-radius: var(--shape-button);
+  border-color: var(--adw-control-border);
+  box-shadow: none;
+  font-weight: 700;
+  transition-duration: var(--adw-transition-duration);
+  transition-timing-function: var(--adw-ease);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-size="default"]:not([data-custom-height="true"]) {
+  height: var(--adw-control-height);
+  min-height: var(--adw-control-height);
+  padding-block: var(--adw-control-padding-y);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-size="default"]:not([data-custom-width="true"]) {
+  padding-inline: var(--adw-control-padding-x);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-size="sm"],
+:root[data-style="adwaita"] [data-slot="button"][data-size="xs"],
+:root[data-style="adwaita"] [data-slot="button"][data-size="lg"] {
+  height: var(--adw-control-height);
+  min-height: var(--adw-control-height);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-size^="icon"] {
+  width: var(--adw-icon-button-size);
+  height: var(--adw-icon-button-size);
+  min-width: var(--adw-icon-button-size);
+  min-height: var(--adw-icon-button-size);
+  padding: 0;
+}
+
+:root[data-style="adwaita"] [data-adw-round-control] {
+  border-radius: var(--shape-round);
+}
+
+:root[data-style="adwaita"] button:not([data-slot="button"]):has(> svg:only-child),
+:root[data-style="adwaita"] [data-adw-icon-button] {
+  width: var(--adw-icon-button-size);
+  height: var(--adw-icon-button-size);
+  padding: 0;
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="default"]:not([data-custom-background="true"]) {
+  color: var(--accent-foreground);
+  background-color: var(--accent);
+  border-color: transparent;
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="default"]:not([data-custom-background="true"]):hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--accent) 95%, black);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="default"]:not([data-custom-background="true"]):active:not(:disabled) {
+  background-color: color-mix(in srgb, var(--accent) 70%, black);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="outline"]:not([data-custom-background="true"]),
+:root[data-style="adwaita"] [data-slot="button"][data-variant="secondary"]:not([data-custom-background="true"]) {
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+  border-color: transparent;
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="outline"]:not([data-custom-background="true"]):hover:not(:disabled),
+:root[data-style="adwaita"] [data-slot="button"][data-variant="secondary"]:not([data-custom-background="true"]):hover:not(:disabled),
+:root[data-style="adwaita"] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) {
+  background-color: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="outline"]:not([data-custom-background="true"]):active:not(:disabled),
+:root[data-style="adwaita"] [data-slot="button"][data-variant="secondary"]:not([data-custom-background="true"]):active:not(:disabled),
+:root[data-style="adwaita"] [data-slot="button"][data-variant="ghost"]:active:not(:disabled) {
+  background-color: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="ghost"]:not([data-custom-background="true"]) {
+  background-color: transparent;
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="destructive"]:not([data-custom-background="true"]) {
+  color: var(--destructive);
+  background-color: color-mix(in srgb, currentColor 15%, transparent);
+  border-color: transparent;
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="destructive"]:not([data-custom-background="true"]):hover:not(:disabled) {
+  background-color: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+:root[data-style="adwaita"] [data-slot="button"][data-variant="destructive"]:not([data-custom-background="true"]):active:not(:disabled) {
+  background-color: color-mix(in srgb, currentColor 35%, transparent);
+}
+
+:root[data-style="adwaita"] [data-slot="button"]:disabled {
+  opacity: 0.5;
+}
+
+:root[data-style="adwaita"] :is(input, textarea, [data-slot="select-trigger"]) {
+  border-radius: var(--shape-input);
+  border-width: 0;
+  background-color: var(--adw-input);
+  box-shadow: none;
+  transition: color var(--adw-transition-duration) var(--adw-ease),
+    background-color var(--adw-transition-duration) var(--adw-ease),
+    outline-color var(--adw-transition-duration) var(--adw-ease),
+    box-shadow var(--adw-transition-duration) var(--adw-ease);
+}
+
+:root[data-style="adwaita"] [data-slot="input"],
+:root[data-style="adwaita"] [data-slot="select-trigger"] {
+  height: var(--adw-control-height);
+  min-height: var(--adw-control-height);
+}
+
+:root[data-style="adwaita"] [data-slot="textarea"] {
+  padding-block: var(--adw-input-padding-y);
+  padding-inline: var(--adw-input-padding-x);
+}
+
+:root[data-style="adwaita"] [data-slot="switch"] {
+  width: var(--adw-switch-width);
+  height: var(--adw-switch-height);
+  border: 0;
+  border-radius: var(--shape-round);
+  background-color: var(--adw-tint-15);
+  box-shadow: none;
+  transition: background-color 100ms var(--adw-ease);
+}
+
+:root[data-style="adwaita"] [data-slot="switch"]:hover:not(:disabled) {
+  background-color: var(--adw-tint-225);
+}
+
+:root[data-style="adwaita"] [data-slot="switch"]:active:not(:disabled) {
+  background-color: var(--adw-tint-08);
+}
+
+:root[data-style="adwaita"] [data-slot="switch"][data-state="checked"] {
+  background-color: var(--accent);
+}
+
+:root[data-style="adwaita"] [data-slot="switch-thumb"] {
+  width: var(--adw-switch-thumb-size);
+  height: var(--adw-switch-thumb-size);
+  background-color: var(--adw-control-thumb-background);
+  border-radius: var(--shape-round);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 20%);
+  transition: transform 100ms var(--adw-ease);
+}
+
+:root[data-style="adwaita"] [data-slot="slider-track"] {
+  border-radius: var(--adw-slider-track-size);
+}
+
+:root[data-style="adwaita"] [data-slot="slider"][data-orientation="horizontal"] [data-slot="slider-track"] {
+  height: var(--adw-slider-track-size);
+}
+
+:root[data-style="adwaita"] [data-slot="slider"][data-orientation="vertical"] [data-slot="slider-track"] {
+  width: var(--adw-slider-track-size);
+}
+
+:root[data-style="adwaita"] [data-slot="slider-range"] {
+  background-color: var(--accent);
+}
+
+:root[data-style="adwaita"] [data-slot="slider-thumb"] {
+  width: var(--adw-slider-thumb-size);
+  height: var(--adw-slider-thumb-size);
+  border: 0;
+  border-radius: var(--shape-round);
+  background: var(--adw-control-thumb-background);
+  box-shadow: 0 0 0 1px rgb(0 0 6 / 10%), 0 2px 4px rgb(0 0 6 / 20%);
+}
+
+:root[data-style="adwaita"] [data-slot="toggle-group"] {
+  gap: 0;
+  padding: 3px;
+  border-radius: var(--shape-button);
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+:root[data-style="adwaita"] [data-slot="toggle-group-item"],
+:root[data-style="adwaita"] [data-slot="toggle"],
+:root[data-style="adwaita"] [data-slot="tabs-trigger"] {
+  border-radius: var(--shape-button);
+  box-shadow: none;
+  transition-duration: var(--adw-transition-duration);
+  transition-timing-function: var(--adw-ease);
+}
+
+:root[data-style="adwaita"] [data-slot="toggle-group-item"][data-state="on"] {
+  border-radius: var(--shape-toggle-selected);
+}
+
+:root[data-style="adwaita"] [data-slot="toggle-group-item"][data-state="on"],
+:root[data-style="adwaita"] [data-slot="toggle"][data-state="on"],
+:root[data-style="adwaita"] [data-slot="tabs-trigger"][data-state="active"] {
+  color: var(--foreground);
+  background-color: var(--adw-active-toggle-bg);
+  box-shadow: var(--adw-shadow-medium);
+}
+
+:root[data-style="adwaita"] [data-slot="toggle-group-item"]:not([data-state="on"]):hover,
+:root[data-style="adwaita"] [data-slot="toggle"]:not([data-state="on"]):hover,
+:root[data-style="adwaita"] [data-slot="tabs-trigger"]:not([data-state="active"]):hover {
+  background-color: var(--adw-tint-05);
+}
+
+:root[data-style="adwaita"] [data-slot="tabs-list"]:not([data-variant="line"]) {
+  height: auto;
+  padding: 3px;
+  border-radius: var(--shape-button);
+  background-color: var(--adw-tint-10);
+}
+
+:root[data-style="adwaita"] [data-slot="checkbox"] {
+  width: var(--adw-checkbox-size);
+  height: var(--adw-checkbox-size);
+  border-radius: var(--shape-button);
+  border-color: var(--adw-border);
+  box-shadow: none;
+}
+
+:root[data-style="adwaita"] [data-slot="radio-group-item"] {
+  width: var(--adw-radio-size);
+  height: var(--adw-radio-size);
+  border: var(--adw-radio-ring) solid var(--adw-tint-25);
+  box-shadow: none;
+}
+
+:root[data-style="adwaita"] [data-slot="radio-group-item"][data-state="checked"] {
+  border-width: var(--adw-radio-dot-border);
+  border-color: var(--accent);
+  background-color: var(--adw-control-thumb-background);
+}
+
+:root[data-style="adwaita"] [data-slot="radio-group-item"][data-state="checked"] [data-slot="radio-group-indicator"] {
+  display: none;
+}
+
+:root[data-style="adwaita"] [data-slot="checkbox"][data-state="checked"] {
+  border-color: var(--accent);
+  color: var(--accent-foreground);
+  background-color: var(--accent);
+}
+
+:root[data-style="adwaita"] [data-slot="card"] {
+  border-radius: var(--shape-card);
+  border-color: var(--adw-border);
+  background-color: var(--adw-card);
+  box-shadow: var(--adw-shadow-medium);
+}
+
+:root[data-style="adwaita"] [data-slot="alert"] {
+  border-color: var(--adw-border);
+  border-radius: var(--shape-card);
+  background-color: var(--adw-card);
+}
+
+:root[data-style="adwaita"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"], [data-slot="sheet-content"], [data-slot="drawer-content"]) {
+  border-radius: var(--shape-popover);
+  border-color: var(--adw-border);
+  background-color: var(--adw-dialog);
+  box-shadow: var(--adw-shadow-high);
+}
+
+:root[data-style="adwaita"] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"], [data-slot="drawer-overlay"]) {
+  background-color: var(--adw-scrim);
+}
+
+:root[data-style="adwaita"] :is([data-slot="popover-content"], [data-slot="hover-card-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="context-menu-content"], [data-slot="context-menu-sub-content"], [data-slot="select-content"], [data-slot="combobox-content"], [data-slot="menubar-content"]) {
+  border-radius: var(--shape-popover);
+  border-color: var(--adw-border);
+  background-color: var(--adw-popover);
+  box-shadow: var(--adw-shadow-high);
+}
+
+:root[data-style="adwaita"] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="context-menu-item"], [data-slot="context-menu-checkbox-item"], [data-slot="context-menu-radio-item"], [data-slot="context-menu-sub-trigger"], [data-slot="select-item"], [data-slot="menubar-item"]) {
+  border-radius: var(--shape-button);
+  padding-block: var(--adw-menu-padding-y);
+  padding-inline: var(--adw-menu-padding-x);
+}
+
+:root[data-style="adwaita"] :is([data-slot="dropdown-menu-item"], [data-slot="context-menu-item"], [data-slot="select-item"], [data-slot="menubar-item"]):is(:hover, :focus, [data-highlighted]) {
+  color: var(--foreground);
+  background-color: var(--adw-tint-05);
+}
+
+:root[data-style="adwaita"] [data-slot="tooltip-content"] {
+  border: 1px solid var(--adw-tooltip-border);
+  border-radius: var(--shape-button);
+  padding: var(--adw-tooltip-padding-y) var(--adw-tooltip-padding-x);
+  color: var(--adw-tooltip-foreground);
+  background-color: var(--adw-tooltip-background);
+  box-shadow: none;
+}
+
+:root[data-style="adwaita"] [data-slot="tooltip-arrow"] {
+  color: var(--adw-tooltip-background);
+  background-color: var(--adw-tooltip-background);
+  fill: var(--adw-tooltip-background);
+}
+
+:root[data-style="adwaita"] :is([data-slot="dialog-close"], [data-slot="sheet-close"]) {
+  display: grid;
+  width: var(--adw-icon-button-size);
+  height: var(--adw-icon-button-size);
+  place-items: center;
+  border-radius: var(--shape-button);
+}
+
+:root[data-style="adwaita"] .toaster {
+  --normal-bg: var(--adw-toast-background);
+  --normal-text: var(--adw-toast-foreground);
+  --normal-border: var(--adw-toast-border);
+  --border-radius: var(--adw-toast-radius);
+}
+
+:root[data-style="adwaita"] [data-sidebar-container],
+:root[data-style="adwaita"] [data-navigation-sidebar] {
+  background-color: var(--adw-sidebar);
+  border-color: var(--adw-sidebar-border);
+}
+
+:root[data-style="adwaita"] [data-chat-sidebar] {
+  background-color: var(--adw-secondary-sidebar);
+  border-color: var(--adw-sidebar-border);
+}
+
+:root[data-style="adwaita"] [data-slot="sheet-header"] {
+  min-height: var(--header-h);
+  color: var(--adw-headerbar-foreground);
+  background-color: var(--adw-headerbar);
+  border-bottom: 1px solid var(--adw-border);
+}
+
+:root[data-style="adwaita"] :is([data-chat-list-header], [data-chat-header], [data-app-titlebar], [data-call-list-header], [data-channel-header]) {
+  color: var(--adw-headerbar-foreground);
+  background-color: var(--adw-headerbar);
+  border-color: var(--adw-border);
+  box-shadow: 0 1px 0 var(--adw-headerbar-shade);
+}
+
+:root[data-style="adwaita"] :is([data-chat-list-header], [data-call-list-header]) {
+  min-height: var(--header-h);
+}
+
+:root[data-style="adwaita"] [data-channel-header] {
+  height: var(--header-h);
+  min-height: var(--header-h);
+  backdrop-filter: none;
+}
+
+:root[data-style="adwaita"] [data-main-chat] {
+  background-color: var(--adw-view);
+}
+
+:root[data-style="adwaita"] [data-chat-sidebar] [data-sidebar-scroll] {
+  background-color: var(--adw-secondary-sidebar);
+}
+
+:root[data-style="adwaita"] [data-chat-item] > button {
+  min-height: var(--adw-chat-row-min-height);
+  padding: var(--adw-chat-row-padding-y) var(--adw-chat-row-padding-x);
+  border-radius: var(--shape-row);
+  box-shadow: none;
+  transition: background-color var(--adw-transition-duration) var(--adw-ease);
+}
+
+:root[data-style="adwaita"] [data-chat-item] [data-slot="avatar"] {
+  width: var(--adw-chat-avatar-size);
+  height: var(--adw-chat-avatar-size);
+}
+
+:root[data-style="adwaita"] [data-chat-item] > button:hover {
+  background-color: var(--adw-tint-05);
+}
+
+:root[data-style="adwaita"] [data-chat-item] > button[data-selected="true"] {
+  color: var(--foreground);
+  background-color: var(--adw-tint-10);
+}
+
+:root[data-style="adwaita"] [data-chat-item] > button:not([data-selected="true"]):active {
+  background-color: var(--adw-tint-08);
+  transform: none;
+}
+
+:root[data-style="adwaita"] [data-chat-item] [data-adw-active-indicator] {
+  display: none;
+}
+
+:root[data-style="adwaita"] [data-navigation-sidebar] button:not([data-selected="true"]):hover {
+  color: var(--foreground);
+  background-color: var(--adw-tint-05);
+  box-shadow: none;
+  transform: none;
+}
+
+:root[data-style="adwaita"] [data-navigation-sidebar] button:active {
+  background-color: var(--adw-tint-08);
+  box-shadow: none;
+  transform: none;
+}
+
+:root[data-style="adwaita"] [data-navigation-sidebar] button[data-selected="true"] {
+  color: var(--foreground);
+  background-color: var(--adw-tint-10);
+  box-shadow: none;
+  transform: none;
+}
+
+:root[data-style="adwaita"] [data-navigation-sidebar] button[data-selected="true"] [data-adw-active-indicator] {
+  display: none;
+}
+
+:root[data-style="adwaita"] [data-main-chat] [data-chat-header] {
+  height: var(--header-h);
+  min-height: var(--header-h);
+  backdrop-filter: none;
+}
+
+:root[data-style="adwaita"] [data-chat-composer] {
+  background-color: var(--adw-window);
+  border-color: var(--adw-border);
+  backdrop-filter: none;
+}
+
+:root[data-style="adwaita"] [data-pinned-banner] {
+  background-color: var(--adw-pinned-banner);
+  padding: var(--adw-spacing-unit);
+}
+
+:root[data-style="adwaita"] [data-pinned-banner] > button:first-child {
+  padding: 0;
+}
+
+:root[data-style="adwaita"] [data-pinned-banner] > button:first-child:hover {
+  background-color: transparent;
+}
+
+:root[data-style="adwaita"] [data-pinned-banner] > button:last-child {
+  margin-right: 0;
+  padding: var(--adw-spacing-unit);
+}
+
+:root[data-style="adwaita"] [data-pinned-banner] p {
+  font-weight: 700;
+}
+
+:root[data-style="adwaita"] [data-message-bubble] {
+  border-radius: var(--shape-bubble);
+  box-shadow: none;
+}
+
+:root[data-style="adwaita"] [data-message-bubble][data-message-owner="outgoing"]:not([data-message-failed="true"]) {
+  color: var(--foreground);
+  background-color: color-mix(in srgb, var(--accent) 20%, var(--adw-view));
+  border-top-right-radius: var(--shape-bubble-tail);
+}
+
+:root[data-style="adwaita"] [data-message-bubble][data-message-owner="incoming"] {
+  color: var(--foreground);
+  background-color: var(--adw-card);
+  border-top-left-radius: var(--shape-bubble-tail);
+}
+
+:root[data-style="adwaita"] [data-chat-typing] {
+  border-radius: var(--shape-bubble);
+  border-color: var(--adw-border);
+  background-color: var(--adw-card);
+  box-shadow: none;
+}
+
+:root[data-style="adwaita"] [data-window-controls] button {
+  border-radius: var(--shape-window-control);
+  background-color: var(--adw-window-control-fill);
+}
+
+:root[data-style="adwaita"] [data-window-controls] button:hover {
+  background-color: var(--adw-window-control-hover-fill);
+}
+
+:root[data-style="adwaita"] :is(button, [role="button"], input, textarea, select) {
+  outline: var(--adw-focus-outline-width) solid transparent;
+  outline-offset: var(--adw-focus-outline-offset);
+  transition: var(--adw-control-transition);
+}
+
+:root[data-style="adwaita"] :focus-visible {
+  outline-color: var(--adw-focus-outline-color);
+  outline-offset: var(--adw-focus-outline-offset);
+  box-shadow: none;
+}
+
+:root[data-style="adwaita"].app-focused ::selection {
+  color: var(--foreground);
+  background-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+:root[data-style="adwaita"]:not(.app-focused) ::selection {
+  color: var(--foreground);
+  background-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+:root[data-style="adwaita"] ::-webkit-scrollbar {
+  width: var(--adw-scrollbar-size);
+  height: var(--adw-scrollbar-size);
+}
+
+:root[data-style="adwaita"] ::-webkit-scrollbar-thumb {
+  border-radius: var(--shape-scrollbar-thumb);
+  background-color: color-mix(in srgb, var(--foreground) 20%, transparent);
+  transition: background-color 200ms linear;
+}
+
+:root[data-style="adwaita"] ::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--foreground) 40%, transparent);
+}
+
+:root[data-style="adwaita"] ::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--foreground) 60%, transparent);
+}
+
+:root[data-style="adwaita"] * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 20%, transparent) transparent;
+}
+
+:root[data-style="adwaita"] .rounded-xl {
+  border-radius: var(--shape-card);
+  clip-path: inset(0 round var(--shape-card));
+  -webkit-clip-path: inset(0 round var(--shape-card));
+}
+
+:root[data-style="adwaita"] [data-slot="boxed-list"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--adw-border);
+  border-radius: var(--shape-card);
+  background-color: var(--adw-card);
+  box-shadow: var(--adw-shadow-medium);
+}
+
+:root[data-style="adwaita"] [data-slot="boxed-list"] > * {
+  min-height: var(--adw-chat-row-min-height);
+  margin-block: 0;
+  padding: var(--adw-chat-row-padding-y) var(--adw-chat-row-padding-x);
+  border-radius: 0;
+  background-color: transparent;
+}
+
+:root[data-style="adwaita"] [data-slot="boxed-list"] > * + * {
+  margin-block-start: 0;
+  border-block-start: 1px solid var(--adw-card-shade);
+}
+
+:root[data-style="adwaita"] [data-slot="boxed-list"] > :hover:not(:disabled) {
+  background-color: var(--adw-tint-03);
+}
+
+:root[data-style="adwaita"] [data-slot="boxed-list"] > [data-selected="true"] {
+  background-color: var(--adw-tint-08);
+}
+
+:root[data-style="adwaita"] [data-slot="boxed-list"] > :first-child {
+  border-start-start-radius: var(--shape-card);
+  border-start-end-radius: var(--shape-card);
+}
+
+:root[data-style="adwaita"] [data-slot="boxed-list"] > :last-child {
+  border-end-start-radius: var(--shape-card);
+  border-end-end-radius: var(--shape-card);
+}
+
+:root[data-style="adwaita"] [data-call-item]:hover:not(:disabled) {
+  background-color: var(--adw-tint-03);
+}
+
+:root[data-style="adwaita"] [data-call-item]:active {
+  transform: none;
+}
+
+:root[data-style="adwaita"] [data-call-item][data-selected="true"] {
+  background-color: var(--adw-tint-08);
+  box-shadow: none;
+  transform: none;
+}
+
+:root[data-style="adwaita"] [data-call-item][data-selected="true"] [data-call-selection-indicator] {
+  display: none;
+}
+
+:root[data-style="adwaita"] [data-app-window] {
+  border-radius: var(--shape-window);
+  background-color: var(--adw-window);
+  clip-path: inset(0 round var(--shape-window));
+  -webkit-clip-path: inset(0 round var(--shape-window));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="adwaita"] *,
+  :root[data-style="adwaita"] *::before,
+  :root[data-style="adwaita"] *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+  }
 }

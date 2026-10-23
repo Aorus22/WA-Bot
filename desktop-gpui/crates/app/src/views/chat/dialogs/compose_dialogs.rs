@@ -1,3 +1,5 @@
+use crate::theme::shape::ShapeExt;
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
@@ -28,7 +30,9 @@ impl ChatView {
             }
             self.dialog_fields.insert(key.to_string(), field);
         }
-        self.dialog_fields[key].element(theme, None).into_any_element()
+        self.dialog_fields[key]
+                    .element(theme, cx.shape(), None)
+                    .into_any_element()
     }
 
     fn dialog_value(&self, key: &str) -> String {
@@ -112,6 +116,7 @@ impl ChatView {
         border_color: Hsla,
         text_color: Hsla,
         primary_color: Hsla,
+        shape: crate::theme::shape::ShapeTokens,
         handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         div()
@@ -119,6 +124,7 @@ impl ChatView {
             .px_4()
             .py_2()
             .rounded_xl()
+            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
             .border_1()
             .border_color(if primary { primary_color } else { border_color })
             .bg(if primary { primary_color } else { rgba(0x00000000).into() })
@@ -143,6 +149,11 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let dialog = self.compose_dialog?;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let scrim = if shape.adwaita { surface.scrim } else { surface.scrim_default };
+        let dialog_bg = if shape.adwaita { surface.dialog } else { card_bg };
+        let dialog_border = if shape.adwaita { surface.border } else { border_color };
         let busy = self.is_sending_attachment;
 
         let (title, body, action_label): (&str, Vec<AnyElement>, &str) = match dialog {
@@ -189,7 +200,7 @@ impl ChatView {
                     })
                     .collect();
 
-                let at_max = self.poll_draft.options.len() >= crate::components::compose::POLL_MAX_OPTIONS;
+                let at_max = self.poll_draft.options.len() >= POLL_MAX_OPTIONS;
                 let mut body: Vec<AnyElement> = vec![self.dialog_field_row("poll-question", "Pertanyaan", &theme, window, cx)];
                 body.extend(options);
                 body.push(
@@ -199,8 +210,9 @@ impl ChatView {
                         .px_3()
                         .py_1p5()
                         .rounded_lg()
+                        .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
                         .border_1()
-                        .border_color(border_color)
+                        .border_color(dialog_border)
                         .text_xs()
                         .text_color(if at_max { muted_text } else { primary_color })
                         .child("+ Tambah opsi")
@@ -213,7 +225,7 @@ impl ChatView {
                 body.push(Self::dialog_toggle_row(
                     "Izinkan jawaban ganda",
                     self.poll_draft.multi_select,
-                    border_color,
+                    dialog_border,
                     text_color,
                     primary_color,
                     cx.listener(|this, _, _, cx| {
@@ -240,7 +252,7 @@ impl ChatView {
                     Self::dialog_toggle_row(
                         "Bagikan lokasi live",
                         self.location_draft.live,
-                        border_color,
+                        dialog_border,
                         text_color,
                         primary_color,
                         cx.listener(|this, _, _, cx| {
@@ -271,7 +283,7 @@ impl ChatView {
                 .absolute()
                 .occlude()
                 .inset_0()
-                .bg(rgba(0x00000088))
+                .bg(scrim)
                 .flex()
                 .items_center()
                 .justify_center()
@@ -281,10 +293,12 @@ impl ChatView {
                         .p_5()
                         .gap_3()
                         .rounded_2xl()
-                        .bg(card_bg)
+                        .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                        .bg(dialog_bg)
                         .border_1()
-                        .border_color(border_color)
-                        .shadow_2xl()
+                        .border_color(dialog_border)
+                        .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
+                        .when(shape.adwaita, |dialog| dialog.shadow_md())
                         .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
                             if ev.keystroke.key.as_str() == "escape" {
                                 this.close_compose_dialog(cx);
@@ -295,6 +309,7 @@ impl ChatView {
                                 .w_full()
                                 .justify_between()
                                 .items_center()
+                                .when(shape.adwaita, |header| header.h(px(shape.header_height)).bg(surface.headerbar))
                                 .child(
                                     div()
                                         .text_lg()
@@ -306,7 +321,7 @@ impl ChatView {
                                     div()
                                         .cursor_pointer()
                                         .p_1()
-                                        .rounded_full()
+                                        .rounded(px(cx.shape().radius_button))
                                         .hover(move |s| s.bg(theme.muted.opacity(0.5)))
                                         .child(svg().data(X_SVG).size(px(15.0)).text_color(muted_text))
                                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
@@ -323,17 +338,19 @@ impl ChatView {
                                 .child(Self::dialog_button(
                                     "Batal".to_string(),
                                     false,
-                                    border_color,
+                                    dialog_border,
                                     text_color,
                                     primary_color,
+                                    shape,
                                     cx.listener(|this, _, _, cx| this.close_compose_dialog(cx)),
                                 ))
                                 .child(Self::dialog_button(
                                     if busy { "Mengirim…".to_string() } else { action_label.to_string() },
                                     true,
-                                    border_color,
+                                    dialog_border,
                                     text_color,
                                     primary_color,
+                                    shape,
                                     cx.listener(move |this, _, _, cx| submit(this, cx)),
                                 )),
                         ),

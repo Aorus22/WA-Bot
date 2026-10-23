@@ -22,7 +22,7 @@ export function PinnedBanner({ pins, fallbackName, onJump, onUnpin }: PinnedBann
 	const sender = message.from === "me" ? "You" : message.senderName || fallbackName || message.from.split("@")[0]
 
 	return (
-		<div className="flex items-center gap-1 border-b border-border/40 bg-background/80 backdrop-blur-xl z-10 shrink-0">
+		<div data-pinned-banner className="flex items-center gap-1 border-b border-border/40 bg-background/80 backdrop-blur-xl z-10 shrink-0">
 			<button
 				type="button"
 				onClick={() => {
@@ -53,7 +53,7 @@ export function PinnedBanner({ pins, fallbackName, onJump, onUnpin }: PinnedBann
 				onClick={() => onUnpin(current)}
 				title="Unpin message"
 				aria-label="Unpin message"
-				className="mr-2 p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+				className="mr-2 p-2 rounded-button text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
 			>
 				<PinOff className="h-4 w-4" />
 			</button>

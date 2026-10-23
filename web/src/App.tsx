@@ -89,6 +89,7 @@ function App() {
 			<CallProvider>
 				<HashRouter>
 					<div
+						data-app-window={isDesktop ? "" : undefined}
 						className={cn(
 							isDesktop && "h-screen w-full bg-background text-foreground relative",
 							isDesktop && windowState !== "maximized" && "rounded-xl shadow-lg overflow-hidden"

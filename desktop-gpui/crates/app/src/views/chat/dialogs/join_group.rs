@@ -1,3 +1,4 @@
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
@@ -12,13 +13,18 @@ impl ChatView {
         let primary_color = theme.primary;
         let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let scrim = if shape.adwaita { surface.scrim } else { surface.scrim_default };
+        let dialog_bg = if shape.adwaita { surface.dialog } else { card_bg };
+        let dialog_border = if shape.adwaita { surface.border } else { border_color };
         if self.is_join_group_open {
             Some(crate::components::motion::modal_in(
                 div()
                     .absolute()
                     .occlude()
                     .inset_0()
-                    .bg(rgba(0x00000088))
+                    .bg(scrim)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -27,22 +33,25 @@ impl ChatView {
                             .w(px(400.0))
                             .p_5()
                             .rounded_2xl()
-                            .bg(card_bg)
+                            .when(shape.adwaita, |dialog| dialog.rounded(px(shape.radius_popover)))
+                            .bg(dialog_bg)
                             .border_1()
-                            .border_color(border_color)
-                            .shadow_2xl()
+                            .border_color(dialog_border)
+                            .when(!shape.adwaita, |dialog| dialog.shadow_2xl())
+                            .when(shape.adwaita, |dialog| dialog.shadow_md())
                             .gap_4()
                             // Header
                             .child(
                                 h_flex()
                                     .justify_between()
                                     .items_center()
+                                    .when(shape.adwaita, |header| header.h(px(shape.header_height)).bg(surface.headerbar))
                                     .child(div().text_lg().font_weight(FontWeight::BOLD).text_color(text_color).child("Join group"))
                                     .child(
                                         div()
                                             .cursor_pointer()
                                             .p_1()
-                                            .rounded_full()
+                                            .rounded(px(cx.shape().radius_button))
                                             .hover(|s| s.bg(theme.muted.opacity(0.5)))
                                             .child(svg().data(X_SVG).size(px(16.0)).text_color(muted_text))
                                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
@@ -55,7 +64,7 @@ impl ChatView {
                                 div().text_xs().text_color(muted_text).child("Paste an invite link (chat.whatsapp.com/...)"),
                             )
                             // Invite Link Input
-                            .children(self.join_link_field.as_ref().map(|field| field.element(&theme, Some(LINK_SVG))))
+                            .children(self.join_link_field.as_ref().map(|field| field.element(&theme, cx.shape(), Some(LINK_SVG))))
                             // Actions
                             .child(
                                 h_flex()
@@ -67,8 +76,9 @@ impl ChatView {
                                             .px_4()
                                             .py_2()
                                             .rounded_xl()
+                                            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
                                             .border_1()
-                                            .border_color(border_color)
+                                            .border_color(dialog_border)
                                             .text_xs()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(text_color)
@@ -84,6 +94,7 @@ impl ChatView {
                                             .px_4()
                                             .py_2()
                                             .rounded_xl()
+                                            .when(shape.adwaita, |button| button.rounded(px(shape.radius_button)))
                                             .bg(primary_color)
                                             .text_xs()
                                             .font_weight(FontWeight::BOLD)

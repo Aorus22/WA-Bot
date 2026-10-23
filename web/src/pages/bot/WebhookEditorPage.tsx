@@ -216,7 +216,7 @@ export function WebhookEditorPage() {
 						variant="ghost"
 						size="icon"
 						onClick={handleBack}
-						className="rounded-full h-8 w-8 shrink-0 mt-0.5 -ml-1.5 text-muted-foreground hover:text-foreground"
+						className="rounded-button h-8 w-8 shrink-0 mt-0.5 -ml-1.5 text-muted-foreground hover:text-foreground"
 					>
 						<ArrowLeft className="h-4 w-4" />
 					</Button>

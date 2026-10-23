@@ -10,6 +10,8 @@ one, change the other in the same commit.** A backend change must be checked aga
 both. Read `docs/PARITY.md` before touching UI, settings, chat state or the API, and
 update it when you add a feature or an intentional difference.
 
+For GPUI component ownership, see [`docs/GPUI-COMPONENTS.md`](docs/GPUI-COMPONENTS.md).
+
 ## Workflow
 
 - Experiments go on `develop` (beta). Releases go to `main` (stable, with the updater).

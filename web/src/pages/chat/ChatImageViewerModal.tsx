@@ -44,7 +44,7 @@ export function ChatImageViewerModal({ open, onOpenChange: _onOpenChange, imageU
 			<div
 				className="absolute inset-0"
 				style={{
-					backgroundColor: "rgba(0,0,0,0.85)",
+					backgroundColor: "var(--viewer-scrim)",
 					opacity: ready ? 1 : 0,
 					transition: "opacity 300ms",
 				}}
@@ -77,9 +77,9 @@ export function ChatImageViewerModal({ open, onOpenChange: _onOpenChange, imageU
 							style={{
 								maxWidth: "95vw",
 								maxHeight: "90vh",
-								borderRadius: "12px",
+								borderRadius: "var(--shape-viewer-image)",
 								objectFit: "contain",
-								boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)",
+								boxShadow: "var(--viewer-image-shadow)",
 							}}
 							draggable={false}
 						/>
@@ -97,30 +97,39 @@ export function ChatImageViewerModal({ open, onOpenChange: _onOpenChange, imageU
 			>
 				{onFavorite && (
 					<button
+						data-adw-round-control=""
+						data-image-viewer-osd=""
 						onClick={() => onFavorite(imageUrl)}
-						className="p-2 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-md transition-colors"
+						className="p-2 backdrop-blur-md transition-colors"
 						title="Add to favorites"
 					>
 						<Star className="h-4 w-4" />
 					</button>
 				)}
 				<button
+					data-adw-round-control=""
+					data-image-viewer-osd=""
 					onClick={() => window.open(imageUrl, '_blank')}
-					className="p-2 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-md transition-colors"
+					className="p-2 backdrop-blur-md transition-colors"
 				>
 					<ExternalLink className="h-4 w-4" />
 				</button>
 				<a
+					data-adw-round-control=""
+					data-adw-icon-button=""
+					data-image-viewer-osd=""
 					href={imageUrl}
 					download
-					className="p-2 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-md transition-colors"
+					className="p-2 backdrop-blur-md transition-colors"
 					onClick={(e) => e.stopPropagation()}
 				>
 					<Download className="h-4 w-4" />
 				</a>
 				<button
+					data-adw-round-control=""
+					data-image-viewer-osd=""
 					onClick={handleClose}
-					className="p-2 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-md transition-colors"
+					className="p-2 backdrop-blur-md transition-colors"
 				>
 					<X className="h-5 w-5" />
 				</button>

@@ -9,7 +9,8 @@ impl ChatView {
         _has_selection: bool,
     ) -> AnyElement {
         let theme = *cx.app_theme();
-        let text_color = theme.foreground;
+        let radius_button = px(cx.shape().radius_button);
+                let text_color = theme.foreground;
         let muted_text = theme.muted_foreground;
         // The chat list page fills the window, so the window controls sit over
         // the right end of its header.
@@ -24,7 +25,7 @@ impl ChatView {
                 .gap_3()
                 .child(
                     h_flex()
-                        .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                        .h(px(cx.shape().header_height))
                         .pr(px(controls_room))
                         .items_center()
                         .gap_4()
@@ -36,7 +37,7 @@ impl ChatView {
                                 .justify_center()
                                 .w(px(32.0))
                                 .h(px(32.0))
-                                .rounded_full()
+                                .rounded(radius_button)
                                 .cursor_pointer()
                                 .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                 .tooltip(move |window, cx| Tooltip::new("Back").build(window, cx))
@@ -73,7 +74,7 @@ impl ChatView {
             // Top Row: Title + Action Icons
             .child(
                 h_flex()
-                    .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                    .h(px(cx.shape().header_height))
                     .pr(px(controls_room))
                     .justify_between()
                     .items_center()
@@ -102,7 +103,7 @@ impl ChatView {
                                     .id("btn-new-group")
                                     .cursor_pointer()
                                     .p_2()
-                                    .rounded_full()
+                                    .rounded(radius_button)
                                     .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                     .tooltip(move |window, cx| {
                                         Tooltip::new("New Group").build(window, cx)
@@ -122,7 +123,7 @@ impl ChatView {
                                     .id("btn-sidebar-menu")
                                     .cursor_pointer()
                                     .p_2()
-                                    .rounded_full()
+                                    .rounded(radius_button)
                                     .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                     .tooltip(move |window, cx| Tooltip::new("Menu").build(window, cx))
                                     .child(svg().data(MORE_VERTICAL_SVG).size(px(18.0)).text_color(muted_text))
@@ -137,7 +138,7 @@ impl ChatView {
             .children(
                 self.search_field
                     .as_ref()
-                    .map(|field| field.element(&theme, Some(SEARCH_SVG))),
+                    .map(|field| field.element(&theme, cx.shape(), Some(SEARCH_SVG))),
             )
             .into_any_element()
     }

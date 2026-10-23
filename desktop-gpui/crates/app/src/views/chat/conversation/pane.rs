@@ -1,4 +1,5 @@
 use crate::views::chat::*;
+use crate::theme::surface::SurfaceExt;
 
 impl ChatView {
     /// Right pane: the open conversation (header, messages, composer) or the empty state.
@@ -11,6 +12,8 @@ impl ChatView {
         show_right: bool,
     ) -> impl IntoElement {
         let theme = *cx.app_theme();
+        let shape = cx.shape();
+        let surface = cx.surface();
         let bg_color = theme.background;
         let framed = !crate::popover::is_popover(cx)
             && window_material::is_framed_window(window);
@@ -21,11 +24,15 @@ impl ChatView {
             .h_full()
             .overflow_hidden()
             .when(!show_right, |el| el.hidden())
-            .bg(window_material::glass_fill(
-                theme.chat.map(|c| c.chat_bg).unwrap_or(bg_color),
-                window_transparency,
-            ))
-            .when(framed, |s| s.rounded_br(px(window_material::WINDOW_CORNER_RADIUS)))
+            .bg(if shape.adwaita {
+                surface.view
+            } else {
+                window_material::glass_fill(
+                    theme.chat.map(|c| c.chat_bg).unwrap_or(bg_color),
+                    window_transparency,
+                )
+            })
+            .when(framed, |s| s.rounded_br(px(window_material::corner_radius(cx))))
             .children(if let Some(ref active_chat) = selected_chat {
                 let chat_jid = active_chat.id.clone();
 
@@ -37,7 +44,7 @@ impl ChatView {
                         .child(if self.select_mode {
                             self.render_selection_bar(cx)
                         } else {
-                            self.render_chat_header(cx, pages, active_chat).into_any_element()
+                            self.render_chat_header(window, cx, pages, active_chat).into_any_element()
                         })
                         // Messages pinned in this chat
                         .children(self.render_pinned_banner(cx))

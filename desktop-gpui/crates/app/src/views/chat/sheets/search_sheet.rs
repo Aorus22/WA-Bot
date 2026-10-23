@@ -1,3 +1,5 @@
+use crate::components::ui::boxed_list::boxed_list;
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
@@ -287,6 +289,11 @@ impl ChatView {
         muted_text: Hsla,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let sheet_bg = if shape.adwaita { surface.view } else { bg_color };
+        let sheet_border = if shape.adwaita { surface.border } else { border_color.opacity(0.4) };
+        let header_bg = if shape.adwaita { surface.headerbar } else { theme.muted.opacity(0.2) };
         v_flex()
             .w(px(SHEET_WIDTH))
             .min_w(px(SHEET_WIDTH))
@@ -294,19 +301,19 @@ impl ChatView {
             .h_full()
             .overflow_hidden()
             .border_l_1()
-            .border_color(border_color.opacity(0.4))
-            .bg(bg_color)
+            .border_color(sheet_border)
+            .bg(sheet_bg)
             .flex_shrink_0()
             // Header
             .child(
                 v_flex()
                     .border_b_1()
-                    .border_color(border_color.opacity(0.4))
-                    .bg(theme.muted.opacity(0.2))
+                    .border_color(sheet_border)
+                    .bg(header_bg)
                     // Header Title row
                     .child(
                         h_flex()
-                            .h(px(crate::components::titlebar::HEADER_HEIGHT))
+                            .h(px(shape.header_height))
                             .pl_4()
                             .pr(px(crate::components::titlebar::controls_room(cx) + 8.0))
                             .justify_between()
@@ -329,7 +336,14 @@ impl ChatView {
                                     .id("btn-close-search-sheet")
                                     .cursor_pointer()
                                     .p_1()
-                                    .rounded_full()
+                                    .when(shape.adwaita, |s| {
+                                        s.w(px(shape.control_size))
+                                            .h(px(shape.control_size))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                    })
+                                    .rounded(px(shape.radius_button))
                                     .hover(|s| s.bg(theme.muted.opacity(0.65)))
                                     .tooltip(move |window, cx| {
                                         Tooltip::new("Close").build(window, cx)
@@ -352,7 +366,7 @@ impl ChatView {
                             .children(
                                 self.sheet_search_field
                                     .as_ref()
-                                    .map(|field| field.element(&theme, Some(SEARCH_SVG))),
+                                    .map(|field| field.element(&theme, shape, Some(SEARCH_SVG))),
                             ),
                     ),
             )
@@ -380,8 +394,7 @@ impl ChatView {
                         .flex_1()
                         .overflow_y_scroll()
                         .p_2()
-                        .gap_1()
-                        .children(self.search_sheet_results.iter().map(|m| {
+                        .child(boxed_list(cx, self.search_sheet_results.iter().map(|m| {
                             let msg_id = m.id.clone();
                             let is_me = m.from == "me" || MessageBubbleHelper::is_from_me(m, "me");
                             let sender = if is_me {
@@ -405,11 +418,10 @@ impl ChatView {
                             v_flex()
                                 .id(SharedString::from(format!("search-result-{}", msg_id)))
                                 .cursor_pointer()
-                                .p_3()
-                                .rounded_xl()
-                                .hover(|s| s.bg(theme.muted.opacity(0.5)))
-                                .border_b_1()
-                                .border_color(border_color.opacity(0.15))
+                                .when(!shape.adwaita, |row| {
+                                    row.p_3().rounded_xl().border_b_1().border_color(border_color.opacity(0.15))
+                                })
+                                .hover(|s| s.bg(if shape.adwaita { theme.foreground.opacity(0.03) } else { theme.muted.opacity(0.5) }))
                                 .gap_1()
                                 .tooltip(move |window, cx| {
                                     Tooltip::new("Click to jump to message").build(window, cx)
@@ -459,8 +471,8 @@ impl ChatView {
                                                 .child(time_str),
                                         ),
                                 )
-                                .into_any_element()
-                        }))
+                        })))
+                        .when(!shape.adwaita, |list| list.gap_1())
                         .into_any_element()
                 } else if !self.search_sheet_query.trim().is_empty() {
                     // Empty results state

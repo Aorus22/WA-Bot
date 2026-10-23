@@ -186,6 +186,16 @@ pub struct Theme {
     /// Radius for the large elements, e.g.: Dialog, Notification border radius.
     pub radius_lg: Pixels,
     pub shadow: bool,
+    /// Enables the app's GTK/Adwaita-specific control styling. Defaults off so
+    /// existing applications keep the original component appearance.
+    #[serde(skip)]
+    pub adwaita: bool,
+    /// Optional dialog surface supplied by an Adwaita host application.
+    #[serde(skip)]
+    pub adwaita_dialog_bg: Option<Hsla>,
+    /// Optional scrollbar thumb width supplied by an Adwaita host application.
+    #[serde(skip)]
+    pub adwaita_scrollbar_width: Option<Pixels>,
     /// Whether focused controls draw a ring outside their border, default true.
     ///
     /// The ring is painted outside the element, so any ancestor that clips its
@@ -426,6 +436,9 @@ impl Theme {
                                         .inset(MOBILE_SCROLLBAR_THUMB_INSET)
                                         .radius(RADIUS_FULL)
                                 })
+                                .when_some(self.adwaita_scrollbar_width, |style, width| {
+                                    style.width(width)
+                                })
                         })
                         .thumb_hover(|style| {
                             style
@@ -436,15 +449,24 @@ impl Theme {
                                         .width(SCROLLBAR_THUMB_HOVER_WIDTH)
                                         .inset(SCROLLBAR_THUMB_INSET)
                                 })
+                                .when_some(self.adwaita_scrollbar_width, |style, width| {
+                                    style.width(width)
+                                })
                         })
                         .thumb_active(|style| {
                             style
                                 .bg(self.tokens.scrollbar_thumb_hover)
+                                .when(self.adwaita, |style| {
+                                    style.bg(self.foreground.opacity(0.60))
+                                })
                                 .radius(self.radius)
                                 .when(gpui_base::is_mobile(), |style| {
                                     style
                                         .width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
                                         .inset(SCROLLBAR_THUMB_INSET)
+                                })
+                                .when_some(self.adwaita_scrollbar_width, |style, width| {
+                                    style.width(width)
                                 })
                         }),
                 ),
@@ -774,6 +796,9 @@ impl From<&ThemeColor> for Theme {
             radius: px(6.),
             radius_lg: px(8.),
             shadow: true,
+            adwaita: false,
+            adwaita_dialog_bg: None,
+            adwaita_scrollbar_width: None,
             focus_ring: true,
             scrollbar_mode: ScrollbarMode::default(),
             notification: NotificationSettings::default(),

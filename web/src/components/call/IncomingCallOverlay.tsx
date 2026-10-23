@@ -209,10 +209,10 @@ export function IncomingCallOverlay() {
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-sky-700/70 dark:text-sky-200/70">Accept to enable your camera, or keep it as voice.</p>
               <div className="mt-2.5 flex gap-2">
-                <Button size="sm" className="flex-1 rounded-full bg-sky-600 hover:bg-sky-700 text-white h-8 text-xs" onClick={handleAcceptVideo} disabled={!!videoBusy}>
+                <Button size="sm" className="flex-1 rounded-button bg-sky-600 hover:bg-sky-700 text-white h-8 text-xs" onClick={handleAcceptVideo} disabled={!!videoBusy}>
                   {videoBusy === "accept" ? "…" : "Accept video"}
                 </Button>
-                <Button size="sm" variant="outline" className="flex-1 rounded-full h-8 text-xs bg-white/60 dark:bg-white/5" onClick={handleRejectVideo} disabled={!!videoBusy}>
+                <Button size="sm" variant="outline" className="flex-1 rounded-button h-8 text-xs bg-white/60 dark:bg-white/5" onClick={handleRejectVideo} disabled={!!videoBusy}>
                   {videoBusy === "reject" ? "…" : "Keep voice"}
                 </Button>
               </div>

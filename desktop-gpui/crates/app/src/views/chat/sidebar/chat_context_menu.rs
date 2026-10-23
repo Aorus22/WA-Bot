@@ -1,3 +1,4 @@
+use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
@@ -8,7 +9,9 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
         let theme = *cx.app_theme();
-        let border_color = theme.border;
+        let shape = cx.shape();
+        let surface = cx.surface();
+        let border_color = if shape.adwaita { surface.border } else { theme.border };
         let card_bg = theme.card;
         let primary_color = theme.primary;
         let text_color = theme.foreground;
@@ -23,10 +26,17 @@ impl ChatView {
             let confirm_leave = ctx.confirm_leave;
             let show_mute_submenu = ctx.show_mute_submenu;
             let menu_pos = ctx.position;
-            let hover_bg: Hsla = theme.foreground.opacity(0.12);
+            let hover_bg: Hsla = theme.foreground.opacity(if shape.adwaita { 0.15 } else { 0.12 });
             let danger: Hsla = rgb(0xef4444).into();
+            macro_rules! styled_menu_row {
+                ($($args:tt)*) => {
+                    menu_row($($args)*)
+                        .when(shape.adwaita, |row| row.px_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                };
+            }
 
-            let mut menu = menu_surface(232.0, card_bg, border_color)
+            let mut menu = menu_surface(232.0, card_bg, border_color, cx)
+                .when(shape.adwaita, |menu| menu.shadow_sm())
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.chat_context_menu = None;
                     cx.notify();
@@ -36,7 +46,7 @@ impl ChatView {
             if unread > 0 {
                 let cid = chat_id.clone();
                 menu = menu.child(
-                    menu_row(window, cx, "cm-read", CHECK_CHECK_SVG, "Mark as read", primary_color, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "cm-read", CHECK_CHECK_SVG, "Mark as read", primary_color, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                             this.mark_chat_read_action(cid.clone(), cx);
                             this.chat_context_menu = None;
@@ -49,7 +59,7 @@ impl ChatView {
             {
                 let cid = chat_id.clone();
                 menu = menu.child(
-                    menu_row(
+                    styled_menu_row!(
                             window,
                             cx,
                         "cm-archive",
@@ -71,7 +81,7 @@ impl ChatView {
             if is_muted {
                 let cid = chat_id.clone();
                 menu = menu.child(
-                    menu_row(window, cx, "cm-unmute", VOLUME_X_SVG, "Unmute notifications", muted_text, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "cm-unmute", VOLUME_X_SVG, "Unmute notifications", muted_text, text_color, hover_bg)
                         .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
                             this.set_mute(cid.clone(), "off".to_string(), cx);
                             this.chat_context_menu = None;
@@ -80,7 +90,7 @@ impl ChatView {
                 );
             } else {
                 menu = menu.child(
-                    menu_row(window, cx, "cm-mute", VOLUME_X_SVG, "Mute notifications", muted_text, text_color, hover_bg)
+                    styled_menu_row!(window, cx, "cm-mute", VOLUME_X_SVG, "Mute notifications", muted_text, text_color, hover_bg)
                         .child(div().flex_1())
                         .child(svg().data(CHEVRON_RIGHT_SVG).size(px(13.0)).text_color(muted_text))
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
@@ -99,10 +109,17 @@ impl ChatView {
                         let cid = chat_id.clone();
                         menu = menu.child(
                             with_hover_fade(
-                                h_flex().id(id).cursor_pointer().pl_12().pr_5().py_2().items_center(),
+                                h_flex()
+                                    .id(id)
+                                    .cursor_pointer()
+                                    .pl_12()
+                                    .pr_5()
+                                    .py_2()
+                                    .when(shape.adwaita, |row| row.pr_3().py_1p5().rounded(px(shape.radius_button)).overflow_hidden())
+                                    .items_center(),
                                 id,
                                 hover_bg,
-                                px(0.0),
+                                px(if shape.adwaita { shape.radius_button } else { 0.0 }),
                                 window,
                                 cx,
                             )
@@ -121,7 +138,7 @@ impl ChatView {
             {
                 let cid = chat_id.clone();
                 menu = menu.child(
-                    menu_row(
+                    styled_menu_row!(
                             window,
                             cx,
                         "cm-pin",
@@ -145,7 +162,7 @@ impl ChatView {
                 menu = menu
                     .child(menu_separator(border_color))
                     .child(
-                        menu_row(
+                        styled_menu_row!(
                             window,
                             cx,
                             "cm-exit",

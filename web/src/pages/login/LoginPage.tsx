@@ -83,7 +83,7 @@ export function LoginPage({ embedded = false }: { embedded?: boolean }) {
 									) : error ? (
 										<div className="flex flex-col items-center gap-4">
 											<p className="text-sm text-muted-foreground">{error}</p>
-											<Button variant="outline" size="sm" onClick={fetchQrCode} className="rounded-full gap-1.5">
+							<Button variant="outline" size="sm" onClick={fetchQrCode} className="rounded-button gap-1.5">
 												<RefreshCw className="h-3.5 w-3.5" />
 												Retry
 											</Button>
@@ -107,7 +107,7 @@ export function LoginPage({ embedded = false }: { embedded?: boolean }) {
 								</div>
 
 								{qrCode && (
-									<Button variant="outline" size="sm" onClick={fetchQrCode} className="rounded-full gap-1.5" disabled={loading}>
+					<Button variant="outline" size="sm" onClick={fetchQrCode} className="rounded-button gap-1.5" disabled={loading}>
 										<RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
 										Refresh QR
 									</Button>
@@ -143,7 +143,7 @@ export function LoginPage({ embedded = false }: { embedded?: boolean }) {
 									onClick={() => setActiveTab("qr")}
 									variant="outline"
 									size="sm"
-									className="rounded-full gap-1.5"
+									className="rounded-button gap-1.5"
 								>
 									<ArrowLeft className="h-3.5 w-3.5" />
 									Back to QR code
