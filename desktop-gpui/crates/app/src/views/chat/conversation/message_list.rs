@@ -100,8 +100,8 @@ impl ChatView {
                     // The strip spans the width but only the pill should catch clicks.
                     .child(div().block_mouse_except_scroll().child(Self::day_pill(
                         label,
-                        theme.muted.opacity(0.9),
-                        border_color.opacity(0.4),
+                        theme.muted.opacity(0.4),
+                        rgba(0x00000000).into(),
                         muted_text,
                     )))
                     .into_any_element()

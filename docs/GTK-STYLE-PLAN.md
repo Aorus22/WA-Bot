@@ -71,7 +71,7 @@ copied from `src/global/variables/libadwaita-*.scss`, `src/mixins/controls.scss`
 | border | fg at 15% |
 
 Dark surfaces: window `#222226`, view `#1d1d20`, sidebar `#2e2e32`, secondary sidebar
-`#28282c`, headerbar `#2e2e32`, card white 8%, dialog/popover `#36363a`.
+`#28282c`, headerbar `#2e2e32`, card white 18%, dialog/popover `#36363a`.
 Light: window `#fafafb`, view `#ffffff`, sidebar `#ebebed`, secondary `#f3f3f5`,
 headerbar `#ffffff`, card `#ffffff`, dialog `#fafafb`, popover `#ffffff`.
 Unfocused window: headerbar and sidebars switch to their *backdrop* colour
@@ -94,7 +94,7 @@ gpui (`theme/shape.rs`, `theme/manager.rs`):
   popover, plus each `*_backdrop`) as `Hsla`, built by `SurfaceTokens::from_tokens(&ActiveTokens, is_dark)`.
   Derivation (so it works with every palette): `view` = background darkened ~4% (dark) /
   lightened (light); `window` = background; `sidebar` = background lightened ~6% (dark) /
-  darkened ~6% (light); `card` = foreground at 8% over view (dark) / white (light);
+  darkened ~6% (light); `card` = foreground at 18% over view (dark) / white (light);
   `dialog`/`popover` = sidebar-ish +2%. Do the maths in OKLab or HSL with unit tests.
   When the active preset is the "Desktop (GTK)" one (`theme/gtk.rs`), read
   `window_bg_color`, `view_bg_color`, `sidebar_bg_color`, `headerbar_bg_color`, `card_bg_color`,

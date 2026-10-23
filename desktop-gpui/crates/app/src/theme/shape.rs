@@ -108,7 +108,7 @@ impl ShapeTokens {
         radius_bubble_tail: 4.0,
         shadows: true,
         radius_popover: 14.0,
-        radius_window: 10.0,
+        radius_window: 15.0,
         titlebar_height: 48.0,
         control_size: 32.0,
         titlebar_control_size: 32.0,

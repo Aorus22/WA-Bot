@@ -160,9 +160,15 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                             .justify_center()
                             .size(px(shape.titlebar_control_size))
                             .rounded_full()
+                            .bg(theme.foreground.opacity(0.10))
                             .text_color(theme.foreground)
                             .hover(|s| s.bg(hover_bg))
-                            .child(svg().data(MINIMIZE_SVG).size(px(12.0))),
+                            .child(
+                                svg()
+                                    .data(MINIMIZE_SVG)
+                                    .size(px(12.0))
+                                    .text_color(theme.foreground),
+                            ),
                     )
                 })
                 .when(!shape.adwaita, |s| {
@@ -190,12 +196,14 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                             .justify_center()
                             .size(px(shape.titlebar_control_size))
                             .rounded_full()
+                            .bg(theme.foreground.opacity(0.10))
                             .text_color(theme.foreground)
                             .hover(|s| s.bg(hover_bg))
                             .child(
                                 svg()
                                     .data(if is_max { RESTORE_SVG } else { MAXIMIZE_SVG })
-                                    .size(px(12.0)),
+                                    .size(px(12.0))
+                                    .text_color(theme.foreground),
                             ),
                     )
                 })
@@ -228,9 +236,15 @@ fn control_buttons(window: &Window, cx: &App) -> gpui::Div {
                             .justify_center()
                             .size(px(shape.titlebar_control_size))
                             .rounded_full()
+                            .bg(theme.foreground.opacity(0.10))
                             .text_color(theme.foreground)
                             .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
-                            .child(svg().data(X_SVG).size(px(13.0))),
+                            .child(
+                                svg()
+                                    .data(X_SVG)
+                                    .size(px(13.0))
+                                    .text_color(theme.foreground),
+                            ),
                     )
                 })
                 .when(!shape.adwaita, |s| {

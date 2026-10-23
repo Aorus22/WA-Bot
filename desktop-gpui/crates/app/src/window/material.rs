@@ -9,7 +9,7 @@ use gpui::{
 };
 use wabot_settings::MAX_WINDOW_TRANSPARENCY;
 
-pub const WINDOW_CORNER_RADIUS: f32 = 10.0;
+pub const WINDOW_CORNER_RADIUS: f32 = 15.0;
 
 /// Active rounded CSD radius, unchanged when the GTK style is disabled.
 pub fn corner_radius(cx: &App) -> f32 {

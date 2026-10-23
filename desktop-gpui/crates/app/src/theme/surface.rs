@@ -98,7 +98,7 @@ impl SurfaceTokens {
         let card = overrides
             .and_then(|o| o.card)
             .unwrap_or(if is_dark {
-                view.mix_oklab(tokens.foreground, 0.92)
+                view.mix_oklab(tokens.foreground, 0.82)
             } else {
                 white
             });
@@ -231,6 +231,6 @@ mod tests {
 
         assert_eq!(surface.view, override_color);
         assert_eq!(surface.window, palette.background);
-        assert_eq!(surface.card, surface.view.mix_oklab(palette.foreground, 0.92));
+        assert_eq!(surface.card, surface.view.mix_oklab(palette.foreground, 0.82));
     }
 }
