@@ -51,6 +51,13 @@ jobs:
             echo "channel=${{ inputs.channel }}" >> "$GITHUB_OUTPUT"
             echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
           fi
+          # Beta trades a little runtime speed for a much shorter build: no LTO. Set
+          # before the Rust cache step so it is part of the cache key. Stable keeps
+          # the release profile from Cargo.toml.
+          if [[ "${GITHUB_EVENT_NAME}" != "push" && "${{ inputs.channel }}" == "beta" ]]; then
+            echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
+            echo "CARGO_PROFILE_RELEASE_DEBUG=0" >> "$GITHUB_ENV"
+          fi
 
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -77,12 +84,21 @@ jobs:
         with:
           workspaces: desktop-gpui
 
+      # linuxdeploy and appimagetool are downloaded by build-appimage.sh into this dir.
+      - name: Cache AppImage tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/wa-bot-appimage
+          key: appimage-tools-v1
+
+      # Without recommends: clang, cmake and pkg-config come with the runner image,
+      # and the recommended packages are most of the install time.
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y squashfs-tools desktop-file-utils libasound2-dev libx11-xcb-dev \
-            libssl-dev libxkbcommon-x11-dev libxkbcommon-dev libwayland-dev libvulkan-dev \
-            libfontconfig1-dev libxcb1-dev libdbus-1-dev pkg-config clang cmake
+          sudo apt-get install -y --no-install-recommends squashfs-tools desktop-file-utils \
+            libasound2-dev libx11-xcb-dev libssl-dev libxkbcommon-x11-dev libxkbcommon-dev \
+            libwayland-dev libvulkan-dev libfontconfig1-dev libxcb1-dev libdbus-1-dev
 
       - name: Check version and stamp beta
         id: ver
