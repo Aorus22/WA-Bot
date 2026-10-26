@@ -225,6 +225,7 @@ impl ChatView {
     pub fn open_forward(&mut self, chat_id: String, msg: Message, cx: &mut Context<Self>) {
         self.context_menu = None;
         self.forward_selected.clear();
+        self.forward_search_query.clear();
         self.is_forwarding = false;
         self.forward_ids = Vec::new();
         self.forward_msg = Some((chat_id, msg));
@@ -236,6 +237,7 @@ impl ChatView {
         let Some(first) = msgs.first().cloned() else { return };
         self.context_menu = None;
         self.forward_selected.clear();
+        self.forward_search_query.clear();
         self.is_forwarding = false;
         self.forward_ids = msgs.iter().map(|m| m.id.clone()).collect();
         self.forward_msg = Some((chat_id, first));

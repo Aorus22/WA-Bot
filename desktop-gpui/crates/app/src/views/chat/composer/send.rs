@@ -89,43 +89,94 @@ impl ChatView {
                     });
                     return;
                 };
-
-                let file_name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "file".to_string());
-                let media_type = kind.media_type(&file_name).to_string();
-
-                let read_path = path.clone();
-                let read = TOKIO_RT
-                    .spawn_blocking(move || std::fs::read(read_path))
-                    .await;
-                let Ok(Ok(bytes)) = read else {
-                    let _ = cx_handle.update(|cx: &mut App| {
-                        if let Some(view) = this.upgrade() {
-                            view.update(cx, |this, cx| {
-                                this.is_sending_attachment = false;
-                                toast::error("Gagal membaca file", cx);
-                                cx.notify();
-                            });
-                        }
-                    });
-                    return;
-                };
-
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = this.upgrade() {
                         view.update(cx, |this, cx| {
-                            this.send_attachment_bytes(
-                                chat_id.clone(),
-                                file_name.clone(),
-                                media_type.clone(),
+                            this.send_attachment_path(chat_id.clone(), path, kind, cx);
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Attach files dropped anywhere on the open conversation. Media extensions
+    /// use the normal image/video/audio path; other files are sent as documents.
+    pub(crate) fn handle_dropped_files(
+        &mut self,
+        paths: &ExternalPaths,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat_id) = self.selected_chat_id.clone() else {
+            return;
+        };
+        if self.editing_message.is_some() {
+            toast::info("Selesaikan edit pesan sebelum melampirkan file", cx);
+            return;
+        }
+
+        let dropped_files: Vec<_> = paths
+            .paths()
+            .iter()
+            .filter(|path| path.is_file())
+            .cloned()
+            .collect();
+        if dropped_files.is_empty() {
+            toast::error("Tidak ada file yang bisa dilampirkan", cx);
+            return;
+        }
+
+        self.attach_panel = AttachPanel::None;
+        for path in dropped_files {
+            let file_name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "file".to_string());
+            let kind = MediaKind::from_file_name(&file_name);
+            self.send_attachment_path(chat_id.clone(), path, kind, cx);
+        }
+    }
+
+    fn send_attachment_path(
+        &mut self,
+        chat_id: String,
+        path: std::path::PathBuf,
+        kind: MediaKind,
+        cx: &mut Context<Self>,
+    ) {
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+        let media_type = kind.media_type(&file_name).to_string();
+        self.is_sending_attachment = true;
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let read = TOKIO_RT
+                    .spawn_blocking(move || std::fs::read(path))
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| match read {
+                            Ok(Ok(bytes)) => this.send_attachment_bytes(
+                                chat_id,
+                                file_name,
+                                media_type,
                                 bytes,
                                 String::new(),
                                 None,
                                 kind,
                                 cx,
-                            );
+                            ),
+                            _ => {
+                                this.is_sending_attachment = false;
+                                toast::error("Gagal membaca file", cx);
+                                cx.notify();
+                            }
                         });
                     }
                 });

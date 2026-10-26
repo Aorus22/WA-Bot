@@ -23,6 +23,10 @@ impl ChatView {
         let surface = cx.surface();
         let sheet_border = surface.sheet_border;
         let framed = !crate::popover::is_popover(cx) && window_material::is_framed_window(window);
+        let viewport_width = f32::from(window.viewport_size().width);
+        let sheet_width = (viewport_width * 0.70).min(SHEET_WIDTH).max(240.0);
+        let media_width = (sheet_width - 72.0).clamp(180.0, 240.0);
+        let media_height = (media_width * 0.82).clamp(150.0, 205.0);
         let base_url = Self::compose_base_url(cx);
         let media_base = base_url.clone();
         let group = self.group_info.clone();
@@ -141,10 +145,10 @@ impl ChatView {
                 "image" | "gif" => media_url.map(|url| {
                     img(url)
                         .id("info-image")
-                        .w(px(240.0))
-                        .max_h(px(260.0))
+                        .w(px(media_width))
+                        .h(px(media_height))
                         .rounded_lg()
-                        .object_fit(ObjectFit::Cover)
+                        .object_fit(ObjectFit::Contain)
                         .into_any_element()
                 }),
                 "video" => Some(
@@ -153,8 +157,8 @@ impl ChatView {
                         message.extra.as_ref()
                             .and_then(|extra| extra.thumbnail.as_deref())
                             .map(|url| resolve_media_url(url, &media_base)),
-                        240.0,
-                        170.0,
+                        media_width,
+                        media_height * 0.72,
                     )
                     .into_any_element(),
                 ),
@@ -163,9 +167,9 @@ impl ChatView {
             if let Some(media) = media {
                 let sticker = message.message_type == "sticker";
                 body = body.child(
-                    h_flex().w_full().justify_end().px_4().pt_4().child(
+                    h_flex().w_full().justify_end().px_3().pt_3().child(
                         v_flex()
-                            .max_w(px(260.0))
+                            .max_w(px(media_width + 16.0))
                             .gap_1()
                             .when(!sticker, |b| b.p_1().rounded_lg().bg(primary_color.opacity(0.22)))
                             .child(media)
@@ -176,9 +180,9 @@ impl ChatView {
                 );
             } else {
             body = body.child(
-                h_flex().w_full().justify_end().px_4().py_4().child(
+                h_flex().w_full().justify_end().px_3().py_3().child(
                     div()
-                        .max_w(px(260.0))
+                        .max_w(px(media_width + 24.0))
                         .px_3()
                         .py_2()
                         .rounded_lg()
@@ -226,7 +230,7 @@ impl ChatView {
             body = body.child(
                 div()
                     .px_4()
-                    .py_8()
+                    .py_4()
                     .text_sm()
                     .text_color(muted_text)
                     .child("No receipts reported yet."),
@@ -250,9 +254,9 @@ impl ChatView {
         }
 
         v_flex()
-            .w(px(SHEET_WIDTH))
-            .min_w(px(SHEET_WIDTH))
-            .max_w(px(SHEET_WIDTH))
+            .w(px(sheet_width))
+            .min_w(px(sheet_width))
+            .max_w(px(sheet_width))
             .h_full()
             .overflow_hidden()
             .border_l_1()

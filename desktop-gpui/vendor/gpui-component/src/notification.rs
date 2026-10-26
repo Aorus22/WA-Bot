@@ -30,7 +30,7 @@ use crate::{
 const NOTIFICATION_TRANSITION_DURATION: Duration = Duration::from_millis(400);
 const NOTIFICATION_EXIT_DURATION: Duration = Duration::from_millis(200);
 const NOTIFICATION_TRANSITION_OFFSET: Pixels = px(96.);
-const DEFAULT_NOTIFICATION_WIDTH: Pixels = px(382.);
+const DEFAULT_NOTIFICATION_WIDTH: Pixels = px(320.);
 const NOTIFICATION_ADVANCE_INTERVAL: Duration = Duration::from_millis(50);
 struct DismissRequest;
 
@@ -445,7 +445,16 @@ impl Render for Notification {
                     .px_3()
             })
             .when_some(icon, |this, icon| {
-                this.child(div().absolute().top(px(18.)).left_4().child(icon))
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .flex()
+                        .items_center()
+                        .left_4()
+                        .child(icon),
+                )
             })
             .child(
                 v_flex()
@@ -1022,8 +1031,12 @@ impl Render for NotificationList {
     ) -> impl IntoElement {
         let size = window.viewport_size();
         let settings = &cx.theme().notification;
-        let (placement, margins, width) =
-            (settings.placement, settings.margins.clone(), settings.width);
+        let (placement, margins) = (settings.placement, settings.margins.clone());
+        let available_width = (size.width.as_f32()
+            - margins.left.as_f32()
+            - margins.right.as_f32())
+            .max(0.);
+        let width = px(settings.width.as_f32().min(available_width));
 
         let groups = self.grouped(cx);
         self.stacks

@@ -215,7 +215,7 @@ impl ChatView {
         let pin = pins[index];
         let message = pin.message.as_ref()?;
         let (sender, snippet) = (sender_label(message), snippet_of(message));
-        let target = pin.message_id.clone();
+        let target = message.id.clone();
 
         let theme = *cx.app_theme();
         let shape = cx.shape();

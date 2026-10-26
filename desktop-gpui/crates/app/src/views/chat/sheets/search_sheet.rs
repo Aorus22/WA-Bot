@@ -165,7 +165,10 @@ impl ChatView {
 
         // If message is already loaded in cached_render_messages
         if let Some(pos) = self.cached_render_messages.iter().position(|m| m.msg.id == message_id) {
-            self.messages_list_state.scroll_to_reveal_item(pos + 1);
+            self.messages_list_state.scroll_to(ListOffset {
+                item_ix: pos + 1,
+                offset_in_item: px(0.),
+            });
             cx.notify();
             return;
         }
@@ -212,7 +215,10 @@ impl ChatView {
                                         ChatStore::global_mut(cx).set_messages(&cid, msgs, true);
                                     }
                                     if let Some(pos) = this.cached_render_messages.iter().position(|m| m.msg.id == target_mid) {
-                                        this.messages_list_state.scroll_to_reveal_item(pos + 1);
+                                        this.messages_list_state.scroll_to(ListOffset {
+                                            item_ix: pos + 1,
+                                            offset_in_item: px(0.),
+                                        });
                                     }
                                 }
                             }

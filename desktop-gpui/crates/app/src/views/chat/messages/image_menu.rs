@@ -24,6 +24,51 @@ pub(crate) fn image_file_name(url: &str) -> String {
         .unwrap_or_else(|| "image.jpg".to_string())
 }
 
+fn write_image_to_clipboard(
+    format: gpui::ImageFormat,
+    bytes: &[u8],
+    cx: &mut gpui::App,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        // GPUI's Linux clipboard backend currently exports text and its own
+        // private image MIME type. Use the same arboard backend as the Linux
+        // clipboard-history app so other applications receive image/png.
+        let _ = (format, cx);
+        let rgba = image::load_from_memory(bytes)
+            .map_err(|error| format!("Gambar tidak bisa dibaca: {error}"))?
+            .to_rgba8();
+        let (width, height) = (rgba.width(), rgba.height());
+        let rgba_bytes = rgba.into_raw();
+        let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+        clipboard
+            .set_image(arboard::ImageData {
+                width: width as usize,
+                height: height as usize,
+                bytes: rgba_bytes.clone().into(),
+            })
+            .map_err(|error| error.to_string())?;
+
+        let observed = clipboard.get_image().map_err(|error| error.to_string())?;
+        if observed.width != width as usize
+            || observed.height != height as usize
+            || observed.bytes.as_ref() != rgba_bytes.as_slice()
+        {
+            return Err("Clipboard image verification returned different data".to_string());
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        cx.write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(
+            format,
+            bytes.to_vec(),
+        )));
+        Ok(())
+    }
+}
+
 impl ChatView {
     /// Download an image and put it on the clipboard as a picture.
     pub(crate) fn copy_image(url: String, cx: &mut Context<Self>) {
@@ -35,13 +80,25 @@ impl ChatView {
                 let res = TOKIO_RT.spawn(async move { client.download_bytes(&url).await }).await;
                 let _ = cx_handle.update(|cx: &mut App| match res {
                     Ok(Ok(bytes)) => match sniff_image_format(&bytes) {
-                        Some(format) => {
-                            cx.write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(format, bytes.to_vec())));
-                            toast::success("Gambar disalin ke clipboard", cx);
-                        }
-                        None => toast::error("Format gambar tidak dikenali", cx),
+                        Some(format) => match write_image_to_clipboard(format, &bytes, cx) {
+                            Ok(()) => toast::success_at(
+                                "Gambar disalin ke clipboard",
+                                Anchor::BottomRight,
+                                cx,
+                            ),
+                            Err(error) => toast::error_at(
+                                format!("Gagal menyalin gambar: {error}"),
+                                Anchor::BottomRight,
+                                cx,
+                            ),
+                        },
+                        None => toast::error_at(
+                            "Format gambar tidak dikenali",
+                            Anchor::BottomRight,
+                            cx,
+                        ),
                     },
-                    _ => toast::error("Gagal mengunduh gambar", cx),
+                    _ => toast::error_at("Gagal mengunduh gambar", Anchor::BottomRight, cx),
                 });
             }
         })

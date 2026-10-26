@@ -14,7 +14,7 @@
 //! toast::error("Gagal menghapus pesan", cx);
 //! ```
 
-use gpui::{AnyWindowHandle, App, Global, SharedString};
+use gpui::{Anchor, AnyWindowHandle, App, Global, SharedString};
 use crate::components::ui::{WindowExt as _, sonner::{Notification, NotificationType}};
 
 /// Global bus holding the main window handle so toasts can be pushed without
@@ -67,6 +67,11 @@ pub fn success(message: impl Into<SharedString>, cx: &mut App) {
     push(Notification::success(message), cx);
 }
 
+/// Show a success toast at a specific corner of the window.
+pub fn success_at(message: impl Into<SharedString>, placement: Anchor, cx: &mut App) {
+    push(Notification::success(message).placement(placement), cx);
+}
+
 /// Show a warning toast.
 pub fn warning(message: impl Into<SharedString>, cx: &mut App) {
     push(
@@ -83,6 +88,17 @@ pub fn error(message: impl Into<SharedString>, cx: &mut App) {
         Notification::new()
             .message(message)
             .with_type(NotificationType::Error),
+        cx,
+    );
+}
+
+/// Show an error toast at a specific corner of the window.
+pub fn error_at(message: impl Into<SharedString>, placement: Anchor, cx: &mut App) {
+    push(
+        Notification::new()
+            .message(message)
+            .with_type(NotificationType::Error)
+            .placement(placement),
         cx,
     );
 }

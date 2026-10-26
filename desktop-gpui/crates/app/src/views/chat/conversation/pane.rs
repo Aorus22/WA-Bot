@@ -32,6 +32,11 @@ impl ChatView {
                     v_flex()
                         .relative()
                         .size_full()
+                        .on_drop(cx.listener(
+                            |this, paths: &ExternalPaths, _, cx| {
+                                this.handle_dropped_files(paths, cx);
+                            },
+                        ))
                         // Chat Header (Clicking opens Info Sheet)
                         .child(if self.select_mode {
                             self.render_selection_bar(cx)

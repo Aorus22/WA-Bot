@@ -80,6 +80,10 @@ pub struct ChatView {
     /// Message being forwarded: (source chat id, message).
     pub forward_msg: Option<(String, Message)>,
     pub forward_selected: HashSet<String>,
+    pub(crate) forward_search_field: Option<TextField>,
+    pub forward_search_query: String,
+    pub(crate) forward_filtered_chats: Vec<Chat>,
+    pub forward_chat_scroll: UniformListScrollHandle,
     pub is_forwarding: bool,
 
     // Context menu popup on sidebar chat right click
@@ -284,6 +288,10 @@ impl ChatView {
             image_menu: None,
             forward_msg: None,
             forward_selected: HashSet::new(),
+            forward_search_field: None,
+            forward_search_query: String::new(),
+            forward_filtered_chats: Vec::new(),
+            forward_chat_scroll: UniformListScrollHandle::new(),
             is_forwarding: false,
             chat_context_menu: None,
             header_menu: None,
@@ -584,12 +592,29 @@ impl Render for ChatView {
             } else if (self.viewed_by_message.is_some() || self.viewed_by_closing)
                 && selected_chat.is_some()
             {
-                Some(Self::animated_sheet(
-                    "message-info-sheet-in",
-                    "message-info-sheet-out",
-                    self.viewed_by_closing,
-                    self.render_message_info_sheet(window, cx),
-                ))
+                let sheet = self.render_message_info_sheet(window, cx);
+                if pages {
+                    // On a narrow GTK window the chat pane has no room to shrink
+                    // beside a drawer. Keep the conversation full-size and layer
+                    // message info over its right edge, as the web layout does.
+                    Some(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .occlude()
+                            .flex()
+                            .justify_end()
+                            .child(sheet)
+                            .into_any_element(),
+                    )
+                } else {
+                    Some(Self::animated_sheet(
+                        "message-info-sheet-in",
+                        "message-info-sheet-out",
+                        self.viewed_by_closing,
+                        sheet,
+                    ))
+                }
             } else if (self.is_search_sheet_open || self.search_sheet_closing)
                 && selected_chat.is_some()
             {
@@ -638,7 +663,7 @@ impl Render for ChatView {
             // ====================================================
             // MODAL: FORWARD MESSAGE
             // ====================================================
-            .children(self.render_forward_dialog(cx))
+            .children(self.render_forward_dialog(window, cx))
             // ====================================================
             // MODAL: JOIN GROUP DIALOG
             // ====================================================

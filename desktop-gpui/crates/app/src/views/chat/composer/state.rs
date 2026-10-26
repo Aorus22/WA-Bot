@@ -57,6 +57,18 @@ pub enum MediaKind {
 }
 
 impl MediaKind {
+    /// Attachment mode inferred from a dropped filename.
+    pub fn from_file_name(file_name: &str) -> Self {
+        let extension = extension_lower(file_name);
+        if extension == "gif" {
+            Self::Gif
+        } else if is_image_file(file_name) || is_video_file(file_name) || is_audio_file(file_name) {
+            Self::Media
+        } else {
+            Self::Document
+        }
+    }
+
     /// Title shown in the native file prompt.
     pub fn prompt(self) -> &'static str {
         match self {
@@ -124,6 +136,14 @@ pub fn is_audio_file(file_name: &str) -> bool {
     matches!(
         extension_lower(file_name).as_str(),
         "mp3" | "ogg" | "oga" | "opus" | "m4a" | "wav" | "aac" | "amr" | "flac" | "weba"
+    )
+}
+
+/// Image extension recognition for dropped files.
+pub fn is_image_file(file_name: &str) -> bool {
+    matches!(
+        extension_lower(file_name).as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "heic" | "heif" | "avif" | "tif" | "tiff"
     )
 }
 

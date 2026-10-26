@@ -54,6 +54,7 @@ cpal = "=0.15.3"
 image = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+arboard = { workspace = true }
 zbus = { workspace = true }
 ksni = { workspace = true }
 

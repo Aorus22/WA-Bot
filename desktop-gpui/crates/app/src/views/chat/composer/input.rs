@@ -120,12 +120,19 @@ impl ChatView {
                     TextFieldEvent::Enter => this.submit_join_group(cx),
                 }
             }));
+            self.forward_search_field = Some(TextField::new("Search name or number", window, cx, |this, event, _, cx| {
+                if let TextFieldEvent::Change(value) = event {
+                    this.forward_search_query = value;
+                    cx.notify();
+                }
+            }));
         }
         for (field, model) in [
             (&self.search_field, &self.search_query),
             (&self.sheet_search_field, &self.search_sheet_query),
             (&self.new_group_field, &self.new_group_name),
             (&self.join_link_field, &self.join_group_link),
+            (&self.forward_search_field, &self.forward_search_query),
         ] {
             if let Some(field) = field {
                 if field.value(cx) != *model {
