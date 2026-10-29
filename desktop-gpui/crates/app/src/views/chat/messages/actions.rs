@@ -169,6 +169,76 @@ impl ChatView {
         cx.notify();
     }
 
+    pub fn open_delete_message_dialog(&mut self, chat_id: String, messages: Vec<Message>, cx: &mut Context<Self>) {
+        if messages.is_empty() {
+            return;
+        }
+        self.context_menu = None;
+        self.delete_message_dialog = Some(DeleteMessageDialog { chat_id, messages });
+        cx.notify();
+    }
+
+    pub fn delete_dialog_for_me(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.delete_message_dialog.take() else { return };
+        let ids: Vec<String> = dialog.messages.into_iter().map(|message| message.id).collect();
+        if self.select_mode {
+            self.exit_select_mode(cx);
+        }
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        let chat_id = dialog.chat_id;
+        cx.notify();
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let mut failed = false;
+                for id in ids {
+                    let base_url = base_url.clone();
+                    let chat_id = chat_id.clone();
+                    let result = TOKIO_RT
+                        .spawn(async move {
+                            HttpClient::new(&base_url)
+                                .delete_message_for_me(&chat_id, &id)
+                                .await
+                        })
+                        .await;
+                    if !matches!(result, Ok(Ok(_))) {
+                        failed = true;
+                    }
+                }
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if this.upgrade().is_some() {
+                        if failed {
+                            toast::error("Gagal menghapus sebagian pesan", cx);
+                        } else {
+                            toast::success("Pesan dihapus untuk Anda", cx);
+                        }
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    pub fn delete_dialog_for_everyone(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.delete_message_dialog.take() else { return };
+        let chat_id = dialog.chat_id;
+        let messages = dialog.messages;
+        if self.select_mode {
+            self.exit_select_mode(cx);
+        }
+        for message in messages.into_iter().filter(|message| {
+            MessageBubbleHelper::is_from_me(message, "me") && message.revoked_at.is_none()
+        }) {
+            self.delete_message(chat_id.clone(), message.id, cx);
+        }
+        cx.notify();
+    }
+
     /// Delete a message
     pub fn delete_message(&mut self, chat_id: String, msg_id: String, cx: &mut Context<Self>) {
         self.context_menu = None;

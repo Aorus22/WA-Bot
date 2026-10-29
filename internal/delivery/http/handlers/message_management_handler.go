@@ -53,6 +53,47 @@ func (mh *MessageManagementHandler) DeleteMessage(w http.ResponseWriter, r *http
 	mh.handler.sendSuccess(w, nil)
 }
 
+// DeleteMessageForMe hides a message only in this WA Bot account's local
+// history. It does not send a WhatsApp revoke to other participants.
+func (mh *MessageManagementHandler) DeleteMessageForMe(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if mh.handler.msgRepo == nil {
+		mh.handler.sendError(w, http.StatusNotImplemented, "Message repository not configured")
+		return
+	}
+
+	vars := mux.Vars(r)
+	chatID := vars["chatId"]
+	msgID := vars["id"]
+	msg, err := mh.handler.msgRepo.GetMessageByID(msgID)
+	if err != nil || msg == nil || mh.handler.msgRepo.ResolveChatID(msg.ChatID) != mh.handler.msgRepo.ResolveChatID(chatID) {
+		mh.handler.sendError(w, http.StatusNotFound, "Message not found in chat")
+		return
+	}
+
+	deletedChatID, lastMsg, err := mh.handler.msgRepo.MarkMessageDeleted(msgID, time.Now().UnixMilli())
+	if err != nil {
+		mh.handler.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if deletedChatID != "" {
+		resolvedChatID := mh.handler.msgRepo.ResolveChatID(deletedChatID)
+		mh.handler.BroadcastMessage("message_deleted", map[string]string{
+			"chatId": resolvedChatID,
+			"id":     msgID,
+		})
+		mh.handler.BroadcastMessage("chat_update", map[string]interface{}{
+			"chatId":  resolvedChatID,
+			"lastMsg": lastMsg,
+		})
+	}
+	mh.handler.sendSuccess(w, nil)
+}
+
 func (mh *MessageManagementHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == "OPTIONS" {

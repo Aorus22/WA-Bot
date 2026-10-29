@@ -29,7 +29,7 @@ gpui-base = "=0.7.1"
 gpui-reqwest-client = { workspace = true }
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["wayland", "x11"] }
 gpui-component = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock"] }
 gpui-kit-assets = { workspace = true }
 raw-window-handle = { workspace = true }
 wabot-supervisor = { workspace = true }

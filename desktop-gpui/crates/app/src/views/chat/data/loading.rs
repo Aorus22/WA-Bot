@@ -77,11 +77,11 @@ impl ChatView {
         self.header_menu = None;
         self.select_mode = false;
         self.selected_messages.clear();
-        self.select_confirm_delete = false;
         self.info_confirm_exit = false;
         self.reply_to = None;
         self.editing_message = None;
-        self.pending_attachment = None;
+        self.pending_attachments.clear();
+        self.delete_message_dialog = None;
         self.update_compose_placeholder(window, cx);
         self.context_menu = None;
         self.chat_context_menu = None;

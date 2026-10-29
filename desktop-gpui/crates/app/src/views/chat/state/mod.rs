@@ -46,6 +46,13 @@ pub struct MessageContextMenu {
     pub pin_picker: bool,
 }
 
+/// Messages queued for the WhatsApp-style delete choice dialog.
+#[derive(Clone, Debug)]
+pub struct DeleteMessageDialog {
+    pub chat_id: String,
+    pub messages: Vec<Message>,
+}
+
 /// Right-click menu for a picture (copy it, save it).
 #[derive(Clone, Debug)]
 pub struct ImageMenu {
@@ -126,10 +133,13 @@ pub struct VoiceDraft {
     pub recorder: Option<crate::views::chat::media::voice_recorder::VoiceRecorder>,
 }
 
-/// An image pasted into the composer, waiting to be sent (with the typed text
-/// as its caption) when the user hits send.
+/// An attachment staged in the preview dialog until the user chooses Send.
 #[derive(Clone)]
 pub struct PendingAttachment {
     pub file_name: String,
-    pub image: std::sync::Arc<Image>,
+    pub path: Option<std::path::PathBuf>,
+    pub image: Option<std::sync::Arc<Image>>,
+    pub media_type: String,
+    pub mime_type: Option<String>,
+    pub kind: MediaKind,
 }

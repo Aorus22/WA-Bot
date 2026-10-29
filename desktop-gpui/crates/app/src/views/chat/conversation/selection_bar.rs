@@ -9,7 +9,6 @@ impl ChatView {
         let muted_text = theme.muted_foreground;
         let count = self.selected_messages.len();
         let deletable = self.selection_deletable();
-        let confirming = self.select_confirm_delete;
         let danger: Hsla = rgb(0xef4444).into();
         let radius_button = px(cx.shape().radius_button);
 
@@ -51,11 +50,7 @@ impl ChatView {
                     .text_base()
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(text_color)
-                    .child(if confirming {
-                        format!("Delete {count} for everyone? Click the bin again")
-                    } else {
-                        format!("{count} selected")
-                    }),
+                    .child(format!("{count} selected")),
             )
             .child(
                 action("btn-select-star", STAR_SVG, "Star", count > 0, muted_text)
@@ -73,9 +68,9 @@ impl ChatView {
                 action(
                     "btn-select-delete",
                     TRASH_SVG,
-                    "Delete for everyone (own messages only)",
+                    "Delete message",
                     deletable,
-                    if confirming { danger } else { muted_text },
+                    danger,
                 )
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.select_delete(cx))),
             )

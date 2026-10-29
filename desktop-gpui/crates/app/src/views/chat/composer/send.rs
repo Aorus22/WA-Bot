@@ -55,11 +55,15 @@ impl ChatView {
         .detach();
     }
 
-    /// Open the native file picker for `kind` and send the picked file.
+    /// Open the native file picker for `kind` and stage the picked file for review.
     pub fn pick_attachment(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
         let Some(chat_id) = self.selected_chat_id.clone() else {
             return;
         };
+        if self.editing_message.is_some() {
+            toast::info("Selesaikan edit pesan sebelum melampirkan file", cx);
+            return;
+        }
         self.attach_panel = AttachPanel::None;
         self.is_sending_attachment = true;
 
@@ -92,7 +96,13 @@ impl ChatView {
                 let _ = cx_handle.update(|cx: &mut App| {
                     if let Some(view) = this.upgrade() {
                         view.update(cx, |this, cx| {
-                            this.send_attachment_path(chat_id.clone(), path, kind, cx);
+                            if this.selected_chat_id.as_deref() != Some(chat_id.as_str()) {
+                                this.is_sending_attachment = false;
+                                cx.notify();
+                                return;
+                            }
+                            this.is_sending_attachment = false;
+                            this.stage_attachment_path(path, kind, cx);
                         });
                     }
                 });
@@ -109,9 +119,9 @@ impl ChatView {
         paths: &ExternalPaths,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.selected_chat_id.clone() else {
+        if self.selected_chat_id.is_none() {
             return;
-        };
+        }
         if self.editing_message.is_some() {
             toast::info("Selesaikan edit pesan sebelum melampirkan file", cx);
             return;
@@ -135,22 +145,43 @@ impl ChatView {
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| "file".to_string());
             let kind = MediaKind::from_file_name(&file_name);
-            self.send_attachment_path(chat_id.clone(), path, kind, cx);
+            self.stage_attachment_path(path, kind, cx);
         }
+        cx.notify();
     }
 
-    fn send_attachment_path(
+    fn stage_attachment_path(&mut self, path: std::path::PathBuf, kind: MediaKind, cx: &mut Context<Self>) {
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+        let media_type = kind.media_type(&file_name).to_string();
+        let mime_type = attachment_mime_type(&file_name);
+        self.pending_attachments.push(PendingAttachment {
+            file_name,
+            path: Some(path),
+            image: None,
+            media_type,
+            mime_type,
+            kind,
+        });
+        cx.notify();
+    }
+
+    pub(super) fn send_attachment_path(
         &mut self,
         chat_id: String,
         path: std::path::PathBuf,
         kind: MediaKind,
+        media_type: String,
+        mime_type: Option<String>,
+        caption: String,
         cx: &mut Context<Self>,
     ) {
         let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| "file".to_string());
-        let media_type = kind.media_type(&file_name).to_string();
         self.is_sending_attachment = true;
 
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -167,8 +198,8 @@ impl ChatView {
                                 file_name,
                                 media_type,
                                 bytes,
-                                String::new(),
-                                None,
+                                caption,
+                                mime_type,
                                 kind,
                                 cx,
                             ),
@@ -186,8 +217,8 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Send `bytes` as a media message with an optimistic local bubble. Shared by the
-    /// file picker and image paste; `caption` rides along with the media.
+    /// Send `bytes` as a media message with an optimistic local bubble. Shared by
+    /// attachment preview, file picker, and pasted image flows.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn send_attachment_bytes(
         &mut self,
@@ -256,7 +287,6 @@ impl ChatView {
                                         &temp_id,
                                         Some(id_res.id),
                                     );
-                                    toast::success("Lampiran terkirim", cx);
                                 }
                                 _ => {
                                     this.finish_optimistic_attachment(cx, &chat_id, &temp_id, None);
@@ -282,11 +312,11 @@ impl ChatView {
         msg_type: &str,
         media_url: Option<String>,
     ) -> String {
-        let now_ms = std::time::SystemTime::now()
+        let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        let temp_id = format!("temp-{}-{}", msg_type, now_ms);
+            .unwrap_or_default();
+        let now_ms = now.as_millis() as i64;
+        let temp_id = format!("temp-{}-{}", msg_type, now.as_nanos());
         let msg = Message {
             id: temp_id.clone(),
             chat_id: chat_id.to_string(),
@@ -539,8 +569,8 @@ impl ChatView {
     /// Send current message in compose bar (supports regular send, reply, and edit)
     pub fn send_current_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.compose_text.trim().to_string();
-        if self.pending_attachment.is_some() && self.editing_message.is_none() {
-            self.send_pending_attachment(window, cx);
+        if !self.pending_attachments.is_empty() && self.editing_message.is_none() {
+            self.send_pending_attachments(window, cx);
             return;
         }
         if text.is_empty() || self.is_sending {
@@ -840,4 +870,28 @@ fn write_local_preview(file_name: &str, bytes: &[u8]) -> Option<String> {
     let path = dir.join(format!("{nanos}-{stem}.{ext}"));
     std::fs::write(&path, bytes).ok()?;
     Some(format!("{LOCAL_MEDIA_PREFIX}{}", path.display()))
+}
+
+fn attachment_mime_type(file_name: &str) -> Option<String> {
+    let extension = std::path::Path::new(file_name)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "ogg" | "opus" => "audio/ogg",
+        "wav" => "audio/wav",
+        "pdf" => "application/pdf",
+        _ => return None,
+    };
+    Some(mime.to_string())
 }

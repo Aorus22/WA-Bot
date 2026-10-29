@@ -27,36 +27,65 @@ impl ChatView {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        self.pending_attachment = Some(PendingAttachment {
-            file_name: format!("pasted-image-{stamp}.{}", image.format.extension()),
-            image: std::sync::Arc::new(image),
+        let file_name = format!("pasted-image-{stamp}.{}", image.format.extension());
+        self.pending_attachments.push(PendingAttachment {
+            file_name,
+            path: None,
+            mime_type: Some(image.format.mime_type().to_string()),
+            media_type: "image".to_string(),
+            image: Some(std::sync::Arc::new(image)),
+            kind: MediaKind::Media,
         });
         cx.notify();
         true
     }
 
     pub(crate) fn clear_pending_attachment(&mut self, cx: &mut Context<Self>) {
-        self.pending_attachment = None;
+        self.pending_attachments.clear();
         cx.notify();
     }
 
-    /// Send the staged image to the open chat; the composer text becomes its caption.
-    pub(crate) fn send_pending_attachment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(att), Some(chat_id)) = (self.pending_attachment.take(), self.selected_chat_id.clone())
-        else {
+    pub(crate) fn remove_pending_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.pending_attachments.len() {
+            self.pending_attachments.remove(index);
+            cx.notify();
+        }
+    }
+
+    /// Send staged attachments to the open chat; the preview field becomes caption text.
+    pub(crate) fn send_pending_attachments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.selected_chat_id.clone() else {
             return;
         };
+        if self.pending_attachments.is_empty() {
+            return;
+        }
+        let attachments = std::mem::take(&mut self.pending_attachments);
         let caption = self.compose_text.trim().to_string();
         self.set_compose_text(String::new(), window, cx);
-        self.send_attachment_bytes(
-            chat_id,
-            att.file_name,
-            "image".to_string(),
-            att.image.bytes.clone(),
-            caption,
-            Some(att.image.format.mime_type().to_string()),
-            MediaKind::Media,
-            cx,
-        );
+        for attachment in attachments {
+            if let Some(path) = attachment.path {
+                self.send_attachment_path(
+                    chat_id.clone(),
+                    path,
+                    attachment.kind,
+                    attachment.media_type,
+                    attachment.mime_type,
+                    caption.clone(),
+                    cx,
+                );
+            } else if let Some(image) = attachment.image {
+                self.send_attachment_bytes(
+                    chat_id.clone(),
+                    attachment.file_name,
+                    attachment.media_type,
+                    image.bytes.clone(),
+                    caption.clone(),
+                    attachment.mime_type,
+                    attachment.kind,
+                    cx,
+                );
+            }
+        }
     }
 }

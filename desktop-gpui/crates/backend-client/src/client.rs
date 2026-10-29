@@ -388,6 +388,20 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
+    pub async fn delete_message_for_me(&self, chat_id: &str, id: &str) -> Result<StatusResult> {
+        let resp = self
+            .client
+            .post(format!(
+                "{}/chats/{}/messages/{}/delete-for-me",
+                self.base_url,
+                urlencoding(chat_id),
+                urlencoding(id)
+            ))
+            .send()
+            .await?;
+        Self::handle_response(resp).await
+    }
+
     pub async fn edit_message(
         &self,
         chat_id: &str,

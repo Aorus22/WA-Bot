@@ -3,6 +3,27 @@ use crate::theme::surface::SurfaceExt;
 use crate::views::chat::*;
 
 impl ChatView {
+    /// Center a nearby message in the viewport. For messages outside the
+    /// rendered window, jump to their row and let the list virtualize there.
+    fn scroll_to_message_item(&self, item_ix: usize) {
+        let list = &self.messages_list_state;
+        let viewport = list.viewport_bounds();
+        if viewport.size.height > px(0.) {
+            if let Some(bounds) = list.bounds_for_item(item_ix) {
+                if bounds.size.height <= viewport.size.height {
+                    list.pause_following_tail();
+                    list.scroll_by(bounds.center().y - viewport.center().y);
+                    return;
+                }
+            }
+        }
+
+        list.scroll_to(ListOffset {
+            item_ix,
+            offset_in_item: px(0.),
+        });
+    }
+
     /// Play the Search drawer's exit animation, then unmount it.
     pub fn close_search_sheet(&mut self, cx: &mut Context<Self>) {
         if !self.is_search_sheet_open || self.search_sheet_closing {
@@ -165,10 +186,7 @@ impl ChatView {
 
         // If message is already loaded in cached_render_messages
         if let Some(pos) = self.cached_render_messages.iter().position(|m| m.msg.id == message_id) {
-            self.messages_list_state.scroll_to(ListOffset {
-                item_ix: pos + 1,
-                offset_in_item: px(0.),
-            });
+            self.scroll_to_message_item(pos + 1);
             cx.notify();
             return;
         }
@@ -215,10 +233,7 @@ impl ChatView {
                                         ChatStore::global_mut(cx).set_messages(&cid, msgs, true);
                                     }
                                     if let Some(pos) = this.cached_render_messages.iter().position(|m| m.msg.id == target_mid) {
-                                        this.messages_list_state.scroll_to(ListOffset {
-                                            item_ix: pos + 1,
-                                            offset_in_item: px(0.),
-                                        });
+                                        this.scroll_to_message_item(pos + 1);
                                     }
                                 }
                             }

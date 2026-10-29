@@ -112,6 +112,7 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/storage/usage", storageUsageHandler.Get).Methods("GET")
 
 	api.HandleFunc("/chats/{chatId}/messages/{id}/delete", msgMgmtHandler.DeleteMessage).Methods("POST", "OPTIONS")
+	api.HandleFunc("/chats/{chatId}/messages/{id}/delete-for-me", msgMgmtHandler.DeleteMessageForMe).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/edit", msgMgmtHandler.EditMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/reply", msgMgmtHandler.ReplyMessage).Methods("POST", "OPTIONS")
 	api.HandleFunc("/chats/{chatId}/messages/{id}/react", messageHandler.SendReaction).Methods("POST", "OPTIONS")

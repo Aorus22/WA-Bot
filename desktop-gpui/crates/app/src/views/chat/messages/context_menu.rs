@@ -303,14 +303,16 @@ impl ChatView {
                     );
                 }
 
-                // Delete (own messages that are not already deleted)
-                if is_from_me && msg_obj.revoked_at.is_none() {
+                // Delete for me is available for any settled message. The
+                // confirmation dialog only offers Delete for everyone when
+                // every selected message belongs to the current user.
+                if settled {
                     card = card.child(menu_separator(border_color)).child(
                         styled_menu_row!(window, cx, "mm-delete", TRASH_SVG, "Delete", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({
                                 let cid = chat_id.clone();
-                                let mid = msg_id.clone();
-                                move |this, _, _, cx| this.delete_message(cid.clone(), mid.clone(), cx)
+                                let message = msg_obj.clone();
+                                move |this, _, _, cx| this.open_delete_message_dialog(cid.clone(), vec![message.clone()], cx)
                             })),
                     );
                 }

@@ -140,67 +140,7 @@ impl ChatView {
             } else {
                 None
             })
-            // Pasted image waiting to be sent (the typed text becomes its caption)
-            .children(self.pending_attachment.as_ref().map(|att| {
-                h_flex()
-                    .mx_3()
-                    .mt_2p5()
-                    .px_3()
-                    .py_2()
-                    .gap_3()
-                    .bg(theme.muted.opacity(0.4))
-                    .border_l_4()
-                    .border_color(primary_color)
-                    .rounded_r_xl()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .gap_3()
-                            .items_center()
-                            .child(
-                                img(ImageSource::Image(att.image.clone()))
-                                    .w(px(56.0))
-                                    .h(px(56.0))
-                                    .flex_shrink_0()
-                                    .rounded_lg()
-                                    .object_fit(ObjectFit::Cover),
-                            )
-                            .child(
-                                v_flex()
-                                    .min_w(px(0.0))
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(primary_color)
-                                            .child("Image ready to send"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(muted_text)
-                                            .overflow_hidden()
-                                            .child(att.file_name.clone()),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("btn-remove-pending-attachment")
-                            .cursor_pointer()
-                            .p_1()
-                            .rounded(radius_button)
-                            .hover(|s| s.bg(theme.muted.opacity(0.6)))
-                            .child(svg().data(X_SVG).size(px(14.0)).text_color(muted_text))
-                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                this.clear_pending_attachment(cx);
-                            })),
-                    )
-            }))
+            // The full attachment review is rendered above the composer.
             // Preview card for the link being typed
             .children(self.render_compose_link_preview(cx))
             // Attach (+) menu, emoji and sticker panels
@@ -269,11 +209,11 @@ impl ChatView {
             })
             // Input row in WhatsApp Web's style: one pill holding the attach and
             // emoji buttons, the field, and mic (empty) or send (has text).
-            .child(if let Some(bar) = self.render_voice_bar(cx) {
+            .when(self.pending_attachments.is_empty(), |el| el.child(if let Some(bar) = self.render_voice_bar(cx) {
                 // Recording a voice note: the bar takes the pill's place.
                 bar
             } else {
-                let has_text = !self.compose_text.trim().is_empty() || self.pending_attachment.is_some();
+                let has_text = !self.compose_text.trim().is_empty();
                 let emoji_open = matches!(self.attach_panel, AttachPanel::Emoji | AttachPanel::Sticker);
                 let attach_open = self.attach_panel == AttachPanel::Menu;
                 let icon_button = |id: &'static str, active: bool| {
@@ -388,6 +328,6 @@ impl ChatView {
                                     .into_any_element()
                             }),
                     )
-            })
+            }))
     }
 }

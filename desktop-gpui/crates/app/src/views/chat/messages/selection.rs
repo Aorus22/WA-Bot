@@ -6,7 +6,6 @@ impl ChatView {
         self.header_menu = None;
         self.context_menu = None;
         self.select_mode = true;
-        self.select_confirm_delete = false;
         self.selected_messages.clear();
         if let Some(id) = first {
             self.selected_messages.insert(id);
@@ -20,7 +19,6 @@ impl ChatView {
             return;
         }
         self.select_mode = false;
-        self.select_confirm_delete = false;
         self.selected_messages.clear();
         self.remeasure_messages();
         cx.notify();
@@ -30,7 +28,6 @@ impl ChatView {
         if !self.selected_messages.remove(id) {
             self.selected_messages.insert(id.to_string());
         }
-        self.select_confirm_delete = false;
         cx.notify();
     }
 
@@ -84,26 +81,17 @@ impl ChatView {
         self.open_forward_many(chat_id, msgs, cx);
     }
 
-    /// Whether every ticked message is ours and still standing.
+    /// Whether at least one message is selected for deletion.
     pub(crate) fn selection_deletable(&self) -> bool {
-        let msgs = self.selected_in_order();
-        !msgs.is_empty() && msgs.iter().all(|m| MessageBubbleHelper::is_from_me(m, "me") && m.revoked_at.is_none())
+        !self.selected_in_order().is_empty()
     }
 
-    /// Delete for everyone; the first click arms it.
+    /// Open the delete choice dialog for selected messages.
     pub fn select_delete(&mut self, cx: &mut Context<Self>) {
         if !self.selection_deletable() {
             return;
         }
-        if !self.select_confirm_delete {
-            self.select_confirm_delete = true;
-            cx.notify();
-            return;
-        }
         let Some(chat_id) = self.selected_chat_id.clone() else { return };
-        for msg in self.selected_in_order() {
-            self.delete_message(chat_id.clone(), msg.id, cx);
-        }
-        self.exit_select_mode(cx);
+        self.open_delete_message_dialog(chat_id, self.selected_in_order(), cx);
     }
 }

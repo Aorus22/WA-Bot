@@ -102,8 +102,8 @@ pub struct ChatView {
     /// Select-messages mode: bubbles get checkboxes and the header becomes an action bar.
     pub select_mode: bool,
     pub selected_messages: HashSet<String>,
-    /// Delete in the selection bar needs a second click.
-    pub select_confirm_delete: bool,
+    /// Modal offering Delete for me and, when available, Delete for everyone.
+    pub delete_message_dialog: Option<DeleteMessageDialog>,
     /// Messages a multi-forward sends, in order (empty for a single forward).
     pub forward_ids: Vec<String>,
     /// Select-chats mode in the chat list.
@@ -190,8 +190,8 @@ pub struct ChatView {
     pub compose_field_focus: FocusHandle,
     pub active_compose_field: usize,
     pub is_sending_attachment: bool,
-    /// Pasted image staged in the composer until send.
-    pub pending_attachment: Option<PendingAttachment>,
+    /// Attachments staged in the preview dialog until the user chooses Send.
+    pub pending_attachments: Vec<PendingAttachment>,
 
     // Full-screen image preview
     pub preview_image_url: Option<String>,
@@ -301,7 +301,7 @@ impl ChatView {
             is_exporting_chat: false,
             select_mode: false,
             selected_messages: HashSet::new(),
-            select_confirm_delete: false,
+            delete_message_dialog: None,
             forward_ids: Vec::new(),
             chat_select_mode: false,
             selected_chats: HashSet::new(),
@@ -381,7 +381,7 @@ impl ChatView {
             compose_field_focus: cx.focus_handle(),
             active_compose_field: 0,
             is_sending_attachment: false,
-            pending_attachment: None,
+            pending_attachments: Vec::new(),
             join_group_link: String::new(),
             join_group_focus: cx.focus_handle(),
             is_joining_group: false,
@@ -679,5 +679,6 @@ impl Render for ChatView {
             // cursor, drag to pan, double-click to zoom, Esc / click outside to close.
             .children(self.render_image_viewer(window, cx))
             .children(self.render_video_viewer(window, cx))
+            .children(self.render_delete_message_dialog(window, cx))
     }
 }
