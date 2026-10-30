@@ -40,6 +40,10 @@ type BackupService interface {
 	Start(target string, keep int) error
 	Status() BackupStatus
 	List(ctx context.Context, target string) ([]BackupEntry, error)
+	// StartRestore merges a backup into the account's live data; nothing live
+	// is replaced.
+	StartRestore(target, account, id string) error
+	RestoreStatus() BackupStatus
 }
 
 func (h *Handler) SetBackupService(s BackupService) { h.backup = s }
@@ -103,4 +107,37 @@ func (bh *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 		list = []BackupEntry{}
 	}
 	bh.handler.sendJSON(w, list)
+}
+
+// Restore merges one backup into the running app's data in the background;
+// poll RestoreStatus for progress.
+func (bh *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	svc := bh.service(w)
+	if svc == nil {
+		return
+	}
+	var req struct {
+		Target  string `json:"target"`
+		Account string `json:"account"`
+		ID      string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		bh.handler.sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := svc.StartRestore(strings.TrimSpace(req.Target), strings.TrimSpace(req.Account), strings.TrimSpace(req.ID)); err != nil {
+		bh.handler.sendError(w, http.StatusConflict, err.Error())
+		return
+	}
+	bh.handler.sendSuccess(w, nil)
+}
+
+func (bh *BackupHandler) RestoreStatus(w http.ResponseWriter, r *http.Request) {
+	if svc := bh.service(w); svc != nil {
+		bh.handler.sendJSON(w, svc.RestoreStatus())
+	}
 }

@@ -73,7 +73,12 @@ manifests-copy/<akun>/<id>-<sha256>.json salinan kedua
 
 ### Tahap 2: parity + restore ke DB aktif
 - [ ] Parity Reed-Solomon per grup chunk, perbaikan otomatis saat restore/check.
-- [ ] Mode Gabung (default) dan Ganti total; tukar DB lewat supervisor; tombol batal 7 hari.
+- [x] Mode Gabung (2026-10-30), live tanpa restart: `backup.Merge` menambah baris yang belum ada
+      (`INSERT OR IGNORE` per primary key; contacts, chats, messages, favorite_stickers, lid_mapping,
+      group_cache) dan media yang belum ada. Data live selalu menang. `POST /api/backup/restore`,
+      `GET /api/backup/restore/status`, tombol Restore di gpui dan web. Pesan yang sengaja dihapus
+      lokal akan muncul lagi bila masih ada di backup. DB pengaturan app tidak digabung.
+- [x] Ganti total: dibatalkan, tidak diperlukan.
 
 ### Tahap 3: Google Drive
 - [ ] OAuth desktop (PKCE, loopback), scope `drive.appdata`, token di keyring OS.

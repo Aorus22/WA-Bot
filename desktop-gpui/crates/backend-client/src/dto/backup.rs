@@ -10,7 +10,17 @@ pub struct BackupRequest {
     pub keep: u32,
 }
 
-/// Progress and outcome of the latest backup (`GET /api/backup/status`).
+/// The body of `POST /api/backup/restore`: merge one backup into the running app.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct RestoreRequest {
+    /// Absolute path of the backup folder.
+    pub target: String,
+    pub account: String,
+    pub id: String,
+}
+
+/// Progress and outcome of the latest backup (`GET /api/backup/status`) or
+/// restore (`GET /api/backup/restore/status`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupStatus {

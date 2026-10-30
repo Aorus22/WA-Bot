@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,9 +19,19 @@ import (
 type backupService struct {
 	mu     sync.Mutex
 	status handlers.BackupStatus
+	// media and hub are what a restore merges into and announces to.
+	media objectstorage.Store
+	hub   interface {
+		BroadcastMessage(msgType string, payload interface{})
+	}
+	restoreStatus handlers.BackupStatus
 }
 
-func newBackupService() *backupService { return &backupService{} }
+func newBackupService(media objectstorage.Store, hub interface {
+	BroadcastMessage(msgType string, payload interface{})
+}) *backupService {
+	return &backupService{media: media, hub: hub}
+}
 
 func (b *backupService) Status() handlers.BackupStatus {
 	b.mu.Lock()
@@ -28,14 +39,109 @@ func (b *backupService) Status() handlers.BackupStatus {
 	return b.status
 }
 
+func (b *backupService) RestoreStatus() handlers.BackupStatus {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.restoreStatus
+}
+
+// StartRestore merges one backup into the account's live data in the
+// background. Nothing live is replaced, see backup.Merge.
+func (b *backupService) StartRestore(target, account, id string) error {
+	if target == "" || !filepath.IsAbs(target) {
+		return fmt.Errorf("choose a backup folder (absolute path)")
+	}
+	if account == "" || id == "" {
+		return fmt.Errorf("choose a backup to restore")
+	}
+	db := filepath.Join(accountsRoot, account, "database", backup.MessagesFile)
+	if _, err := os.Stat(db); err != nil {
+		return fmt.Errorf("account %s is not linked on this device; log in with it first", account)
+	}
+	b.mu.Lock()
+	if b.restoreStatus.Running || b.status.Running {
+		b.mu.Unlock()
+		return fmt.Errorf("a backup or restore is already running")
+	}
+	b.restoreStatus = handlers.BackupStatus{Running: true, Account: account, StartedAt: time.Now().UnixMilli()}
+	b.mu.Unlock()
+
+	go func() {
+		rep, err := backup.Merge(context.Background(), backup.LocalFolder{Root: target}, account, id,
+			backup.MergeTarget{MessagesDB: db, Media: mergeMedia(b.media)},
+			backup.Options{WorkDir: "tmp", Progress: func(p backup.Progress) {
+				b.mu.Lock()
+				defer b.mu.Unlock()
+				b.restoreStatus.Stage, b.restoreStatus.Item = p.Stage, p.Item
+				b.restoreStatus.Done, b.restoreStatus.Total = p.Done, p.Total
+				b.restoreStatus.Percent = restorePercent(p.Stage, p.Done, p.Total)
+			}})
+		b.mu.Lock()
+		b.restoreStatus.Running = false
+		b.restoreStatus.FinishedAt = time.Now().UnixMilli()
+		if err != nil {
+			b.restoreStatus.Error = err.Error()
+		} else {
+			b.restoreStatus.Percent = 100
+			b.restoreStatus.Summary = mergeSummary(rep)
+		}
+		b.mu.Unlock()
+		if err == nil && b.hub != nil {
+			b.hub.BroadcastMessage("chats_changed", map[string]interface{}{"reason": "restored"})
+		}
+	}()
+	return nil
+}
+
+// restorePercent folds a merge stage into 0..99: reading the backup into
+// staging, adding the rows, then the media objects.
+func restorePercent(stage string, done, total int64) int {
+	switch stage {
+	case "chat":
+		return 10
+	case "merge":
+		return 40
+	case "media":
+		if total > 0 {
+			return 40 + int(float64(done)/float64(total)*59)
+		}
+		return 40
+	}
+	return 0
+}
+
+func mergeSummary(r *backup.MergeReport) string {
+	var rows, present int64
+	for _, n := range r.Added {
+		rows += n
+	}
+	for _, n := range r.Present {
+		present += n
+	}
+	out := fmt.Sprintf("%d messages, chats and contacts added (%d were already here)\n%d media added (%d were already here)",
+		rows, present, r.MediaAdded, r.MediaPresent)
+	if len(r.Lost) > 0 {
+		out += fmt.Sprintf("\n%d parts of the backup could not be read and were skipped", len(r.Lost))
+	}
+	return out
+}
+
+// mergeMedia is nil-safe: an unset store leaves media out of the merge.
+func mergeMedia(s objectstorage.Store) backup.MergeMedia {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
 func (b *backupService) Start(target string, keep int) error {
 	if target == "" || !filepath.IsAbs(target) {
 		return fmt.Errorf("choose a backup folder (absolute path)")
 	}
 	b.mu.Lock()
-	if b.status.Running {
+	if b.status.Running || b.restoreStatus.Running {
 		b.mu.Unlock()
-		return fmt.Errorf("a backup is already running")
+		return fmt.Errorf("a backup or restore is already running")
 	}
 	b.status = handlers.BackupStatus{Running: true, StartedAt: time.Now().UnixMilli()}
 	b.mu.Unlock()

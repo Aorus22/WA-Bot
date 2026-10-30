@@ -18,8 +18,14 @@ const STAGES: Record<string, string> = {
 	manifest: 'Finishing',
 }
 
-function progressText(status: BackupStatus): string {
-	const label = STAGES[status.stage ?? ''] ?? 'Working'
+const RESTORE_STAGES: Record<string, string> = {
+	chat: 'Reading chats from the backup',
+	merge: 'Adding missing chats and messages',
+	media: 'Adding missing media',
+}
+
+function progressText(status: BackupStatus, restoring: boolean): string {
+	const label = (restoring ? RESTORE_STAGES[status.stage ?? ''] : undefined) ?? STAGES[status.stage ?? ''] ?? 'Working'
 	if (status.total > 0) return `${label} · ${status.done} of ${status.total}`
 	return status.item ? `${label} · ${status.item}` : label
 }
@@ -28,9 +34,15 @@ function progressText(status: BackupStatus): string {
 export function BackupSection() {
 	const [folder, setFolder] = useState(() => localStorage.getItem(FOLDER_KEY) ?? '')
 	const [status, setStatus] = useState<BackupStatus | null>(null)
+	const [restoreStatus, setRestoreStatus] = useState<BackupStatus | null>(null)
+	const [lastWasRestore, setLastWasRestore] = useState(false)
 	const [backups, setBackups] = useState<BackupEntry[]>([])
 	const wasRunning = useRef(false)
-	const running = status?.running ?? false
+	const restoreWasRunning = useRef(false)
+	const backingUp = status?.running ?? false
+	const restoring = restoreStatus?.running ?? false
+	const running = backingUp || restoring
+	const shown = lastWasRestore ? restoreStatus : status
 
 	const loadList = useCallback(async (target: string) => {
 		if (!target.startsWith('/')) return setBackups([])
@@ -56,18 +68,40 @@ export function BackupSection() {
 		}
 	}, [loadList])
 
+	const loadRestoreStatus = useCallback(async () => {
+		try {
+			const next = await api.getRestoreStatus()
+			setRestoreStatus(next)
+			if (next.running) setLastWasRestore(true)
+			if (restoreWasRunning.current && !next.running) {
+				if (next.error) toast.error(`Restore failed: ${next.error}`)
+				else toast.success('Restore finished')
+			}
+			restoreWasRunning.current = next.running
+		} catch {
+			// Retried on the next poll or click.
+		}
+	}, [])
+
 	useEffect(() => {
 		void loadStatus()
+		void loadRestoreStatus()
 		void loadList(folder)
 		// Only on mount; the folder reloads the list when it is saved.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [])
 
 	useEffect(() => {
-		if (!running) return
+		if (!backingUp) return
 		const timer = window.setInterval(() => void loadStatus(), 1000)
 		return () => window.clearInterval(timer)
-	}, [running, loadStatus])
+	}, [backingUp, loadStatus])
+
+	useEffect(() => {
+		if (!restoring) return
+		const timer = window.setInterval(() => void loadRestoreStatus(), 1000)
+		return () => window.clearInterval(timer)
+	}, [restoring, loadRestoreStatus])
 
 	const saveFolder = () => {
 		const target = folder.trim()
@@ -85,10 +119,22 @@ export function BackupSection() {
 		saveFolder()
 		try {
 			await api.startBackup(target, KEEP_BACKUPS)
+			setLastWasRestore(false)
 			wasRunning.current = true
 			setStatus({ running: true, done: 0, total: 0 })
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : 'Could not start the backup')
+		}
+	}
+
+	const restore = async (b: BackupEntry) => {
+		try {
+			await api.startRestore(folder.trim(), b.account, b.id)
+			setLastWasRestore(true)
+			restoreWasRunning.current = true
+			setRestoreStatus({ running: true, done: 0, total: 0 })
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Could not start the restore')
 		}
 	}
 
@@ -108,7 +154,7 @@ export function BackupSection() {
 				</div>
 				<Button size="sm" onClick={start} disabled={running || !folder.trim()}>
 					{running && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-					{running ? 'Backing up…' : 'Back up now'}
+					{restoring ? 'Restoring…' : backingUp ? 'Backing up…' : 'Back up now'}
 				</Button>
 			</div>
 			<div className="flex flex-col gap-1.5">
@@ -126,37 +172,43 @@ export function BackupSection() {
 					The full path on the computer running WA Bot. The newest {KEEP_BACKUPS} backups are kept.
 				</span>
 			</div>
-			{status && (running || status.error || status.summary) && (
+			{shown && (running || shown.error || shown.summary) && (
 				<div className="space-y-1.5 border-t pt-3 text-xs text-muted-foreground">
-					{running ? (
+					{shown.running ? (
 						<>
-							<div className="font-medium text-foreground">Backing up · {status.percent ?? 0}%</div>
+							<div className="font-medium text-foreground">{restoring ? 'Restoring' : 'Backing up'} · {shown.percent ?? 0}%</div>
 							<div
 								role="progressbar"
 								aria-valuemin={0}
 								aria-valuemax={100}
-								aria-valuenow={status.percent ?? 0}
+								aria-valuenow={shown.percent ?? 0}
 								className="flex h-1.5 rounded-full bg-muted overflow-hidden"
 							>
-								<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.max(1, status.percent ?? 0)}%` }} />
+								<div className="h-full bg-[#00a884] transition-all" style={{ width: `${Math.max(1, shown.percent ?? 0)}%` }} />
 							</div>
-							<div>{progressText(status)}</div>
-							{(status.accountCount ?? 0) > 1 && <div>Account {status.accountIndex} of {status.accountCount}</div>}
+							<div>{progressText(shown, restoring)}</div>
+							{(shown.accountCount ?? 0) > 1 && <div>Account {shown.accountIndex} of {shown.accountCount}</div>}
 						</>
-					) : status.error ? (
-						<p className="text-destructive">{status.error}</p>
+					) : shown.error ? (
+						<p className="text-destructive">{shown.error}</p>
 					) : (
-						<p className="whitespace-pre-line">{status.summary}</p>
+						<p className="whitespace-pre-line">{shown.summary}</p>
 					)}
 				</div>
 			)}
 			{newest.length > 0 && (
 				<div className="space-y-1.5">
 					<p className="text-xs font-medium">{newest.length} backups in this folder</p>
+					<p className="text-xs text-muted-foreground">
+						Restore adds what is missing from a backup. Nothing you have now is replaced.
+					</p>
 					<BoxedList className="flex flex-col space-y-0.5">
 						{newest.slice(0, 5).map((b) => (
-							<div key={`${b.account}/${b.id}`} className="flex items-center text-xs text-muted-foreground">
-								{new Date(b.createdAt).toLocaleString()} · {b.account}
+							<div key={`${b.account}/${b.id}`} className="flex items-center justify-between text-xs text-muted-foreground">
+								<span>{new Date(b.createdAt).toLocaleString()} · {b.account}</span>
+								<Button size="sm" variant="secondary" onClick={() => void restore(b)} disabled={running}>
+									Restore
+								</Button>
 							</div>
 						))}
 					</BoxedList>

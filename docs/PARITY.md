@@ -30,7 +30,7 @@ change in the other, in the same commit or the same PR.
 | --- | --- | --- |
 | Settings page | `crates/app/src/views/settings.rs` and `settings_*.rs` | `src/pages/settings/SettingsPage.tsx` |
 | Chat history and media rows | `views/settings_history.rs` | `SettingsPage.tsx`, `HistoryMediaSection.tsx` |
-| Backup | `views/settings_backup.rs` | `BackupSection.tsx` |
+| Backup (back up now, per-backup Restore that merges: adds only what is missing, replaces nothing) | `views/settings/backup.rs` | `BackupSection.tsx` |
 | AI provider | `views/settings_ai.rs` | `SettingsPage.tsx` (AI) |
 | Theme picker | `settings.rs` (modal) | `SettingsPage.tsx` (dialog) |
 | WinUI / Fluent style | `theme/shape.rs` (`WINUI`), `SurfaceTokens::apply_fluent` in `theme/surface.rs`, setting `winui_style` | `--winui-*` vars and `:root[data-style="winui"]` rules in `index.css`, key `wa-bot-winui-style` |

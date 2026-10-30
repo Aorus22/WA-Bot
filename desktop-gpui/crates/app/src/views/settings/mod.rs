@@ -174,6 +174,11 @@ pub struct SettingsView {
     pub backups: Vec<BackupEntry>,
     pub is_backing_up: bool,
     pub backup_polling: bool,
+    pub restore_status: Option<BackupStatus>,
+    pub is_restoring: bool,
+    pub restore_polling: bool,
+    /// Which run the status area shows: the latest restore or the latest backup.
+    pub last_was_restore: bool,
 
     // App updates (GitHub Releases)
     pub update_status: UpdateStatus,
