@@ -46,6 +46,7 @@ mod state;
 pub(crate) use helpers::render_message_mentions_with_spans;
 use layout_pref::LayoutKind;
 pub(crate) use media::viewer_math::*;
+pub(crate) use media::thumbnail::*;
 pub use composer::*;
 pub use conversation::{MentionText, TextMenuRequest};
 pub use chat_page::*;

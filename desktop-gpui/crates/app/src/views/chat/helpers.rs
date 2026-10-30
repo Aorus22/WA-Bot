@@ -1,6 +1,7 @@
 use crate::views::chat::*;
 use crate::theme::shape::ShapeExt;
 use crate::theme::surface::SurfaceExt;
+use std::sync::Arc;
 
 pub(crate) fn prepare_mention_text(text: &str, group: Option<&GroupCache>) -> (String, Vec<String>) {
     let Some(group) = group else { return (text.to_string(), Vec::new()) };
@@ -145,18 +146,36 @@ pub(crate) enum PreviewLoad {
 /// cache as the `img` element, so this adds no second download; gpui re-renders
 /// the view when the load finishes.
 pub(crate) fn preview_load_state(url: &str, window: &mut Window, cx: &mut App) -> PreviewLoad {
-    let resource = if url.starts_with("http://") || url.starts_with("https://") {
-        Resource::Uri(SharedUri::from(url.to_string()))
-    } else {
-        Resource::Path(std::path::Path::new(url).into())
-    };
-    match window.use_asset::<ImageAssetLoader>(&resource, cx) {
+    match window.use_asset::<ImageAssetLoader>(&preview_resource(url), cx) {
         None => PreviewLoad::Loading,
         Some(Err(_)) => PreviewLoad::Failed,
         Some(Ok(data)) => {
             let size = data.size(0);
             PreviewLoad::Ready(size.width.0 as f32, size.height.0 as f32)
         }
+    }
+}
+
+/// The decoded picture at `url`, out of the same asset cache the `img` element
+/// fills. `None` while it is still loading, or after a failure.
+pub(crate) fn preview_render_image(
+    url: &str,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<Arc<RenderImage>> {
+    match window.use_asset::<ImageAssetLoader>(&preview_resource(url), cx) {
+        Some(Ok(data)) => Some(data),
+        _ => None,
+    }
+}
+
+/// Where the picture at `url` is read from: a file for the local preview of an
+/// attachment that is still uploading, an http(s) URI otherwise.
+fn preview_resource(url: &str) -> Resource {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Resource::Uri(SharedUri::from(url.to_string()))
+    } else {
+        Resource::Path(std::path::Path::new(url).into())
     }
 }
 

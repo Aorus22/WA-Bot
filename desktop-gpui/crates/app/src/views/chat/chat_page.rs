@@ -44,6 +44,9 @@ pub struct ChatView {
     // Cached messages for 60fps scrolling
     pub cached_chat_id: Option<String>,
     pub cached_render_messages: Vec<RenderMessage>,
+    /// Downscaled copies of the pictures the bubbles draw, so gpui never has to
+    /// shrink a full-size one itself; see `media::thumbnail`.
+    pub(crate) bubble_pictures: ThumbnailCache,
 
     // Scroll handles for visual scrollbars (uniform_list and virtual list)
     pub chat_list_scroll_handle: UniformListScrollHandle,
@@ -261,6 +264,7 @@ impl ChatView {
 
             cached_chat_id: None,
             cached_render_messages: Vec::new(),
+            bubble_pictures: ThumbnailCache::new(),
 
             chat_list_scroll_handle: UniformListScrollHandle::new(),
             // At the bottom the list follows new messages by itself; scrolling

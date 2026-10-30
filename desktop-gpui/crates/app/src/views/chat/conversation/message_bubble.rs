@@ -384,6 +384,16 @@ impl ChatView {
                             MESSAGE_IMAGE_MIN_WIDTH,
                             MESSAGE_IMAGE_MIN_HEIGHT,
                         ));
+                        // gpui has no mipmaps, so a full-size picture drawn this
+                        // small comes out aliased; hand it a copy at the size the
+                        // bubble shows it instead (see `media::thumbnail`).
+                        let picture = bubble_picture(
+                            &mut this.bubble_pictures,
+                            &full_url,
+                            (image_w, image_h),
+                            window,
+                            cx,
+                        );
                         let frame = div()
                                 .w(px(image_w))
                                 .h(px(image_h))
@@ -404,9 +414,12 @@ impl ChatView {
                                     // The id is what lets gpui key frame state for
                                     // multi-frame GIF/WebP; without it only the first
                                     // frame ever renders.
-                                    img(match m_url.strip_prefix(LOCAL_MEDIA_PREFIX) {
-                                        Some(path) => ImageSource::from(std::path::PathBuf::from(path)),
-                                        None => ImageSource::from(full_url),
+                                    img(match picture {
+                                        Some(picture) => ImageSource::Render(picture),
+                                        None => match m_url.strip_prefix(LOCAL_MEDIA_PREFIX) {
+                                            Some(path) => ImageSource::from(std::path::PathBuf::from(path)),
+                                            None => ImageSource::from(full_url),
+                                        },
                                     })
                                         .id(format!("msg-image-{}", r_msg.msg.id))
                                         .w(px(image_w))
