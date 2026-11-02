@@ -34,3 +34,10 @@ pub(crate) const AVATAR_COLORS: &[u32] = &[
     0x10b981, // Green
     0x14b8a6, // Teal
 ];
+
+/// How many lines the composer grows to before it scrolls. A line is counted
+/// as the text is wrapped, not as it is broken with Enter.
+pub(crate) const COMPOSE_MAX_ROWS: usize = 6;
+pub(crate) const COMPOSE_LINE_HEIGHT: f32 = 20.0;
+/// Space above and below the text inside the composer.
+pub(crate) const COMPOSE_PADDING: f32 = 12.0;

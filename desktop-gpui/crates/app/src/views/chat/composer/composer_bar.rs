@@ -25,8 +25,6 @@ impl ChatView {
         } else {
             "http://127.0.0.1:3000/api".to_string()
         };
-        let compose_rows = self.compose_text.split('\n').count().clamp(1, 6);
-        let compose_textarea_height = px(compose_rows as f32 * 20.0 + 12.0);
         // No bar behind the pill: it floats over the chat, as in WhatsApp Web.
         v_flex()
             .relative()
@@ -298,8 +296,8 @@ impl ChatView {
                                         .appearance(false)
                                         .bordered(false)
                                         .w_full()
-                                        .h(compose_textarea_height)
-                                        .max_h(px(150.0))
+                                        .min_h(px(COMPOSE_LINE_HEIGHT + COMPOSE_PADDING))
+                                        .max_h(px(COMPOSE_MAX_ROWS as f32 * COMPOSE_LINE_HEIGHT + COMPOSE_PADDING))
                                         .text_sm()
                                         .text_color(text_color)
                                         .into_any_element(),
