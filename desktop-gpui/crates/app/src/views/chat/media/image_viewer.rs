@@ -13,7 +13,11 @@ impl ChatView {
     }
 
     pub fn close_preview(&mut self, cx: &mut Context<Self>) {
-        self.preview_image_url = None;
+        // The viewer draws the picture at full size; nothing else needs that
+        // copy once it is closed.
+        if let Some(url) = self.preview_image_url.take() {
+            release_picture(&url, None, cx);
+        }
         self.preview_msg = None;
         self.preview_drag = None;
         cx.notify();

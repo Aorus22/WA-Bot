@@ -171,7 +171,7 @@ pub(crate) fn preview_render_image(
 
 /// Where the picture at `url` is read from: a file for the local preview of an
 /// attachment that is still uploading, an http(s) URI otherwise.
-fn preview_resource(url: &str) -> Resource {
+pub(crate) fn preview_resource(url: &str) -> Resource {
     if url.starts_with("http://") || url.starts_with("https://") {
         Resource::Uri(SharedUri::from(url.to_string()))
     } else {

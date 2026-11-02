@@ -9,16 +9,18 @@
 //! nothing to shrink.
 //!
 //! Each copy is made once and kept in [`ThumbnailCache`], which lives on the
-//! chat view for as long as the pictures are on screen.
+//! chat view for as long as the pictures are on screen. The full-size picture
+//! is let go of as soon as its copy exists: gpui keeps every decoded asset
+//! until it is told to drop it, and a photo is tens of megabytes decoded.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::views::chat::*;
 
-/// A cached copy: the source picture it came from, its width and its height,
-/// in device pixels.
-pub(crate) type ThumbnailKey = (usize, u32, u32);
+/// A cached copy: the URL of the picture it came from, its width and its
+/// height, in device pixels.
+pub(crate) type ThumbnailKey = (String, u32, u32);
 
 /// Downscaled pictures, most recently used first.
 pub(crate) type ThumbnailCache = VecDeque<(ThumbnailKey, Arc<RenderImage>)>;
@@ -27,7 +29,7 @@ pub(crate) type ThumbnailCache = VecDeque<(ThumbnailKey, Arc<RenderImage>)>;
 /// sprite-atlas tile while it is cached, and a bubble is at most 340x360
 /// logical pixels, so this stays in the low tens of megabytes even when every
 /// entry is a big picture.
-pub(crate) const THUMBNAIL_CACHE_LIMIT: usize = 32;
+pub(crate) const THUMBNAIL_CACHE_LIMIT: usize = 24;
 
 /// Below this linear shrink the GPU's own filtering is good enough and a copy
 /// would only cost memory.
@@ -43,25 +45,41 @@ pub(crate) fn bubble_picture(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<Arc<RenderImage>> {
-    let source = preview_render_image(url, window, cx)?;
     let scale = window.scale_factor();
     let target = (
         (frame.0 * scale).round().max(1.0) as u32,
         (frame.1 * scale).round().max(1.0) as u32,
     );
-    let key: ThumbnailKey = (source.id.0, target.0, target.1);
+    let key: ThumbnailKey = (url.to_string(), target.0, target.1);
     let cached_index = cache.iter().position(|(cached, _)| *cached == key);
     let cached = cached_index.and_then(|index| cache.remove(index));
     if let Some(entry) = cached {
-        // Reuse the copy, and mark it as the most recently used one.
+        // Reuse the copy, and mark it as the most recently used one. The
+        // full-size picture is not asked for again, so it is not reloaded.
         let picture = entry.1.clone();
         cache.push_front(entry);
         return Some(picture);
     }
-    let picture = downscale(&source, target)?;
+    let source = preview_render_image(url, window, cx)?;
+    let picture = downscale(&source, target);
+    if picture.is_some() {
+        // Only the copy is drawn from here on.
+        release_picture(url, Some(window), cx);
+    }
+    let picture = picture?;
     evict_if_full(cache, window, cx);
     cache.push_front((key, picture.clone()));
     Some(picture)
+}
+
+/// Let go of the decoded picture at `url`, in gpui's asset cache and on the
+/// GPU. It is decoded again the next time something asks for it.
+pub(crate) fn release_picture(url: &str, window: Option<&mut Window>, cx: &mut App) {
+    let resource = preview_resource(url);
+    if let Some(Ok(picture)) = cx.fetch_asset::<ImageAssetLoader>(&resource) {
+        cx.drop_image(picture, window);
+    }
+    cx.remove_asset::<ImageAssetLoader>(&resource);
 }
 
 /// A Lanczos3 copy of `source` for a bubble of `target` device pixels. `None`
@@ -92,8 +110,11 @@ pub(crate) fn downscale(source: &Arc<RenderImage>, target: (u32, u32)) -> Option
     let copy_h = (source_h as f32 * cover).ceil().max(1.0) as u32;
     // A `RenderImage` holds BGRA, and `resize` works channel by channel, so the
     // copy is BGRA too, which is what the atlas upload expects.
-    let buffer =
-        image::RgbaImage::from_raw(source_w as u32, source_h as u32, source.as_bytes(0)?.to_vec())?;
+    let buffer = image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(
+        source_w as u32,
+        source_h as u32,
+        source.as_bytes(0)?,
+    )?;
     let resized = image::imageops::resize(
         &buffer,
         copy_w,

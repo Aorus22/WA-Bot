@@ -170,7 +170,9 @@ impl ChatView {
         }
         self.context_menu = None;
         self.chat_context_menu = None;
-        self.preview_image_url = None;
+        if let Some(url) = self.preview_image_url.take() {
+            release_picture(&url, None, cx);
+        }
         self.close_video(None, cx);
         cx.notify();
     }
