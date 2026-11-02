@@ -748,25 +748,19 @@ mod tests {
     #[test]
     fn env_vars_are_exactly_main_js_five_without_secrets() {
         let base = PathBuf::from("/tmp/wabot-test");
-        let opts = SpawnOptions::new(
-            "/opt/wa-bot-backend",
-            base.join("database"),
-            base.join("media"),
-        )
-        .unwrap();
+        // Built with `Path::join` rather than written out literally: the
+        // separator is host-specific, so a hard-coded "/tmp/.../database"
+        // only holds on Unix.
+        let db = base.join("database");
+        let media = base.join("media");
+        let opts = SpawnOptions::new("/opt/wa-bot-backend", db.clone(), media.clone()).unwrap();
         let env = opts.env_vars();
         assert_eq!(env.len(), 5);
         let get = |k: &str| env.iter().find(|(key, _)| *key == k).map(|(_, v)| v.clone());
         assert_eq!(get("PORT").as_deref(), Some(":0"));
         assert_eq!(get("ALLOWED_ORIGINS").as_deref(), Some("*"));
-        assert_eq!(
-            get("DB_PATH").as_deref(),
-            Some("/tmp/wabot-test/database")
-        );
-        assert_eq!(
-            get("MEDIA_PATH").as_deref(),
-            Some("/tmp/wabot-test/media")
-        );
+        assert_eq!(get("DB_PATH").as_deref(), db.to_str());
+        assert_eq!(get("MEDIA_PATH").as_deref(), media.to_str());
         assert_eq!(get("TZ").as_deref(), Some("Asia/Jakarta"));
         // No encryption-key material anywhere (wa-bot has none).
         for (k, v) in &env {
