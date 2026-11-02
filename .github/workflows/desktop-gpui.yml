@@ -22,7 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            # The whole workspace: the GPUI frontend plus everything it drives.
+            packages: '--workspace'
+          - os: windows-latest
+            # The frontend itself is Linux-only — layer-shell, GTK theme reads,
+            # `std::os::unix` sockets — so building the whole workspace here can
+            # never pass. The crates the backend runs on are portable and stay
+            # covered. Same set as the cross-target check below.
+            packages: '-p wabot-supervisor -p wabot-settings -p wabot-backend-client'
 
     steps:
       - name: Checkout code
@@ -51,14 +60,14 @@ jobs:
           sudo apt-get install -y libasound2-dev libfontconfig1-dev libx11-xcb-dev libssl-dev libxkbcommon-x11-dev libxkbcommon-dev mingw-w64
 
       # --locked everywhere: any Cargo.lock drift fails CI (exact-pin enforcement).
-      - name: Build workspace
-        run: cargo build --workspace --locked --manifest-path desktop-gpui/Cargo.toml
+      - name: Build
+        run: cargo build ${{ matrix.packages }} --locked --manifest-path desktop-gpui/Cargo.toml
 
-      - name: Test workspace
-        run: cargo test --workspace --locked --manifest-path desktop-gpui/Cargo.toml
+      - name: Test
+        run: cargo test ${{ matrix.packages }} --locked --manifest-path desktop-gpui/Cargo.toml
 
       - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --locked --manifest-path desktop-gpui/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy ${{ matrix.packages }} --locked --manifest-path desktop-gpui/Cargo.toml --all-targets -- -D warnings
 
       # Cross-target safety net on ubuntu (no linker needed for check).
       - name: Check Windows target
