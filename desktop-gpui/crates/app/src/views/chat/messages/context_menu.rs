@@ -1,4 +1,5 @@
 use crate::theme::surface::SurfaceExt;
+use crate::components::emoji_picker::EMOJI_FONT_FAMILY;
 use crate::views::chat::*;
 use super::star_pin::{DEFAULT_PIN_SECS, PIN_DURATIONS};
 
@@ -87,7 +88,8 @@ impl ChatView {
                                     .when(shape.styled, |button| button.rounded(px(shape.radius_button)))
                                     .hover(|s| s.bg(surface.menu_item_hover))
                                     .text_lg()
-                                    .child(emoji)
+                                    .font_family(EMOJI_FONT_FAMILY)
+                                .child(emoji)
                                     .on_mouse_down(MouseButton::Left, react!(emoji, cx))
                             }),
                         ),
@@ -140,6 +142,7 @@ impl ChatView {
                                 cx,
                             )
                                 .text_xl()
+                                .font_family(EMOJI_FONT_FAMILY)
                                 .child(emoji)
                                 .on_mouse_down(MouseButton::Left, react!(emoji, cx))
                         }))

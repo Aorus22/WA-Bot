@@ -1,3 +1,4 @@
+use crate::components::emoji_picker::EMOJI_FONT_FAMILY;
 use crate::views::chat::*;
 use crate::theme::surface::SurfaceExt;
 use gpui_component::theme::Colorize as _;
@@ -674,7 +675,7 @@ impl ChatView {
                                     .child(h_flex()
                                         .items_center()
                                         .gap(px(2.0))
-                                        .child(r.emoji.clone())
+                                        .child(div().font_family(EMOJI_FONT_FAMILY).child(r.emoji.clone()))
                                         .children(if count_label.is_empty() { None } else { Some(
                                             div()
                                                 .chat_text(0.625, 0.875, chat_scale)
