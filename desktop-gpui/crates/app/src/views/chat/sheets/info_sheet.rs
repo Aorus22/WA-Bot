@@ -288,6 +288,7 @@ impl ChatView {
                 .child(
                     v_flex()
                         .id("info-sheet-scroll")
+                        .min_h_0()
                         .flex_1()
                         .overflow_y_scroll()
                         .p_4()

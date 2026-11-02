@@ -130,7 +130,7 @@ impl ChatView {
                 }))
         };
 
-        let mut body = v_flex().id("message-info-scroll").flex_1().overflow_y_scroll().pb_4();
+        let mut body = v_flex().flex_shrink_0().pb_4();
 
         if let Some(message) = message.as_ref() {
             let text = MessageBubbleHelper::decode_content(&message.content);
@@ -293,7 +293,8 @@ impl ChatView {
                             .child("Message info"),
                     ),
             )
-            .child(body)
+            // Scroll viewport: its content column must not shrink to fit, or nothing overflows.
+            .child(div().id("message-info-scroll").flex_1().min_h_0().overflow_y_scroll().child(body))
             .into_any_element()
     }
 }
