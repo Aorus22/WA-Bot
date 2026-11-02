@@ -125,6 +125,8 @@ export const ChatMessageItem = memo(({
 	const isImage = message.type === "image"
 	const isVideo = message.type === "video"
 	const isSticker = message.type === "sticker"
+	// Only plain text can be edited; a link preview's thumbnail does not make it media.
+	const canEdit = isMe && !isRevoked && (!message.type || message.type === "text")
 	const isDocument = message.type === "document"
 	const isAudio = message.type === "audio" || message.type === "ptt" || message.type === "voice"
 	const isPoll = message.type === "poll"
@@ -462,7 +464,7 @@ export const ChatMessageItem = memo(({
 											<PopoverContent className="w-auto p-1" align="start">
 												<div className="flex flex-col">
 													<button onClick={onReply} className="flex items-center gap-2 w-full p-2 hover:bg-muted rounded text-sm"><Reply className="h-4 w-4 text-primary" /><span>Reply</span></button>
-													<button onClick={onEdit} className="flex items-center gap-2 w-full p-2 hover:bg-muted rounded text-sm"><Edit3 className="h-4 w-4 text-orange-500" /><span>Edit</span></button>
+													{canEdit && <button onClick={onEdit} className="flex items-center gap-2 w-full p-2 hover:bg-muted rounded text-sm"><Edit3 className="h-4 w-4 text-orange-500" /><span>Edit</span></button>}
 													<button onClick={onDelete} className="flex items-center gap-2 w-full p-2 hover:bg-muted rounded text-sm text-destructive"><Trash2 className="h-4 w-4" /><span>Delete</span></button>
 												</div>
 											</PopoverContent>
@@ -514,7 +516,7 @@ export const ChatMessageItem = memo(({
 											}} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><SmilePlus className="h-4 w-4 text-primary" /><span className="font-medium">React…</span></button>
 											{isMe && !isRevoked && (
 												<>
-													<button onClick={onEdit} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Edit3 className="h-4 w-4 text-orange-500" /><span className="font-medium">Edit</span></button>
+													{canEdit && <button onClick={onEdit} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors"><Edit3 className="h-4 w-4 text-orange-500" /><span className="font-medium">Edit</span></button>}
 													<button onClick={onDelete} className="flex items-center gap-3 w-full p-2.5 hover:bg-muted rounded-lg text-sm transition-colors text-destructive"><Trash2 className="h-4 w-4" /><span className="font-medium">Delete for everyone</span></button>
 												</>
 											)}
