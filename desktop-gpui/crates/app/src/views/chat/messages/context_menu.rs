@@ -293,7 +293,9 @@ impl ChatView {
                 }
 
                 // Edit (own text messages)
-                if is_from_me && !has_media && msg_obj.revoked_at.is_none() {
+                // A link preview's thumbnail sets `media_url` on a plain text message, so the type decides.
+                let editable_type = matches!(msg_obj.message_type.as_str(), "" | "text") && !is_image_message(&msg_obj);
+                if is_from_me && editable_type && msg_obj.revoked_at.is_none() {
                     card = card.child(
                         styled_menu_row!(window, cx, "mm-edit", EDIT_SVG, "Edit", muted_text, text_color, hover_bg)
                             .on_mouse_down(MouseButton::Left, cx.listener({

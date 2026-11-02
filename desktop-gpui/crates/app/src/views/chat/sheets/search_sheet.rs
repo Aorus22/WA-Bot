@@ -411,6 +411,7 @@ impl ChatView {
                     // Results list
                     v_flex()
                         .id("search-sheet-results-list")
+                        .min_h_0()
                         .flex_1()
                         .overflow_y_scroll()
                         .p_2()

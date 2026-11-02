@@ -386,8 +386,8 @@ impl ChatStore {
             WsEvent::MessageEdited { chat_id, id, content, extra } => {
                 self.patch_message(chat_id, id, |m| {
                     m.content = content.clone();
-                    if extra.is_some() {
-                        m.extra = extra.clone();
+                    if let Some(extra) = extra {
+                        m.extra = Some((**extra).clone());
                     }
                 });
                 true

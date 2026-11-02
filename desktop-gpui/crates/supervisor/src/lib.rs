@@ -747,26 +747,20 @@ mod tests {
 
     #[test]
     fn env_vars_are_exactly_main_js_five_without_secrets() {
-        let base = PathBuf::from("/tmp/wabot-test");
-        let opts = SpawnOptions::new(
-            "/opt/wa-bot-backend",
-            base.join("database"),
-            base.join("media"),
-        )
-        .unwrap();
+        // `temp_dir()` is absolute on every host. A literal "/tmp/..." is not:
+        // Windows wants a drive prefix, and `SpawnOptions::new` rejects
+        // anything it cannot resolve.
+        let base = std::env::temp_dir().join("wabot-test");
+        let db = base.join("database");
+        let media = base.join("media");
+        let opts = SpawnOptions::new("/opt/wa-bot-backend", db.clone(), media.clone()).unwrap();
         let env = opts.env_vars();
         assert_eq!(env.len(), 5);
         let get = |k: &str| env.iter().find(|(key, _)| *key == k).map(|(_, v)| v.clone());
         assert_eq!(get("PORT").as_deref(), Some(":0"));
         assert_eq!(get("ALLOWED_ORIGINS").as_deref(), Some("*"));
-        assert_eq!(
-            get("DB_PATH").as_deref(),
-            Some("/tmp/wabot-test/database")
-        );
-        assert_eq!(
-            get("MEDIA_PATH").as_deref(),
-            Some("/tmp/wabot-test/media")
-        );
+        assert_eq!(get("DB_PATH").as_deref(), db.to_str());
+        assert_eq!(get("MEDIA_PATH").as_deref(), media.to_str());
         assert_eq!(get("TZ").as_deref(), Some("Asia/Jakarta"));
         // No encryption-key material anywhere (wa-bot has none).
         for (k, v) in &env {
@@ -776,10 +770,10 @@ mod tests {
         let cmd = opts.build_command();
         assert!(cmd.as_std().get_args().next().is_none());
         assert!(cmd.as_std().get_current_dir().is_none());
-        let opts_wd = opts.clone().with_work_dir("/tmp/wabot-test");
+        let opts_wd = opts.clone().with_work_dir(base.clone());
         assert_eq!(
             opts_wd.build_command().as_std().get_current_dir(),
-            Some(std::path::Path::new("/tmp/wabot-test"))
+            Some(base.as_path())
         );
     }
 

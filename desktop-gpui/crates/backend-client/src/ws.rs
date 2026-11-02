@@ -44,7 +44,11 @@ pub enum WsEvent {
         id: String,
         content: String,
         /// The message's extra after the edit, which carries its edit history.
-        extra: Option<crate::dto::MessageExtra>,
+        ///
+        /// Boxed: `MessageExtra` is a wide struct (every optional payload kind
+        /// at once), so inlining it here would make this variant dwarf all the
+        /// others in `WsEvent`.
+        extra: Option<Box<crate::dto::MessageExtra>>,
     },
     MessageReaction {
         chat_id: String,
@@ -227,7 +231,8 @@ impl WsMessage {
                 extra: self
                     .payload
                     .get("extra")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .map(Box::new),
             },
             "message_reaction" => WsEvent::MessageReaction {
                 chat_id: self

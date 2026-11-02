@@ -215,6 +215,7 @@ impl ChatView {
             } else {
                 v_flex()
                     .id("starred-sheet-list")
+                    .min_h_0()
                     .flex_1()
                     .overflow_y_scroll()
                     .p_2()

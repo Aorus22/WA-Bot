@@ -19,8 +19,10 @@ fn test_send_media_builder_audio_voice_note() {
 
 #[test]
 fn test_send_media_options_custom_secret() {
-    let mut opts = SendMediaOptions::default();
-    opts.secret = Some("my-secret-key".to_string());
+    let opts = SendMediaOptions {
+        secret: Some("my-secret-key".to_string()),
+        ..Default::default()
+    };
     let builder = SendMediaBuilder::new("12345@s.whatsapp.net", "document", vec![7, 8], "doc.pdf")
         .options(opts);
     let _form = builder.build_form();

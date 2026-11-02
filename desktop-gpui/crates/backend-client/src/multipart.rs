@@ -3,25 +3,13 @@ use crate::client::HttpClient;
 use crate::dto::{GroupCache, IdResult};
 use crate::error::{ClientError, Result};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SendMediaOptions {
     pub ptt: Option<bool>,
     pub seconds: Option<f64>,
     pub waveform: Option<String>,
     pub view_once: Option<bool>,
     pub secret: Option<String>,
-}
-
-impl Default for SendMediaOptions {
-    fn default() -> Self {
-        Self {
-            ptt: None,
-            seconds: None,
-            waveform: None,
-            view_once: None,
-            secret: None,
-        }
-    }
 }
 
 pub struct SendMediaBuilder {

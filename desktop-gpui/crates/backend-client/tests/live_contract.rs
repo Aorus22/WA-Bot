@@ -144,12 +144,11 @@ async fn live_backend_contract_roundtrip_if_available() {
     // Wait for connected event
     let mut connected = false;
     for _ in 0..30 {
-        match tokio::time::timeout(Duration::from_millis(200), rx.recv_async()).await {
-            Ok(Ok(WsEvent::Connected)) => {
-                connected = true;
-                break;
-            }
-            _ => {}
+        if let Ok(Ok(WsEvent::Connected)) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv_async()).await
+        {
+            connected = true;
+            break;
         }
     }
     assert!(connected, "WsClient must connect to live backend WS");
