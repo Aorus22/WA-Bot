@@ -747,10 +747,10 @@ mod tests {
 
     #[test]
     fn env_vars_are_exactly_main_js_five_without_secrets() {
-        let base = PathBuf::from("/tmp/wabot-test");
-        // Built with `Path::join` rather than written out literally: the
-        // separator is host-specific, so a hard-coded "/tmp/.../database"
-        // only holds on Unix.
+        // `temp_dir()` is absolute on every host. A literal "/tmp/..." is not:
+        // Windows wants a drive prefix, and `SpawnOptions::new` rejects
+        // anything it cannot resolve.
+        let base = std::env::temp_dir().join("wabot-test");
         let db = base.join("database");
         let media = base.join("media");
         let opts = SpawnOptions::new("/opt/wa-bot-backend", db.clone(), media.clone()).unwrap();
@@ -770,10 +770,10 @@ mod tests {
         let cmd = opts.build_command();
         assert!(cmd.as_std().get_args().next().is_none());
         assert!(cmd.as_std().get_current_dir().is_none());
-        let opts_wd = opts.clone().with_work_dir("/tmp/wabot-test");
+        let opts_wd = opts.clone().with_work_dir(base.clone());
         assert_eq!(
             opts_wd.build_command().as_std().get_current_dir(),
-            Some(std::path::Path::new("/tmp/wabot-test"))
+            Some(base.as_path())
         );
     }
 
