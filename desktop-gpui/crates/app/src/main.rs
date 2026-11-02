@@ -23,6 +23,9 @@ use wabot_backend_client::client::HttpClient;
 use wabot_backend_client::ws::WsClient;
 use wabot_settings::DesktopSettings;
 
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() {
     // `--toggle` / `--popover`: resident panel-popover instance (see popover.rs).
     // A plain launch is resident too: closing its window leaves it in the tray
