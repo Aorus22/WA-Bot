@@ -63,10 +63,7 @@ impl ChatView {
                 entry
                     .messages
                     .iter()
-                    .filter(|m| {
-                        m.media_url.is_some()
-                            && (m.message_type == "image" || m.content == "[Image]" || m.content.is_empty())
-                    })
+                    .filter(|m| m.media_url.is_some() && is_image_message(m))
                     .cloned()
                     .collect()
             })

@@ -458,6 +458,53 @@ pub(crate) fn quote_media_label(msg: &Message) -> String {
     }
 }
 
+/// Whether a message is a picture. Its type decides; only a message without a
+/// media type (old rows, optimistic placeholders) falls back to guessing from
+/// a media URL plus an `[Image]` or empty text. A video sent without a caption
+/// also has empty text, and must not be drawn as a picture.
+pub(crate) fn is_image_message(message: &Message) -> bool {
+    match message.message_type.as_str() {
+        "image" => true,
+        "" | "text" => {
+            message.media_url.is_some() && (message.content == "[Image]" || message.content.is_empty())
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod image_message_tests {
+    use super::*;
+    use core::prelude::v1::test;
+
+    fn message(message_type: &str, content: &str, media: bool) -> Message {
+        Message {
+            message_type: message_type.to_string(),
+            content: content.to_string(),
+            media_url: media.then(|| "/media/x".to_string()),
+            ..Message::default()
+        }
+    }
+
+    #[test]
+    fn a_video_without_a_caption_is_not_a_picture() {
+        assert!(!is_image_message(&message("video", "", true)));
+    }
+
+    #[test]
+    fn a_typed_picture_is_a_picture_with_or_without_a_caption() {
+        assert!(is_image_message(&message("image", "", true)));
+        assert!(is_image_message(&message("image", "look", true)));
+    }
+
+    #[test]
+    fn an_untyped_message_with_media_and_no_text_is_still_a_picture() {
+        assert!(is_image_message(&message("", "", true)));
+        assert!(is_image_message(&message("text", "[Image]", true)));
+        assert!(!is_image_message(&message("text", "", false)));
+    }
+}
+
 /// Filled triangle for the play button on video previews.
 const PLAY_TRIANGLE_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" fill="currentColor"/></svg>"#;
 
