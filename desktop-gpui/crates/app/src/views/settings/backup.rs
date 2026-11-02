@@ -12,7 +12,16 @@ use crate::components::ui::{ButtonVariant, action_button};
 /// Backups kept per account after each run.
 pub(super) const KEEP_BACKUPS: u32 = 5;
 
-fn stage_label(stage: &str) -> &'static str {
+fn stage_label(stage: &str, restoring: bool) -> &'static str {
+    match (stage, restoring) {
+        ("chat", true) => "Reading chats from the backup",
+        ("merge", _) => "Adding missing chats and messages",
+        ("media", true) => "Adding missing media",
+        _ => backup_stage_label(stage),
+    }
+}
+
+fn backup_stage_label(stage: &str) -> &'static str {
     match stage {
         "snapshot" => "Checking the databases",
         "chat" => "Saving chats",
@@ -34,12 +43,13 @@ fn format_time(ms: i64) -> String {
 impl SettingsView {
     pub(super) fn render_backup_section(&mut self, cx: &mut Context<Self>, p: Palette) -> Div {
         let shape = cx.shape();
-        let running = self.is_backing_up;
+        let restoring = self.is_restoring;
+        let running = self.is_backing_up || restoring;
         let has_folder = self.backup_folder.is_some();
 
         let action = action_button(
             "backup-start",
-            if running { "Backing up…" } else { "Back up now" },
+            if restoring { "Restoring…" } else if running { "Backing up…" } else { "Back up now" },
             ButtonVariant::Primary,
             has_folder && !running,
             cx,
@@ -80,9 +90,10 @@ impl SettingsView {
                 change,
             ));
 
-        if let Some(st) = self.backup_status.as_ref() {
+        let shown = if self.last_was_restore { self.restore_status.as_ref() } else { self.backup_status.as_ref() };
+        if let Some(st) = shown {
             if running {
-                let mut detail = stage_label(&st.stage).to_string();
+                let mut detail = stage_label(&st.stage, restoring).to_string();
                 if st.total > 0 {
                     detail.push_str(&format!(" · {} of {}", st.done, st.total));
                 } else if !st.item.is_empty() {
@@ -100,7 +111,7 @@ impl SettingsView {
                             .text_size(rems(p.typography.caption_size))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(p.text)
-                            .child(format!("Backing up · {}%", st.percent)),
+                            .child(format!("{} · {}%", if restoring { "Restoring" } else { "Backing up" }, st.percent)),
                     )
                     .child(progress_bar(p, &[((st.percent.max(1) as f32) / 100.0, p.primary)]))
                     .child(div().text_size(rems(p.typography.caption_size)).text_color(p.muted).child(detail));
@@ -128,12 +139,23 @@ impl SettingsView {
             let mut newest: Vec<_> = self.backups.iter().collect();
             newest.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             let rows = newest.into_iter().take(5).map(|b| {
+                let (account, id) = (b.account.clone(), b.id.clone());
+                let restore = action_button(
+                    SharedString::from(format!("backup-restore-{}-{}", b.account, b.id)),
+                    "Restore",
+                    ButtonVariant::Secondary,
+                    !running,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.start_restore(account.clone(), id.clone(), cx)));
                 h_flex()
                     .items_center()
+                    .justify_between()
                     .text_size(rems(p.typography.caption_size))
                     .text_color(p.muted)
                     .child(format!("{}  ·  {}", format_time(b.created_at), b.account))
-            });
+                    .child(restore)
+            }).collect::<Vec<_>>();
             let backup_rows = boxed_list(cx, rows).when(!shape.styled, |list| list.gap_0p5());
             section = section.child(
                 div()
@@ -146,6 +168,12 @@ impl SettingsView {
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(p.text)
                             .child(format!("{} backups in this folder", self.backups.len())),
+                    )
+                    .child(
+                        div()
+                            .text_size(rems(p.typography.caption_size))
+                            .text_color(p.muted)
+                            .child("Restore adds what is missing from a backup. Nothing you have now is replaced."),
                     )
                     .child(backup_rows),
             );

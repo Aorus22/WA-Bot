@@ -88,6 +88,8 @@ func (r *Router) RegisterRoutes() *mux.Router {
 	api.HandleFunc("/backup/run", backupHandler.Run).Methods("POST", "OPTIONS")
 	api.HandleFunc("/backup/status", backupHandler.Status).Methods("GET")
 	api.HandleFunc("/backup/list", backupHandler.List).Methods("GET")
+	api.HandleFunc("/backup/restore", backupHandler.Restore).Methods("POST", "OPTIONS")
+	api.HandleFunc("/backup/restore/status", backupHandler.RestoreStatus).Methods("GET")
 
 	api.HandleFunc("/chats", chatHandler.GetChats).Methods("GET")
 	api.HandleFunc("/chats/{id}/messages", chatHandler.GetMessages).Methods("GET")

@@ -162,7 +162,7 @@ func restoreMedia(ctx context.Context, m *Media, dest string, chunks *chunkStore
 	return store.Close()
 }
 
-func restoreObject(ctx context.Context, store *objectstorage.SQLiteStore, ref objectstorage.ObjectRef, o MediaObject, chunks *chunkStore) error {
+func restoreObject(ctx context.Context, store mediaSink, ref objectstorage.ObjectRef, o MediaObject, chunks *chunkStore) error {
 	pr, pw := io.Pipe()
 	go func() {
 		// Each part is checked before any of it reaches the store, and a bad
@@ -188,4 +188,9 @@ func restoreObject(ctx context.Context, store *objectstorage.SQLiteStore, ref ob
 		return fmt.Errorf("restored bytes do not match the recorded checksum")
 	}
 	return nil
+}
+
+// mediaSink is where restored objects are written.
+type mediaSink interface {
+	Put(ctx context.Context, ref objectstorage.ObjectRef, body io.Reader, opts objectstorage.PutOptions) (objectstorage.ObjectInfo, error)
 }

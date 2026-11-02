@@ -190,29 +190,10 @@ func (r *RestoreReport) Complete() bool { return len(r.Lost) == 0 && len(r.Misma
 // the error is reserved for failures that leave nothing usable.
 func Restore(ctx context.Context, t Target, account, id, outDir string, opt Options) (*RestoreReport, error) {
 	opt.defaults()
-	list, err := ListBackups(ctx, t, account)
-	if err != nil {
-		return nil, err
-	}
 	rep := &RestoreReport{Account: account, OutDir: outDir}
-	var m *Manifest
-	for _, mi := range list {
-		if mi.Account != account || (id != "" && mi.ID != id) {
-			continue
-		}
-		got, err := LoadManifest(ctx, t, mi)
-		if err != nil {
-			rep.Warnings = append(rep.Warnings, err.Error())
-			continue
-		}
-		m = got
-		break
-	}
-	if m == nil {
-		if id != "" {
-			return rep, fmt.Errorf("backup: no readable backup %s for %s", id, account)
-		}
-		return rep, fmt.Errorf("backup: no readable backup for %s", account)
+	m, err := pickManifest(ctx, t, account, id, &rep.Warnings)
+	if err != nil {
+		return rep, err
 	}
 	rep.ID = m.ID
 
@@ -235,6 +216,30 @@ func Restore(ctx context.Context, t Target, account, id, outDir string, opt Opti
 		rep.Files = append(rep.Files, dest)
 	}
 	return rep, nil
+}
+
+// pickManifest loads the manifest of backup id of account (empty id: the newest
+// one that can be read). Manifests that fail to load add a line to warnings.
+func pickManifest(ctx context.Context, t Target, account, id string, warnings *[]string) (*Manifest, error) {
+	list, err := ListBackups(ctx, t, account)
+	if err != nil {
+		return nil, err
+	}
+	for _, mi := range list {
+		if mi.Account != account || (id != "" && mi.ID != id) {
+			continue
+		}
+		got, err := LoadManifest(ctx, t, mi)
+		if err != nil {
+			*warnings = append(*warnings, err.Error())
+			continue
+		}
+		return got, nil
+	}
+	if id != "" {
+		return nil, fmt.Errorf("backup: no readable backup %s for %s", id, account)
+	}
+	return nil, fmt.Errorf("backup: no readable backup for %s", account)
 }
 
 // CheckedBackup is the state of one backup in a target.

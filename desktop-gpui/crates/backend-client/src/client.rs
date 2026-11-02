@@ -767,6 +767,18 @@ impl HttpClient {
         Self::handle_response(resp).await
     }
 
+    /// Merges one backup into the running app's data, in the background. Nothing
+    /// that is already there is replaced.
+    pub async fn start_restore(&self, request: &RestoreRequest) -> Result<StatusResult> {
+        let resp = self.client.post(format!("{}/backup/restore", self.base_url)).json(request).send().await?;
+        Self::handle_response(resp).await
+    }
+
+    pub async fn get_restore_status(&self) -> Result<BackupStatus> {
+        let resp = self.client.get(format!("{}/backup/restore/status", self.base_url)).send().await?;
+        Self::handle_response(resp).await
+    }
+
     /// The backups found in `target`.
     pub async fn list_backups(&self, target: &str) -> Result<Vec<BackupEntry>> {
         let resp = self

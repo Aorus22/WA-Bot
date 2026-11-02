@@ -119,6 +119,8 @@ fn evict_if_full(cache: &mut ThumbnailCache, window: &mut Window, cx: &mut App) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `super::*` brings in gpui's own `test` macro, which does not expand here.
+    use std::prelude::v1::test;
 
     fn picture(width: u32, height: u32, frames: usize) -> Arc<RenderImage> {
         let frames = (0..frames)

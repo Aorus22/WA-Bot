@@ -734,6 +734,19 @@ class ApiClient {	private baseUrl: string
 		return this.request<BackupStatus>("/backup/status")
 	}
 
+	/** Merges one backup into the running app's data; nothing already there is replaced. */
+	async startRestore(target: string, account: string, id: string): Promise<void> {
+		await this.request<unknown>("/backup/restore", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ target, account, id }),
+		})
+	}
+
+	async getRestoreStatus(): Promise<BackupStatus> {
+		return this.request<BackupStatus>("/backup/restore/status")
+	}
+
 	async listBackups(target: string): Promise<BackupEntry[]> {
 		return this.request<BackupEntry[]>(`/backup/list?target=${encodeURIComponent(target)}`)
 	}

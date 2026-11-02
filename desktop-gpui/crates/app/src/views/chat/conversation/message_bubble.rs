@@ -79,7 +79,7 @@ impl ChatView {
             let msg_clone = r_msg.msg.clone();
 
             let msg_type = r_msg.msg.message_type.as_str();
-            let is_image = msg_type == "image" || (r_msg.msg.media_url.is_some() && (content == "[Image]" || content.is_empty()));
+            let is_image = is_image_message(&r_msg.msg);
             let is_sticker = msg_type == "sticker" || (r_msg.msg.media_url.is_some() && content == "[Sticker]");
             let is_video = msg_type == "video" || (r_msg.msg.media_url.is_some() && content == "[Video]");
             // Documents keep their file name as content, so the type

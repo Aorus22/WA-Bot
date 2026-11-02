@@ -153,7 +153,7 @@ func InitializeApp() (*App, error) {
 	eventHandler := whatsapp.NewWhatsAppEventHandler(handlerUC, deliveryWaService, stateRepo, waClient, storageRepo)
 
 	httpServer := http.NewHTTPServer(waClient, cfg, storageRepo)
-	httpServer.SetBackupService(newBackupService())
+	httpServer.SetBackupService(newBackupService(mediaStorage.wrapper.Store(), httpServer))
 
 	// Opened on a throwaway path; the account manager switches it to the
 	// linked account's folder (or an empty pending one) right below.

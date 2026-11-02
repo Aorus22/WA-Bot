@@ -1,7 +1,7 @@
 //! Settings state transitions, persistence and backend flows.
 
 use super::*;
-use wabot_backend_client::dto::BackupRequest;
+use wabot_backend_client::dto::{BackupRequest, RestoreRequest};
 
 impl SettingsView {
     // Backup persistence and backend work is kept here with the other data flows.
@@ -143,6 +143,10 @@ impl SettingsView {
             backups: Vec::new(),
             is_backing_up: false,
             backup_polling: false,
+            restore_status: None,
+            is_restoring: false,
+            restore_polling: false,
+            last_was_restore: false,
 
             update_status: UpdateStatus::Idle,
             update_progress: Arc::new((AtomicU64::new(0), AtomicU64::new(0))),
@@ -1167,6 +1171,12 @@ impl SettingsView {
                         async move { HttpClient::new(&base_url).get_backup_status().await }
                     })
                     .await;
+                let restore = TOKIO_RT
+                    .spawn({
+                        let base_url = base_url.clone();
+                        async move { HttpClient::new(&base_url).get_restore_status().await }
+                    })
+                    .await;
                 let list = match target {
                     Some(target) => TOKIO_RT
                         .spawn(async move { HttpClient::new(&base_url).list_backups(&target).await })
@@ -1182,6 +1192,14 @@ impl SettingsView {
                                 this.is_backing_up = status.running;
                                 this.backup_status = Some(status);
                                 this.watch_backup(cx);
+                            }
+                            if let Ok(Ok(status)) = restore {
+                                if status.running {
+                                    this.is_restoring = true;
+                                    this.last_was_restore = true;
+                                    this.restore_status = Some(status);
+                                    this.watch_restore(cx);
+                                }
                             }
                             if let Some(list) = list {
                                 this.backups = list;
@@ -1232,10 +1250,11 @@ impl SettingsView {
     /// Start a backup via POST /api/backup/run and follow it.
     pub fn start_backup(&mut self, cx: &mut Context<Self>) {
         let Some(target) = self.backup_folder.clone() else { return };
-        if self.is_backing_up {
+        if self.is_backing_up || self.is_restoring {
             return;
         }
         self.is_backing_up = true;
+        self.last_was_restore = false;
         self.backup_status = None;
         let base_url = Self::backend_base_url(cx);
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -1265,6 +1284,96 @@ impl SettingsView {
                         });
                     }
                 });
+            }
+        })
+        .detach();
+    }
+
+    /// Merge one backup into the running app via POST /api/backup/restore and
+    /// follow it. What is already here is kept; only what is missing is added.
+    pub fn start_restore(&mut self, account: String, id: String, cx: &mut Context<Self>) {
+        let Some(target) = self.backup_folder.clone() else { return };
+        if self.is_backing_up || self.is_restoring {
+            return;
+        }
+        self.is_restoring = true;
+        self.last_was_restore = true;
+        self.restore_status = None;
+        let base_url = Self::backend_base_url(cx);
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                let request = RestoreRequest { target, account, id };
+                let res = TOKIO_RT
+                    .spawn(async move { HttpClient::new(&base_url).start_restore(&request).await })
+                    .await;
+                let _ = cx_handle.update(|cx: &mut App| {
+                    if let Some(view) = this.upgrade() {
+                        view.update(cx, |this, cx| {
+                            match res {
+                                Ok(Ok(_)) => this.watch_restore(cx),
+                                other => {
+                                    this.is_restoring = false;
+                                    let reason = match other {
+                                        Ok(Err(ClientError::Api { message, .. })) => message,
+                                        Ok(Err(e)) => e.to_string(),
+                                        Err(e) => e.to_string(),
+                                        Ok(Ok(_)) => String::new(),
+                                    };
+                                    toast::error(format!("Could not start the restore: {reason}"), cx);
+                                }
+                            }
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Refetch the restore status every second until the run ends.
+    fn watch_restore(&mut self, cx: &mut Context<Self>) {
+        if self.restore_polling || !self.is_restoring {
+            return;
+        }
+        self.restore_polling = true;
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx_handle = cx.clone();
+            async move {
+                loop {
+                    cx_handle.background_executor().timer(std::time::Duration::from_millis(1000)).await;
+                    let Some(base_url) = cx_handle.update(|cx: &mut App| {
+                        cx.has_global::<AuthState>().then(|| AuthState::global(cx).base_url.clone())
+                    }) else {
+                        break;
+                    };
+                    let res = TOKIO_RT
+                        .spawn(async move { HttpClient::new(&base_url).get_restore_status().await })
+                        .await;
+                    let Ok(Ok(status)) = res else { continue };
+                    let running = status.running;
+                    let alive = cx_handle.update(|cx: &mut App| {
+                        let Some(view) = this.upgrade() else { return false };
+                        view.update(cx, |this, cx| {
+                            this.is_restoring = running;
+                            if !running {
+                                this.restore_polling = false;
+                                if status.error.is_empty() {
+                                    toast::success("Restore finished", cx);
+                                } else {
+                                    toast::error(format!("Restore failed: {}", status.error), cx);
+                                }
+                            }
+                            this.restore_status = Some(status);
+                            cx.notify();
+                        });
+                        true
+                    });
+                    if !alive || !running {
+                        break;
+                    }
+                }
             }
         })
         .detach();
