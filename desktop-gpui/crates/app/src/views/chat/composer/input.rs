@@ -12,6 +12,7 @@ impl ChatView {
         let textarea = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Type a message")
+                .auto_grow(1, COMPOSE_MAX_ROWS)
                 .submit_on_enter(true)
         });
 

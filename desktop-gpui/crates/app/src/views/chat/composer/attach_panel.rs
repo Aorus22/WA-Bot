@@ -1,3 +1,4 @@
+use crate::components::emoji_picker::EMOJI_FONT_FAMILY;
 use crate::views::chat::*;
 use crate::theme::surface::SurfaceExt;
 
@@ -294,6 +295,7 @@ impl ChatView {
                             .cursor_pointer()
                             .text_size(px(16.0))
                             .hover(move |s| s.bg(hover_bg))
+                            .font_family(EMOJI_FONT_FAMILY)
                             .child(em)
                             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
                                 this.insert_emoji(&em_handler, window, cx);

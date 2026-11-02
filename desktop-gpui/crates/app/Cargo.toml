@@ -25,6 +25,9 @@ gpui-wayland-blur-patch = []
 # Partial bumps compile each side separately but fail at the call site (E0277);
 # plan 01-01 task 2 guards the pairing. Never use the stale gpui 0.2.2 snapshot.
 gpui = { workspace = true }
+# glibc malloc keeps one arena per thread and holds on to what image decoding
+# freed there; mimalloc hands it back.
+mimalloc = "=0.1.52"
 gpui-base = "=0.7.1"
 gpui-reqwest-client = { workspace = true }
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["wayland", "x11"] }
