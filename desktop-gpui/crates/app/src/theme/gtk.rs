@@ -320,6 +320,22 @@ fn parse_gtk_font_name(value: &str) -> Option<GtkFont> {
     })
 }
 
+/// Flatten a translucent surface onto its backdrop (source-over), keeping the
+/// backdrop's own alpha.
+///
+/// Adwaita ships `card_bg_color` as `RGB(255 255 255 / 8%)`, and themes that copy
+/// it (COSMIC, adw-gtk3) do the same. Used as a solid fill, the bare RGB becomes a
+/// white card, so overlays are flattened before they reach the token table.
+fn flatten_over(backdrop: Rgba, surface: Rgba) -> Rgba {
+    let a = surface.a.clamp(0.0, 1.0);
+    Rgba {
+        r: backdrop.r + (surface.r - backdrop.r) * a,
+        g: backdrop.g + (surface.g - backdrop.g) * a,
+        b: backdrop.b + (surface.b - backdrop.b) * a,
+        a: backdrop.a,
+    }
+}
+
 /// Surface colors published by the active GTK palette, if present.
 pub fn surface_overrides() -> Option<SurfaceOverrides> {
     let css = load_user_css();
@@ -327,14 +343,23 @@ pub fn surface_overrides() -> Option<SurfaceOverrides> {
         return None;
     }
     let color = |names: &[&str]| css.get_any(names).map(Hsla::from);
+    let window = css.get_any(&["window_bg_color", "theme_bg_color"]);
+    // Raised surfaces are the ones drawn as solid fills, so a translucent token
+    // has to be flattened onto the window first. Structural surfaces (window,
+    // view, sidebar, headerbar) are left as authored: themes that ship them
+    // translucent mean to composite them over the window themselves.
+    let raised = |surface: Option<Rgba>| match (surface, window) {
+        (Some(surface), Some(window)) => Some(Hsla::from(flatten_over(window, surface))),
+        (surface, _) => surface.map(Hsla::from),
+    };
     Some(SurfaceOverrides {
-        window: color(&["window_bg_color", "theme_bg_color"]),
+        window: window.map(Hsla::from),
         view: color(&["view_bg_color", "theme_base_color"]),
         sidebar: color(&["sidebar_bg_color", "sidebar_bg_color_breeze"]),
         headerbar: color(&["headerbar_bg_color", "headerbar_bg_color_breeze"]),
-        card: color(&["card_bg_color", "theme_card_bg_color"]),
-        dialog: color(&["dialog_bg_color"]),
-        popover: color(&["popover_bg_color"]),
+        card: raised(css.get_any(&["card_bg_color", "theme_card_bg_color"])),
+        dialog: raised(css.get_any(&["dialog_bg_color"])),
+        popover: raised(css.get_any(&["popover_bg_color"])),
     })
 }
 
@@ -455,9 +480,13 @@ pub fn palette_from_css(css: &UserCss) -> Option<GtkPalette> {
         .get_any(&["view_bg_color", "theme_base_color_breeze", "theme_base_color"])
         .map(hex_from_rgba)
         .unwrap_or(bg);
+    // GTK publishes raised surfaces as translucent overlays: Adwaita dark ships
+    // `card_bg_color: RGB(255 255 255 / 8%)`, and every theme that copies it
+    // (COSMIC, adw-gtk3) does the same. Taking the bare RGB turns that 8% white
+    // overlay into a solid white card, so flatten it onto the window first.
     let card = css
         .get_any(&["card_bg_color", "popover_bg_color", "theme_card_bg_color"])
-        .map(hex_from_rgba)
+        .map(|c| mix_hex(bg, hex_from_rgba(c), c.a))
         .unwrap_or(base);
 
     let mut accent = css
@@ -634,6 +663,57 @@ mod tests {
         assert_eq!(p.primary_foreground, 0xffffff);
         assert_eq!(p.destructive, 0xc01c28);
         assert!(contrast(p.muted_foreground, p.background) >= MIN_MUTED_CONTRAST);
+    }
+
+    /// Adwaita — and COSMIC, which copies it verbatim — publishes
+    /// `card_bg_color` as `RGB(255 255 255 / 8%)`. Taking the bare RGB produced a
+    /// solid white card with white text on top.
+    #[test]
+    fn translucent_card_overlay_is_flattened_onto_the_window() {
+        let p = palette_from_css(&css(
+            "@define-color window_bg_color #222226;@define-color window_fg_color #ffffff;\
+             @define-color card_bg_color rgba(255, 255, 255, 0.08);",
+        ))
+        .unwrap();
+        assert_ne!(p.card, 0xffffff);
+        assert!(
+            luminance(p.card) < 0.1,
+            "card must stay dark, got {:#08x}",
+            p.card
+        );
+        assert!(contrast(p.foreground, p.card) > 7.0);
+    }
+
+    #[test]
+    fn flatten_over_keeps_opaque_colours_and_darkens_overlays() {
+        let backdrop = Rgba {
+            r: 0.13,
+            g: 0.13,
+            b: 0.15,
+            a: 1.0,
+        };
+        let opaque = Rgba {
+            r: 0.2,
+            g: 0.3,
+            b: 0.4,
+            a: 1.0,
+        };
+        let flat = flatten_over(backdrop, opaque);
+        assert!((flat.r - 0.2).abs() < 1e-6);
+        assert!((flat.b - 0.4).abs() < 1e-6);
+        assert!((flat.a - 1.0).abs() < 1e-6);
+
+        let overlay = flatten_over(
+            backdrop,
+            Rgba {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 0.08,
+            },
+        );
+        assert!((overlay.a - 1.0).abs() < 1e-6);
+        assert!(overlay.r < 0.25, "8% white over a dark window must stay dark");
     }
 
     #[test]
