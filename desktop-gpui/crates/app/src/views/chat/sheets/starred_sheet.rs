@@ -154,6 +154,7 @@ impl ChatView {
                                     .child("Starred messages"),
                             ),
                     )
+                    .child(crate::components::titlebar::drag_area())
                     .child(
                         div()
                             .id("btn-close-starred-sheet")

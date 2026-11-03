@@ -161,7 +161,8 @@ impl ChatView {
                             Some(i) if gallery.len() > 1 => format!("{} / {}", i + 1, gallery.len()),
                             _ => String::new(),
                         }),
-                );
+                )
+                .child(crate::components::titlebar::drag_area());
             let mut actions = h_flex().items_center().gap_1();
             actions = actions
                 .child(tool("pv-zoom-out", MINUS_SVG).on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {

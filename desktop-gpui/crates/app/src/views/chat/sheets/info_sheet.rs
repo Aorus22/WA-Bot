@@ -255,6 +255,7 @@ impl ChatView {
                                     "Contact info"
                                 }),
                         )
+                        .child(crate::components::titlebar::drag_area())
                         .child(
                             div()
                                 .id("btn-close-info-sheet")

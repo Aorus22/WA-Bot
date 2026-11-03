@@ -307,6 +307,7 @@ impl ChatView {
             .bg(rgba(0x0b141acc))
             .occlude()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(crate::components::titlebar::drag_area())
             .child(actions);
 
         let progress = if duration > 0.0 { (position / duration).clamp(0.0, 1.0) } else { 0.0 };

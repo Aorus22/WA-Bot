@@ -224,7 +224,7 @@ impl ChatView {
                                             .child(chat_name),
                                     ),
                             )
-                            .child(div().flex_1())
+                            .child(crate::components::titlebar::drag_area())
                             .child(
                                 div()
                                     .text_xs()

@@ -351,6 +351,7 @@ impl ChatView {
                                             .child("Search Messages"),
                                     ),
                             )
+                            .child(crate::components::titlebar::drag_area())
                             .child(
                                 div()
                                     .id("btn-close-search-sheet")

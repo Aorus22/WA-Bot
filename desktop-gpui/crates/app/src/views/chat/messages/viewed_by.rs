@@ -291,7 +291,8 @@ impl ChatView {
                             .font_weight(FontWeight::BOLD)
                             .text_color(text_color)
                             .child("Message info"),
-                    ),
+                    )
+                    .child(crate::components::titlebar::drag_area()),
             )
             // Scroll viewport: its content column must not shrink to fit, or nothing overflows.
             .child(div().id("message-info-scroll").flex_1().min_h_0().overflow_y_scroll().child(body))

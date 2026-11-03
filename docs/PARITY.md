@@ -48,7 +48,7 @@ These exist because of the platform, not by accident. Keep this list short.
 | Difference | Why |
 | --- | --- |
 | Window transparency, backdrop blur, interface and chat text size, chat layout | A native window has them; a browser tab does not. |
-| Window controls (minimize, maximize, close) sit in the chat headers, after a separator, and the empty header space drags the window | The web page has no window of its own. The title bar row is gone on the chat page; other pages keep it. |
+| Window controls (minimize, maximize, close) sit in the chat headers, after a separator, and the empty header space drags the window, in sheet headers (contact/group info, starred, search, message info), the image and video viewers and the attachment preview too | The web page has no window of its own. The title bar row is gone on the chat page; other pages keep it. |
 | When the window is too narrow for the rail, the list and a 560 px conversation, `Auto` layout shows the chat list and the conversation as separate pages | Lets the window be tiled to half of a small screen. The web follows its own breakpoints. |
 | OS notifications, autostart, resident daemon | Desktop only. |
 | In-app updater, beta channel | The web is served, not installed. Beta builds hide the update buttons. |
