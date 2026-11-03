@@ -55,6 +55,34 @@ These exist because of the platform, not by accident. Keep this list short.
 | Backup folder: native folder picker (gpui), typed absolute path (web) | A browser cannot return an absolute path. Both talk to `/api/backup/*`. |
 | Settings layout details (popover vs `Select`, modal vs dialog) | Each toolkit's own control. |
 
+## Terminal client (`desktop-cli/`)
+
+A third, smaller client: a ratatui chat view (sidebar and conversation) that reuses
+`desktop-gpui/crates/backend-client`. It is **not** a full mirror and is exempt from the
+1:1 rule for now. It shows chats, text and media tags, reactions, ticks, day pills,
+typing lines, unread badges, and can send text and mark a chat read. Pictures: image,
+sticker and video-preview thumbnails in bubbles, profile photos in the chat list (initial
+tile until loaded or when there is none), and a full-screen viewer (`o` or click, `h/l`
+to step through the chat's pictures). Needs a terminal with kitty, sixel or iTerm2
+graphics for sharp images; others get a half-block approximation (`--images` picks the
+mode, `--images off` turns pictures off). Videos show their preview only, no playback.
+Context menus (right-click, or `J`/`K` then `.` on a message, `.` on a chat) carry the same
+items as gpui: reply, react, message info, forward, pin, star, copy, copy image, add to
+favourites, edit, delete (for me / for everyone); and for chats: mark as read, archive, mute,
+pin, exit group. The info and search sheets are a right-hand drawer like gpui and the web
+(`I`, `f`, or the header buttons). `Ctrl-v` pastes a picture from the clipboard (or a dropped
+file path) into a preview box with a caption; nothing is sent until Enter.
+The "+" button beside the message field (or `+` / `A`) opens the same attach menu as gpui:
+sticker, photo / video, document, audio, GIF, poll, location, contact, and paste picture.
+Files are chosen in a small in-terminal browser (mouse or keyboard, `~` home, `.` hidden);
+the sticker picker has Recent and Favourites tabs and a click sends. Every attachment goes
+through a box with Send / Cancel buttons (a caption for everything but audio).
+Still missing against gpui/web: multi-select, starred sheet, group editing, settings, calls,
+statuses, channels, the emoji picker, voice recording, and playing or saving received
+audio, video and documents. It does not start the backend; it reads `~/.wa-bot/run/core.json`.
+Wording that is shared (day pills, typing line, "Mark as read" semantics, read receipts
+off means opening a chat does not clear unread) must stay the same as the other clients.
+
 ## Behavior both clients share
 
 - Only the avatar and name in a conversation header open the info sheet. The rest of

@@ -1,0 +1,43 @@
+[package]
+name = "wabot-cli"
+description = "Terminal chat client for WA Bot (ratatui)"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["WA Bot contributors"]
+
+[[bin]]
+name = "wabot-cli"
+path = "src/main.rs"
+
+# Standalone project: not a member of the desktop-gpui workspace.
+[workspace]
+
+[dependencies]
+# Reused as-is from the gpui app: typed HTTP + WebSocket client, no gpui inside.
+wabot-backend-client = { path = "../desktop-gpui/crates/backend-client" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+flume = "0.12"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ratatui = "0.30"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+unicode-width = "0.2"
+# Terminal graphics (kitty / sixel / iTerm2, halfblocks fallback). chafa needs a system lib: off.
+ratatui-image = { version = "11.1", default-features = false, features = ["crossterm", "image-defaults"] }
+# Clipboard: paste a picture, copy text. Same features as the gpui app.
+arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+
+# `cargo run` (debug) is what gets used day to day. Image decoding, resizing and
+# encoding are far too slow unoptimised (the scroll froze on every new picture),
+# so dependencies are always built with optimisations, and our own code lightly.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
