@@ -366,10 +366,56 @@ pub fn surface_overrides() -> Option<SurfaceOverrides> {
 fn load_user_css() -> UserCss {
     let mut out = UserCss::default();
     for path in user_css_paths() {
-        if let Ok(text) = std::fs::read_to_string(&path) {
+        for (_, text) in read_css_with_imports(&path) {
             parse_css_into(&text, &mut out);
         }
     }
+    out
+}
+
+/// Stylesheets nest at most this deep through `@import`.
+const MAX_IMPORT_DEPTH: usize = 4;
+
+/// The file named by one `@import`, for `url("x.css")`, `url(x.css)` and
+/// `"x.css"`. Remote and resource URLs are not followed.
+fn import_target(statement: &str) -> Option<String> {
+    let statement = statement.trim();
+    let inner = match statement.strip_prefix("url(") {
+        Some(rest) => rest.split(')').next()?,
+        None => statement.split_whitespace().next()?,
+    };
+    let inner = inner.trim().trim_matches(|c| c == '"' || c == '\'').trim();
+    (!inner.is_empty() && !inner.contains("://")).then(|| inner.to_string())
+}
+
+/// `path` and what it `@import`s, in cascade order: an imported file comes
+/// before the file that imports it, so the importer's own colours win.
+/// Rewaita and similar tools keep the palette in a second file and leave
+/// `gtk.css` as nothing but `@import`s.
+fn read_css_with_imports(path: &std::path::Path) -> Vec<(PathBuf, String)> {
+    fn walk(path: &std::path::Path, depth: usize, seen: &mut Vec<PathBuf>, out: &mut Vec<(PathBuf, String)>) {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if seen.contains(&canonical) {
+            return;
+        }
+        seen.push(canonical);
+        if depth < MAX_IMPORT_DEPTH {
+            let stripped = strip_css_comments(&text);
+            let base = path.parent().unwrap_or(std::path::Path::new("."));
+            for statement in stripped.split("@import").skip(1) {
+                let Some(target) = statement.split(';').next().and_then(import_target) else {
+                    continue;
+                };
+                walk(&base.join(target), depth + 1, seen, out);
+            }
+        }
+        out.push((path.to_path_buf(), text));
+    }
+    let mut out = Vec::new();
+    walk(path, 0, &mut Vec::new(), &mut out);
     out
 }
 
@@ -383,6 +429,15 @@ pub fn current_key() -> ThemeKey {
     ThemeKey(
         user_css_paths()
             .into_iter()
+            .flat_map(|path| {
+                // The file and everything it imports: a theme switch may rewrite
+                // only the imported palette.
+                let mut files: Vec<PathBuf> = read_css_with_imports(&path).into_iter().map(|(p, _)| p).collect();
+                if files.is_empty() {
+                    files.push(path);
+                }
+                files
+            })
             .chain(gtk_settings_paths())
             .filter_map(|path| {
                 let target = std::fs::canonicalize(&path).ok()?;
@@ -595,6 +650,35 @@ mod tests {
         let mut out = UserCss::default();
         parse_css_into(text, &mut out);
         out
+    }
+
+    #[test]
+    fn reads_the_file_a_stylesheet_imports() {
+        assert_eq!(import_target(r#"url("rewaita.css")"#).as_deref(), Some("rewaita.css"));
+        assert_eq!(import_target("url(colors.css)").as_deref(), Some("colors.css"));
+        assert_eq!(import_target(r#" "a/b.css" "#).as_deref(), Some("a/b.css"));
+        assert_eq!(import_target(r#"url("https://x.test/a.css")"#), None);
+        assert_eq!(import_target(""), None);
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("gtk.css"),
+            "@import url(\"palette.css\");\n@import \"loop.css\";\n:root { --window-bg-color: #111111; }",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("palette.css"), ":root { --window-bg-color: #222222; --view-bg-color: #333333; }").unwrap();
+        std::fs::write(dir.path().join("loop.css"), "@import url(\"gtk.css\");").unwrap();
+        let files = read_css_with_imports(&dir.path().join("gtk.css"));
+        let names: Vec<_> = files.iter().map(|(p, _)| p.file_name().unwrap().to_str().unwrap().to_string()).collect();
+        assert_eq!(names, vec!["palette.css", "loop.css", "gtk.css"]);
+
+        let mut merged = UserCss::default();
+        for (_, text) in files {
+            parse_css_into(&text, &mut merged);
+        }
+        // The importing file wins where both define a colour; imports fill the rest.
+        assert_eq!(merged.get("window_bg_color"), parse_css_color("#111111"));
+        assert_eq!(merged.get("view_bg_color"), parse_css_color("#333333"));
     }
 
     #[test]
