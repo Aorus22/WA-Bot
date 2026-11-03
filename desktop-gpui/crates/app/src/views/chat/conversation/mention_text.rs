@@ -19,6 +19,7 @@ use gpui_base::{
     TextSelectionRun, Theme,
 };
 
+use crate::components::emoji_picker::EMOJI_FONT_FAMILY;
 use crate::text_format::Style as TextFormat;
 
 /// Called with the mentioned JID when a mention is clicked.
@@ -125,6 +126,13 @@ impl MentionText {
     /// One run per stretch of text sharing the same mention and format.
     fn text_runs(&self, base: &TextStyle, mono: SharedString) -> Vec<TextRun> {
         let mut cuts = vec![0, self.text.len()];
+        // Emoji runs get the bundled color font as their own family: relying on the
+        // window's text-style fallback left them blank (the system COLRv1 font won).
+        let emoji = emoji_ranges(&self.text);
+        for range in &emoji {
+            cuts.push(range.start);
+            cuts.push(range.end);
+        }
         let ranges = self
             .targets
             .iter()
@@ -141,6 +149,12 @@ impl MentionText {
             .map(|pair| {
                 let (start, end) = (pair[0], pair[1]);
                 let mut style = base.clone();
+                style.font_fallbacks = Some(gpui::FontFallbacks::from_fonts(vec![
+                    EMOJI_FONT_FAMILY.to_string(),
+                ]));
+                if emoji.iter().any(|r| r.start <= start && end <= r.end) {
+                    style.font_family = SharedString::from(EMOJI_FONT_FAMILY);
+                }
                 if let Some((_, format)) = self.formats.iter().find(|(r, _)| r.start <= start && end <= r.end) {
                     if format.bold {
                         style.font_weight = FontWeight::BOLD;
@@ -151,7 +165,7 @@ impl MentionText {
                     if format.strike {
                         style.strikethrough = Some(StrikethroughStyle { thickness: px(1.0), color: None });
                     }
-                    if format.mono {
+                    if format.mono && !emoji.iter().any(|r| r.start <= start && end <= r.end) {
                         style.font_family = mono.clone();
                     }
                 }
@@ -170,6 +184,74 @@ impl MentionText {
             })
             .collect()
     }
+}
+
+/// Emoji whose default look is the color picture even without U+FE0F.
+fn is_default_emoji_symbol(c: char) -> bool {
+    matches!(c as u32,
+        0x231A | 0x231B | 0x23E9..=0x23EC | 0x23F0 | 0x23F3 | 0x25FD | 0x25FE | 0x2614 | 0x2615
+        | 0x2648..=0x2653 | 0x267F | 0x2693 | 0x26A1 | 0x26AA | 0x26AB | 0x26BD | 0x26BE | 0x26C4
+        | 0x26C5 | 0x26CE | 0x26D4 | 0x26EA | 0x26F2 | 0x26F3 | 0x26F5 | 0x26FA | 0x26FD | 0x2705
+        | 0x270A | 0x270B | 0x2728 | 0x274C | 0x274E | 0x2753..=0x2755 | 0x2757 | 0x2795..=0x2797
+        | 0x27B0 | 0x27BF | 0x2B1B | 0x2B1C | 0x2B50 | 0x2B55)
+}
+
+fn is_regional_indicator(c: char) -> bool {
+    matches!(c as u32, 0x1F1E6..=0x1F1FF)
+}
+
+/// Pictographs and flags: always emoji.
+fn is_pictograph(c: char) -> bool {
+    matches!(c as u32, 0x1F1E6..=0x1F1FF | 0x1F300..=0x1FAFF)
+}
+
+/// Byte ranges of the emoji in `text`: pictographs, flags, keycaps, symbols
+/// shown with U+FE0F, and the ZWJ / skin tone / tag sequences built from them.
+pub fn emoji_ranges(text: &str) -> Vec<Range<usize>> {
+    const ZWJ: char = '\u{200D}';
+    const VS16: char = '\u{FE0F}';
+    const KEYCAP: char = '\u{20E3}';
+    let is_tag = |c: char| matches!(c as u32, 0xE0020..=0xE007F);
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut out: Vec<Range<usize>> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let (start, c) = chars[i];
+        let next = chars.get(i + 1).map(|&(_, n)| n);
+        let third = chars.get(i + 2).map(|&(_, n)| n);
+        let keycap = (c.is_ascii_digit() || c == '#' || c == '*')
+            && (next == Some(KEYCAP) || (next == Some(VS16) && third == Some(KEYCAP)));
+        let symbol_with_vs16 = next == Some(VS16) && (c as u32) >= 0x80;
+        let begins = is_pictograph(c) || is_default_emoji_symbol(c) || symbol_with_vs16 || keycap;
+        if !begins {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while let Some(&(_, n)) = chars.get(j) {
+            if n == VS16 || n == KEYCAP || is_tag(n) || matches!(n as u32, 0x1F3FB..=0x1F3FF) {
+                j += 1;
+            } else if n == ZWJ {
+                // The joiner pulls in the next symbol, even a plain BMP one.
+                j += 1;
+                if chars.get(j).is_some() {
+                    j += 1;
+                }
+            } else if j == i + 1 && is_regional_indicator(c) && is_regional_indicator(n) {
+                // Two regional indicators make one flag.
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        let end = chars.get(j).map_or(text.len(), |&(b, _)| b);
+        match out.last_mut() {
+            Some(last) if last.end == start => last.end = end,
+            _ => out.push(start..end),
+        }
+        i = j;
+    }
+    out
 }
 
 /// Byte ranges of the web addresses in `text`: `http(s)://…` and `www.…`,
@@ -469,6 +551,23 @@ mod tests {
 
     fn links(text: &str) -> Vec<&str> {
         find_links(text).into_iter().map(|r| &text[r]).collect()
+    }
+
+    fn emoji(text: &str) -> Vec<&str> {
+        emoji_ranges(text).into_iter().map(|r| &text[r]).collect()
+    }
+
+    #[test]
+    fn finds_emoji_and_leaves_plain_text() {
+        assert_eq!(emoji("🗿"), vec!["🗿"]);
+        assert_eq!(emoji("halo 👍🏽 ya"), vec!["👍🏽"]);
+        assert_eq!(emoji("a ❤️ b ❤ c"), vec!["❤️"]);
+        assert_eq!(emoji("✅ done ⭐"), vec!["✅", "⭐"]);
+        assert_eq!(emoji("1️⃣ dan #️⃣ tapi 12 # *"), vec!["1️⃣", "#️⃣"]);
+        assert_eq!(emoji("🇮🇩🇯🇵"), vec!["🇮🇩🇯🇵"]);
+        assert_eq!(emoji("👩\u{200d}❤\u{fe0f}\u{200d}👨!"), vec!["👩\u{200d}❤\u{fe0f}\u{200d}👨"]);
+        assert!(emoji("plain text, © ™ → ✓ 123").is_empty());
+        assert!(emoji("").is_empty());
     }
 
     #[test]
