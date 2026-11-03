@@ -13,14 +13,14 @@ use ratatui_image::sliced::{SignedPosition, SlicedImage};
 use ratatui_image::{FilterType, Resize, StatefulImage};
 use wabot_backend_client::Message;
 
-use crate::app::{is_from_me, kind_label, with_tag, App, ChatLog, Focus, Mode};
+use crate::app::{is_from_me, kind_label, with_tag, App, ChatLog, Focus, Mode, MsgView};
 use crate::images::{self, Img, Kind, Slot};
 use crate::browser::draw_browser;
 use crate::form::draw_form;
 use crate::stickers::draw_stickers;
 use crate::overlay::{draw_attach, draw_menu};
 use crate::panel::draw_panel;
-use crate::text::{truncate, width, wrap};
+use crate::text::{truncate, width, wrap_rows, LinkSeg};
 use crate::theme::{self as c, local, name_color};
 
 /// Below this width only one pane shows at a time.
@@ -44,6 +44,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.want.clear();
     app.media_hits.clear();
     app.bubble_hits.clear();
+    app.link_hits.clear();
+    app.quote_hits.clear();
     if app.viewer.is_some() {
         draw_viewer(f, app, main);
         draw_status(f, app, status);
@@ -437,11 +439,26 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let cached = match app.lines_cache.take() {
         Some(c) if c.chat == chat_id && c.width == text_w && c.gen == app.lines_gen => c,
         _ => {
-            let (lines, placements, spans) = match app.logs.get(&chat_id) {
+            let b = match app.logs.get(&chat_id) {
                 Some(log) if log.loaded || !log.msgs.is_empty() => build_lines(app, &chat_id, log, text_w),
-                Some(_) | None => (vec![Line::styled("  Loading messages…", Style::new().fg(c::DIM))], Vec::new(), Vec::new()),
+                Some(_) | None => Built {
+                    lines: vec![Line::styled("  Loading messages…", Style::new().fg(c::DIM))],
+                    placements: Vec::new(),
+                    spans: Vec::new(),
+                    links: Vec::new(),
+                    quotes: Vec::new(),
+                },
             };
-            LinesCache { chat: chat_id.clone(), width: text_w, gen: app.lines_gen, lines, placements, spans }
+            LinesCache {
+                chat: chat_id.clone(),
+                width: text_w,
+                gen: app.lines_gen,
+                lines: b.lines,
+                placements: b.placements,
+                spans: b.spans,
+                links: b.links,
+                quotes: b.quotes,
+            }
         }
     };
     let (lines, placements, spans) = (&cached.lines, &cached.placements, &cached.spans);
@@ -498,6 +515,42 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         if app.sel_msg.as_deref() == Some(sp.msg_id.as_str()) {
             let marks: Vec<Line> = (0..b - a).map(|_| Line::styled("▌", Style::new().fg(c::YELLOW))).collect();
             f.render_widget(Paragraph::new(marks), Rect::new(text_area.x, y, 1, (b - a) as u16));
+        }
+    }
+
+    // Links and quoted lines on screen: clickable.
+    let on_screen = |line: usize, x0: usize, x1: usize| -> Option<Rect> {
+        if line < start || line >= end || x0 >= text_area.width as usize {
+            return None;
+        }
+        let w = (x1.min(text_area.width as usize) - x0) as u16;
+        Some(Rect::new(text_area.x + x0 as u16, text_area.y + (pad + line - start) as u16, w, 1))
+    };
+    for l in &cached.links {
+        if let Some(r) = on_screen(l.line, l.x0, l.x1) {
+            app.link_hits.push((r, l.url.clone()));
+        }
+    }
+    for q in &cached.quotes {
+        if let Some(r) = on_screen(q.line, q.x0, q.x1) {
+            app.quote_hits.push((r, q.target.clone()));
+        }
+    }
+    // Text picked with the mouse: remember how rows map to lines, paint the selection.
+    app.msg_view = MsgView { area: text_area, start, pad };
+    if let Some(sel) = app.selection.filter(|s| !s.is_empty()) {
+        let ((l0, c0), (l1, c1)) = sel.ordered();
+        for line in l0.max(start)..=l1.min(end.saturating_sub(1)) {
+            if line < start || line >= end {
+                continue;
+            }
+            let from = if line == l0 { c0 } else { 0 };
+            let to = if line == l1 { c1 } else { text_area.width as usize };
+            let (from, to) = (from.min(text_area.width as usize), to.min(text_area.width as usize));
+            if from < to {
+                let r = Rect::new(text_area.x + from as u16, text_area.y + (pad + line - start) as u16, (to - from) as u16, 1);
+                f.buffer_mut().set_style(r, Style::new().add_modifier(Modifier::REVERSED));
+            }
         }
     }
 
@@ -651,7 +704,7 @@ fn draw_welcome(f: &mut Frame, area: Rect) {
 
 /// Every line of the conversation at this width, oldest first. Messages are
 /// bubbles: mine on the right, theirs on the left.
-fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<Line<'static>>, Vec<Placement>, Vec<BubbleSpan>) {
+fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built {
     let chat = app.chat(chat_id);
     let is_group = chat.is_some_and(|c| c.is_group);
     let chat_name = chat.map_or("", |c| c.name.as_str());
@@ -676,6 +729,8 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<L
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut placements: Vec<Placement> = Vec::new();
     let mut spans: Vec<BubbleSpan> = Vec::new();
+    let mut links: Vec<LinkSpan> = Vec::new();
+    let mut quotes: Vec<QuoteSpan> = Vec::new();
     let centered = |text: &str, style: Style| Line::from(Span::styled(text.to_string(), style)).centered();
     if log.loading && !log.msgs.is_empty() {
         out.push(centered("loading older messages…", Style::new().fg(c::DIM)));
@@ -724,8 +779,10 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<L
         } else {
             Style::new().fg(c::FG)
         };
-        let mut body: Vec<(String, Style)> =
-            wrap(&message_text(m), inner_max).into_iter().map(|l| (l, body_style)).collect();
+        let mut body: Vec<Row> = wrap_rows(&message_text(m), inner_max)
+            .into_iter()
+            .map(|w| Row { text: w.text, style: body_style, links: w.links })
+            .collect();
         if let Some(title) = m
             .extra
             .as_ref()
@@ -733,7 +790,7 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<L
             .and_then(|lp| lp.title.as_deref())
             .filter(|t| !t.is_empty())
         {
-            body.push((format!("↳ {}", truncate(title, inner_max.saturating_sub(2))), Style::new().fg(c::CYAN)));
+            body.push(Row::plain(format!("↳ {}", truncate(title, inner_max.saturating_sub(2))), Style::new().fg(c::CYAN)));
         }
 
         let time = local(m.timestamp).map(|t| t.format("%H:%M").to_string()).unwrap_or_default();
@@ -764,10 +821,10 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<L
                 _ => (max_cols.min(24), 6, "loading picture…"),
             };
             if cols > 0 {
-                let mut rows_text: Vec<(String, Style)> =
-                    (0..rows).map(|_| (" ".repeat(cols as usize), Style::new())).collect();
+                let mut rows_text: Vec<Row> =
+                    (0..rows).map(|_| Row::plain(" ".repeat(cols as usize), Style::new())).collect();
                 if !note.is_empty() {
-                    rows_text[0] = (pad_to(note, cols as usize), Style::new().fg(c::DIM));
+                    rows_text[0] = Row::plain(pad_to(note, cols as usize), Style::new().fg(c::DIM));
                 }
                 body.splice(0..0, rows_text);
                 // The picture says "image" already: drop the tag from the caption.
@@ -775,14 +832,15 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<L
                     if let Some(tag) = kind_label(m) {
                         let at = rows as usize;
                         // The backend writes "[Sticker]" / "[Image]": match the tag ignoring case.
-                        let rest = body.get(at).and_then(|(t, _)| {
+                        let rest = body.get(at).and_then(|row| {
+                            let t = &row.text;
                             let hit = t.is_char_boundary(tag.len()) && t[..tag.len()].eq_ignore_ascii_case(&tag);
                             hit.then(|| t[tag.len()..].trim_start().to_string())
                         });
-                        match rest {
-                            Some(r) if r.is_empty() => body[at].0 = String::new(),
-                            Some(r) => body[at].0 = r,
-                            None => {}
+                        if let Some(r) = rest {
+                            // The text moved: byte offsets of its links no longer apply.
+                            body[at].text = r;
+                            body[at].links.clear();
                         }
                     }
                 }
@@ -797,11 +855,20 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<L
                 Some(orig) => format!("↪ {}: {}", app.sender_label(chat_id, orig), crate::app::preview(orig)),
                 None => "↪ Reply".to_string(),
             };
-            body.insert(0, (truncate(&q, inner_max), Style::new().fg(c::CYAN)));
+            body.insert(0, Row::plain(truncate(&q, inner_max), Style::new().fg(c::CYAN)));
             quote_rows = 1;
         }
         let first_line = out.len();
-        let (margin, outer) = push_bubble(&mut out, pane_w, mine, &body, meta, bg, inner_max);
+        let (margin, outer, found) = push_bubble(&mut out, pane_w, mine, &body, meta, bg, inner_max);
+        for (row, x0, x1, url) in found {
+            links.push(LinkSpan { line: first_line + row, x0, x1, url });
+        }
+        if quote_rows == 1 {
+            if let Some(rid) = m.reply_to_id.as_deref().filter(|r| !r.is_empty()) {
+                let w = width(&body[0].text);
+                quotes.push(QuoteSpan { line: first_line, x0: margin + 1, x1: margin + 1 + w, target: rid.to_string() });
+            }
+        }
         if let Some((url, w, h)) = thumb {
             placements.push(Placement { line: first_line + quote_rows, x: (margin + 1) as u16, w, h, url, msg_id: m.id.clone() });
         }
@@ -821,7 +888,70 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> (Vec<L
         }
         spans.push(BubbleSpan { msg_id: m.id.clone(), line0: first_line, line1: out.len(), x0: margin, x1: margin + outer });
     }
-    (out, placements, spans)
+    Built { lines: out, placements, spans, links, quotes }
+}
+
+/// Everything `build_lines` makes: the lines and where things sit among them.
+pub(crate) struct Built {
+    lines: Vec<Line<'static>>,
+    placements: Vec<Placement>,
+    spans: Vec<BubbleSpan>,
+    links: Vec<LinkSpan>,
+    quotes: Vec<QuoteSpan>,
+}
+
+/// One row of a bubble: text, its base style and the links inside it.
+struct Row {
+    text: String,
+    style: Style,
+    links: Vec<LinkSeg>,
+}
+
+impl Row {
+    fn plain(text: String, style: Style) -> Self {
+        Self { text, style, links: Vec::new() }
+    }
+}
+
+/// A link on screen-to-be: line among all lines, columns inside the pane, address.
+pub(crate) struct LinkSpan {
+    line: usize,
+    x0: usize,
+    x1: usize,
+    url: String,
+}
+
+/// The quoted line of a reply: clicking it goes to the message it answers.
+pub(crate) struct QuoteSpan {
+    line: usize,
+    x0: usize,
+    x1: usize,
+    target: String,
+}
+
+/// The text between two points of the conversation, rows joined by newlines. Cells
+/// are counted like on screen, so wide characters count two.
+pub fn selected_text(app: &App, sel: crate::app::Selection) -> String {
+    let Some(cache) = app.lines_cache.as_ref() else { return String::new() };
+    let ((l0, c0), (l1, c1)) = sel.ordered();
+    let mut rows: Vec<String> = Vec::new();
+    for line in l0..=l1.min(cache.lines.len().saturating_sub(1)) {
+        let full: String = cache.lines[line].spans.iter().map(|s| s.content.as_ref()).collect();
+        let from = if line == l0 { c0 } else { 0 };
+        let to = if line == l1 { c1 } else { usize::MAX };
+        let mut text = String::new();
+        let mut col = 0;
+        for ch in full.chars() {
+            let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if col >= from && col + w <= to {
+                text.push(ch);
+            }
+            col += w;
+        }
+        rows.push(text.trim().to_string());
+    }
+    // Blank rows between bubbles stay as one empty line at most; ends are trimmed.
+    rows.join("\n").trim().to_string()
 }
 
 /// The conversation's lines for one chat at one width, kept between frames.
@@ -832,6 +962,8 @@ pub struct LinesCache {
     lines: Vec<Line<'static>>,
     placements: Vec<Placement>,
     spans: Vec<BubbleSpan>,
+    links: Vec<LinkSpan>,
+    quotes: Vec<QuoteSpan>,
 }
 
 /// Where one message's bubble sits among the conversation lines.
@@ -861,20 +993,21 @@ fn pad_to(s: &str, w: usize) -> String {
     format!("{s}{}", " ".repeat(w.saturating_sub(width(s))))
 }
 
-/// One bubble: `body` lines on `bg`, then `meta` (time, ticks) at the bottom right,
-/// on the last text line when it fits and on a line of its own otherwise.
+/// One bubble: `body` rows on `bg`, then `meta` (time, ticks) at the bottom right,
+/// on the last text row when it fits and on a row of its own otherwise. Besides the
+/// margin and width it says where the links are: (row, first column, end column, address).
 fn push_bubble(
     out: &mut Vec<Line<'static>>,
     pane_w: usize,
     mine: bool,
-    body: &[(String, Style)],
+    body: &[Row],
     meta: Vec<Span<'static>>,
     bg: Color,
     inner_max: usize,
-) -> (usize, usize) {
+) -> (usize, usize, Vec<(usize, usize, usize, String)>) {
     let meta_w: usize = meta.iter().map(|s| width(&s.content)).sum();
-    let widest = body.iter().map(|(t, _)| width(t)).max().unwrap_or(0);
-    let last_w = body.last().map_or(0, |(t, _)| width(t));
+    let widest = body.iter().map(|r| width(&r.text)).max().unwrap_or(0);
+    let last_w = body.last().map_or(0, |r| width(&r.text));
     let inline = last_w + 2 + meta_w <= inner_max;
     let inner = if inline { widest.max(last_w + 2 + meta_w) } else { widest.max(meta_w) };
     let margin = if mine { pane_w.saturating_sub(inner + 2 + 1) } else { 1 };
@@ -889,15 +1022,33 @@ fn push_bubble(
         spans.into_iter().map(|s| Span { style: s.style.bg(bg), content: s.content }).collect()
     };
 
+    let link_style = Style::new().fg(c::BLUE).add_modifier(Modifier::UNDERLINED);
+    let mut found = Vec::new();
     let count = body.len();
-    for (i, (text, style)) in body.iter().enumerate() {
-        let mut spans = vec![Span::styled(text.clone(), style.bg(bg))];
+    for (i, r) in body.iter().enumerate() {
+        // Plain text and links alternate; a link is underlined and clickable.
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut at = 0;
+        for l in &r.links {
+            let Some(before) = r.text.get(at..l.start) else { continue };
+            let Some(label) = r.text.get(l.start..l.end) else { continue };
+            if !before.is_empty() {
+                spans.push(Span::styled(before.to_string(), r.style.bg(bg)));
+            }
+            spans.push(Span::styled(label.to_string(), r.style.patch(link_style).bg(bg)));
+            let x0 = margin + 1 + width(&r.text[..l.start]);
+            found.push((i, x0, x0 + width(label), l.url.clone()));
+            at = l.end;
+        }
+        if let Some(rest) = r.text.get(at..).filter(|t| !t.is_empty() || spans.is_empty()) {
+            spans.push(Span::styled(rest.to_string(), r.style.bg(bg)));
+        }
         if i + 1 == count && inline {
-            let gap = inner - width(text) - meta_w;
+            let gap = inner - width(&r.text) - meta_w;
             spans.push(Span::styled(" ".repeat(gap), Style::new().bg(bg)));
             spans.extend(with_bg(meta.clone()));
         } else {
-            spans.push(Span::styled(" ".repeat(inner - width(text)), Style::new().bg(bg)));
+            spans.push(Span::styled(" ".repeat(inner - width(&r.text)), Style::new().bg(bg)));
         }
         out.push(row(spans));
     }
@@ -906,7 +1057,7 @@ fn push_bubble(
         spans.extend(with_bg(meta));
         out.push(row(spans));
     }
-    (margin, inner + 2)
+    (margin, inner + 2, found)
 }
 
 /// The text of one message as shown: tag, mentions by name, flags.
@@ -2228,5 +2379,250 @@ mod tests {
         let btn = app.hit.latest_btn;
         mouse(&mut app, MouseEventKind::Down(MouseButton::Left), btn.x + 3, btn.y);
         assert!(app.logs["g@g.us"].loading, "the newest page is fetched again (the offline runtime never runs it)");
+    }
+
+    fn add_message(app: &mut App, m: Message) {
+        app.logs.get_mut("g@g.us").unwrap().msgs.push(m);
+        app.lines_gen += 1;
+    }
+
+    fn click(app: &mut App, col: u16, row: u16) {
+        mouse(app, MouseEventKind::Down(MouseButton::Left), col, row);
+        mouse(app, MouseEventKind::Up(MouseButton::Left), col, row);
+    }
+
+    #[test]
+    fn links_are_underlined_and_a_click_opens_them() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let now = crate::app::now_ms();
+        add_message(&mut app, msg("L1", "me", "cek https://example.com/halaman ya, atau www.contoh.id.", now - 10_000));
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        let rows = draw_once(&mut app, &mut term);
+        assert!(rows.iter().any(|r| r.contains("https://example.com/halaman")));
+        assert_eq!(app.link_hits.len(), 2, "both addresses are clickable");
+
+        // Drawn underlined, and clicking the label opens the full address.
+        let (r, url) = app.link_hits[0].clone();
+        assert_eq!(url, "https://example.com/halaman");
+        let cell = term.backend().buffer()[(r.x + 2, r.y)].clone();
+        assert!(cell.modifier.contains(Modifier::UNDERLINED), "{cell:?}");
+        click(&mut app, r.x + 2, r.y);
+        assert_eq!(app.last_opened.as_deref(), Some("https://example.com/halaman"));
+
+        // "www." gets a scheme, and the trailing dot is not part of the link.
+        let (r2, url2) = app.link_hits[1].clone();
+        assert_eq!(url2, "https://www.contoh.id");
+        click(&mut app, r2.x, r2.y);
+        assert_eq!(app.last_opened.as_deref(), Some("https://www.contoh.id"));
+
+        // Plain text next to it opens nothing.
+        app.last_opened = None;
+        click(&mut app, r.x.saturating_sub(2), r.y);
+        assert_eq!(app.last_opened, None);
+    }
+
+    #[test]
+    fn a_link_cut_over_several_rows_opens_whole_from_any_row() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let now = crate::app::now_ms();
+        let long = "https://example.com/sebuah/alamat/yang/panjang/sekali/sampai/harus/dipotong/beberapa/baris";
+        add_message(&mut app, msg("L2", "me", long, now - 10_000));
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        draw_once(&mut app, &mut term);
+        let pieces: Vec<_> = app.link_hits.iter().filter(|(_, u)| u == long).collect();
+        assert!(pieces.len() >= 2, "one piece per row: {}", pieces.len());
+        let (last, _) = pieces.last().unwrap();
+        let (last_x, last_y) = (last.x, last.y);
+        click(&mut app, last_x, last_y);
+        assert_eq!(app.last_opened.as_deref(), Some(long));
+    }
+
+    #[test]
+    fn clicking_a_quoted_reply_goes_to_the_original_message() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let now = crate::app::now_ms();
+        let mut reply = msg("R1", "me", "setuju!", now - 5_000);
+        reply.reply_to_id = Some("0".into());
+        add_message(&mut app, reply);
+        // Plenty of messages in between, so the original is far above the view.
+        for i in 0..40 {
+            add_message(&mut app, msg(&format!("f{i}"), "628@s.whatsapp.net", &format!("pengisi nomor {i}"), now - 4_000 + i));
+        }
+        let mut reply2 = msg("R2", "me", "balasan terakhir", now - 1_000);
+        reply2.reply_to_id = Some("0".into());
+        add_message(&mut app, reply2);
+        let mut term = Terminal::new(TestBackend::new(110, 24)).unwrap();
+        draw_once(&mut app, &mut term);
+        assert!(app.bubble_hits.iter().all(|(_, id)| id != "0"), "the original is out of view");
+        let (r, target) = app.quote_hits.first().cloned().expect("the visible reply has a clickable quote");
+        assert_eq!(target, "0");
+
+        click(&mut app, r.x + 1, r.y);
+        assert_eq!(app.sel_msg.as_deref(), Some("0"));
+        draw_once(&mut app, &mut term);
+        app.finish_scroll();
+        draw_once(&mut app, &mut term);
+        assert!(app.bubble_hits.iter().any(|(_, id)| id == "0"), "the original is on screen now");
+        assert!(app.scroll > 0);
+    }
+
+    #[test]
+    fn a_quote_of_an_unloaded_message_still_asks_for_it() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let now = crate::app::now_ms();
+        let mut reply = msg("R9", "me", "ini balasan lama", now - 5_000);
+        reply.reply_to_id = Some("jauh-sekali".into());
+        add_message(&mut app, reply);
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        let rows = draw_once(&mut app, &mut term);
+        assert!(rows.iter().any(|r| r.contains("↪ Reply")));
+        let (r, target) = app.quote_hits[0].clone();
+        assert_eq!(target, "jauh-sekali");
+        // The offline runtime never runs the fetch; it must simply not crash or select anything.
+        click(&mut app, r.x, r.y);
+        assert_eq!(app.sel_msg, None);
+    }
+
+    #[test]
+    fn dragging_over_text_selects_it_and_copies_on_release() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let now = crate::app::now_ms();
+        add_message(&mut app, msg("T1", "me", "salin kalimat ini saja", now - 10_000));
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        let rows = draw_once(&mut app, &mut term);
+        let y = rows.iter().position(|r| r.contains("salin kalimat")).unwrap() as u16;
+        let x0 = rows[y as usize].find("salin").map(|b| rows[y as usize][..b].chars().count()).unwrap() as u16;
+
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x0, y);
+        mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), x0 + 5, y);
+        mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), x0 + 13, y);
+        // The picked cells are drawn reversed.
+        draw_once(&mut app, &mut term);
+        assert!(term.backend().buffer()[(x0 + 3, y)].modifier.contains(Modifier::REVERSED));
+        assert!(!term.backend().buffer()[(x0 + 20, y)].modifier.contains(Modifier::REVERSED));
+        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), x0 + 13, y);
+        assert_eq!(app.last_copied.as_deref(), Some("salin kalimat"));
+        assert!(app.notice.as_ref().is_some_and(|(t, _)| t.contains("Copied 13")));
+
+        // A plain click afterwards clears the highlight and copies nothing more.
+        app.last_copied = None;
+        click(&mut app, x0, y);
+        draw_once(&mut app, &mut term);
+        assert!(!term.backend().buffer()[(x0 + 3, y)].modifier.contains(Modifier::REVERSED));
+        assert_eq!(app.last_copied, None);
+    }
+
+    #[test]
+    fn a_selection_over_several_bubbles_copies_every_row() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let now = crate::app::now_ms();
+        add_message(&mut app, msg("T2", "me", "baris pertama", now - 10_000));
+        add_message(&mut app, msg("T3", "me", "baris kedua", now - 9_000));
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        let rows = draw_once(&mut app, &mut term);
+        let y1 = rows.iter().position(|r| r.contains("baris pertama")).unwrap() as u16;
+        let y2 = rows.iter().position(|r| r.contains("baris kedua")).unwrap() as u16;
+        // Dragged upwards, from the end of the second to the start of the first.
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 109, y2);
+        mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), 0, y1);
+        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), 0, y1);
+        let copied = app.last_copied.clone().unwrap();
+        assert!(copied.contains("baris pertama") && copied.contains("baris kedua"), "{copied:?}");
+        assert!(copied.find("pertama") < copied.find("kedua"));
+    }
+
+    #[test]
+    fn forward_lists_every_chat_and_typing_narrows_it() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        for i in 0..50 {
+            app.chats.push(Chat {
+                id: format!("c{i}@s.whatsapp.net"),
+                name: format!("Teman {i:02}"),
+                last_time: 2 + i,
+                ..serde_json::from_str(r#"{"id":"x"}"#).unwrap()
+            });
+        }
+        app.chats.push(Chat {
+            id: "keluarga@g.us".into(),
+            name: "Keluarga Besar".into(),
+            is_group: true,
+            last_time: 99,
+            ..serde_json::from_str(r#"{"id":"x"}"#).unwrap()
+        });
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        draw_once(&mut app, &mut term);
+        app.open_message_menu((10, 10), "p1");
+        // Down to "Forward" and open it.
+        while app.menu.as_ref().unwrap().current().unwrap().label != "Forward" {
+            key(&mut app, KeyCode::Char('j'));
+        }
+        key(&mut app, KeyCode::Enter);
+        let m = app.menu.as_ref().unwrap();
+        assert!(m.search.is_some());
+        assert!(m.items.len() > 50, "not cut to 30: {}", m.items.len());
+        let rows = draw_once(&mut app, &mut term);
+        assert!(rows.iter().any(|r| r.contains("type to search")));
+
+        // Letters are text, not j/k movement.
+        for ch in "kelu".chars() {
+            key(&mut app, KeyCode::Char(ch));
+        }
+        let m = app.menu.as_ref().unwrap();
+        assert_eq!(m.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Keluarga Besar"]);
+        let rows = draw_once(&mut app, &mut term);
+        assert!(rows.iter().any(|r| r.contains("⌕ kelu")), "the field shows what was typed");
+
+        key(&mut app, KeyCode::Backspace);
+        key(&mut app, KeyCode::Backspace);
+        key(&mut app, KeyCode::Backspace);
+        key(&mut app, KeyCode::Backspace);
+        assert!(app.menu.as_ref().unwrap().items.len() > 50, "empty search lists all again");
+        for ch in "zzz".chars() {
+            key(&mut app, KeyCode::Char(ch));
+        }
+        let rows = draw_once(&mut app, &mut term);
+        assert!(rows.iter().any(|r| r.contains("No match")));
+
+        // Esc clears the text, a second Esc goes back to the message menu.
+        key(&mut app, KeyCode::Esc);
+        assert!(app.menu.as_ref().unwrap().search.is_some());
+        key(&mut app, KeyCode::Esc);
+        assert!(app.menu.as_ref().unwrap().search.is_none());
+        assert!(app.menu.as_ref().unwrap().items.iter().any(|i| i.label == "Reply"));
+    }
+
+    #[test]
+    fn a_click_on_a_search_result_forwards_there() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        app.chats.push(Chat {
+            id: "keluarga@g.us".into(),
+            name: "Keluarga Besar".into(),
+            is_group: true,
+            last_time: 99,
+            ..serde_json::from_str(r#"{"id":"x"}"#).unwrap()
+        });
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        draw_once(&mut app, &mut term);
+        app.open_message_menu((10, 10), "p1");
+        while app.menu.as_ref().unwrap().current().unwrap().label != "Forward" {
+            key(&mut app, KeyCode::Char('j'));
+        }
+        key(&mut app, KeyCode::Enter);
+        for ch in "besar".chars() {
+            key(&mut app, KeyCode::Char(ch));
+        }
+        let rows = draw_once(&mut app, &mut term);
+        let y = rows.iter().position(|r| r.contains("Keluarga Besar")).unwrap() as u16;
+        let x = rows[y as usize].find("Keluarga").map(|b| rows[y as usize][..b].chars().count()).unwrap() as u16;
+        click(&mut app, x + 2, y);
+        assert!(app.menu.is_none(), "the menu closes after picking");
     }
 }

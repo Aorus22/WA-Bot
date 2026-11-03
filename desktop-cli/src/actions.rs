@@ -73,6 +73,37 @@ impl App {
         });
     }
 
+    /// Put text on the clipboard; says why on the status line when that fails.
+    /// (Tests keep it in `last_copied` and leave the real clipboard alone.)
+    pub(crate) fn copy_out(&mut self, text: &str) -> bool {
+        if cfg!(test) {
+            self.last_copied = Some(text.to_string());
+            return true;
+        }
+        match clip::write_text(text) {
+            Ok(()) => {
+                self.last_copied = Some(text.to_string());
+                true
+            }
+            Err(e) => {
+                self.notice(format!("Could not copy: {e}"));
+                false
+            }
+        }
+    }
+
+    /// Open an address in the desktop's browser.
+    pub(crate) fn open_link(&mut self, url: &str) {
+        self.last_opened = Some(url.to_string());
+        if cfg!(test) {
+            return;
+        }
+        match clip::open_url(url) {
+            Ok(()) => self.notice(format!("Opening {}", crate::text::truncate(url, 60))),
+            Err(e) => self.notice(format!("Could not open the link: {e}")),
+        }
+    }
+
     // ---- opening menus ------------------------------------------------------
 
     /// The attach (+) menu, opened above the button.
@@ -139,6 +170,36 @@ impl App {
 
     pub fn key_menu(&mut self, key: KeyEvent) {
         let Some(menu) = self.menu.as_mut() else { return };
+        // With a search field every letter is text; arrows, Enter and Esc still steer.
+        if menu.search.is_some() {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            let none: Option<fn(&mut String)> = None;
+            match key.code {
+                KeyCode::Char('c') if ctrl => self.menu = None,
+                KeyCode::Char('u') if ctrl => menu.edit_query(none),
+                KeyCode::Char('n') if ctrl => menu.step(1),
+                KeyCode::Char('p') if ctrl => menu.step(-1),
+                KeyCode::Char(ch) if !ctrl => menu.edit_query(Some(move |q: &mut String| q.push(ch))),
+                KeyCode::Backspace => menu.edit_query(Some(|q: &mut String| {
+                    q.pop();
+                })),
+                KeyCode::Down | KeyCode::Tab => menu.step(1),
+                KeyCode::Up | KeyCode::BackTab => menu.step(-1),
+                KeyCode::Home => menu.sel = 0,
+                KeyCode::End => menu.sel = menu.items.len().saturating_sub(1),
+                // Esc clears the text first, then goes back a level.
+                KeyCode::Esc => {
+                    if !menu.query_is_empty() {
+                        menu.edit_query(none);
+                    } else if !menu.back() {
+                        self.menu = None;
+                    }
+                }
+                KeyCode::Enter => self.activate_menu_item(),
+                _ => {}
+            }
+            return;
+        }
         match key.code {
             KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => menu.step(1),
             KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => menu.step(-1),
@@ -161,6 +222,7 @@ impl App {
         let Some(item) = menu.current().cloned() else { return };
         match item.action {
             Action::Submenu { title, items } => menu.open_sub(title, items),
+            Action::SearchMenu { title, items } => menu.open_search(title, items),
             action => {
                 self.menu = None;
                 self.run_action(action);
@@ -271,10 +333,11 @@ impl App {
             Action::ForwardTo { msg, chat: to } => self.spawn_call("Forwarded", Then::Nothing, move |h| async move {
                 h.forward_message(&chat, &msg, &[to]).await.map(|_| ()).map_err(|e| e.to_string())
             }),
-            Action::Copy(text) => match clip::write_text(&text) {
-                Ok(()) => self.notice("Copied"),
-                Err(e) => self.notice(format!("Could not copy: {e}")),
-            },
+            Action::Copy(text) => {
+                if self.copy_out(&text) {
+                    self.notice("Copied");
+                }
+            }
             Action::CopyImage(id) => self.copy_image(&chat, &id),
             Action::Star(id, starred) => {
                 let then = Then::Star(chat.clone(), id.clone(), starred);
@@ -325,7 +388,7 @@ impl App {
                 })
             }
             // Handled by the menu itself.
-            Action::Submenu { .. } => {}
+            Action::Submenu { .. } | Action::SearchMenu { .. } => {}
         }
     }
 

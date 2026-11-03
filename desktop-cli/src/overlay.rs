@@ -19,19 +19,24 @@ pub fn draw_menu(f: &mut Frame, menu: &mut Menu, area: Rect) {
     let widest = menu
         .items
         .iter()
-        .map(|i| width(&i.label) + if i.hint.is_empty() && !matches!(i.action, Action::Submenu { .. }) { 0 } else { width(&i.hint) + 2 } + 2)
+        .map(|i| width(&i.label) + if i.hint.is_empty() && !matches!(i.action, Action::Submenu { .. } | Action::SearchMenu { .. }) { 0 } else { width(&i.hint) + 2 } + 2)
         .max()
         .unwrap_or(10);
-    let w = (widest.max(title_w) + 4).clamp(18, 46).min(area.width.saturating_sub(2) as usize) as u16;
+    let min_w = if menu.search.is_some() { 32 } else { 18 };
+    let w = (widest.max(title_w) + 4).clamp(min_w, 46).min(area.width.saturating_sub(2) as usize) as u16;
 
     let rules = |items: &[crate::menu::MenuItem]| items.iter().filter(|i| i.rule_above).count();
-    let chrome = 2 + u16::from(menu.title.is_some());
+    // Border, title, search field and the "no match" line when nothing is left.
+    let searching = menu.search.is_some();
+    let chrome = 2 + u16::from(menu.title.is_some()) + u16::from(searching) + u16::from(searching && menu.items.is_empty());
     let max_rows = area.height.saturating_sub(2 + chrome) as usize;
 
     // Keep the highlighted item inside a window when the list is taller than the screen.
     let n = menu.items.len();
     let shown = n.min(max_rows.max(1));
-    if menu.sel < menu.offset {
+    if shown == 0 {
+        menu.offset = 0;
+    } else if menu.sel < menu.offset {
         menu.offset = menu.sel;
     } else if menu.sel >= menu.offset + shown {
         menu.offset = menu.sel + 1 - shown;
@@ -61,6 +66,23 @@ pub fn draw_menu(f: &mut Frame, menu: &mut Menu, area: Rect) {
         row += 1;
     }
     let iw = inner.width as usize;
+    if let Some(s) = &menu.search {
+        let line = if s.query.is_empty() {
+            Line::from(vec![Span::styled(" ⌕ ", Style::new().fg(c::BLUE)), Span::styled("type to search", Style::new().fg(c::DIM))])
+        } else {
+            Line::from(vec![
+                Span::styled(" ⌕ ", Style::new().fg(c::BLUE)),
+                Span::styled(truncate(&s.query, iw.saturating_sub(5)), Style::new().fg(c::FG)),
+                Span::styled("▏", Style::new().fg(c::BLUE)),
+            ])
+        };
+        lines.push(line);
+        row += 1;
+        if menu.items.is_empty() {
+            lines.push(Line::styled(" No match", Style::new().fg(c::DIM)));
+            row += 1;
+        }
+    }
     for (k, item) in window.iter().enumerate() {
         let idx = menu.offset + k;
         if item.rule_above {
@@ -69,7 +91,7 @@ pub fn draw_menu(f: &mut Frame, menu: &mut Menu, area: Rect) {
         }
         let selected = idx == menu.sel;
         let fg = if item.danger { c::RED } else { c::FG };
-        let arrow = if matches!(item.action, Action::Submenu { .. }) { "›" } else { "" };
+        let arrow = if matches!(item.action, Action::Submenu { .. } | Action::SearchMenu { .. }) { "›" } else { "" };
         let right = if item.hint.is_empty() { arrow.to_string() } else { item.hint.clone() };
         let label = truncate(&item.label, iw.saturating_sub(width(&right) + 3));
         let gap = iw.saturating_sub(1 + width(&label) + width(&right) + 1);

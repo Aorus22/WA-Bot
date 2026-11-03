@@ -315,7 +315,7 @@ impl App {
     }
 
     /// Show a message in the conversation, loading its surroundings if needed.
-    fn jump_to(&mut self, chat_id: &str, msg_id: &str) {
+    pub(crate) fn jump_to(&mut self, chat_id: &str, msg_id: &str) {
         let present = self.logs.get(chat_id).is_some_and(|l| l.msgs.iter().any(|m| m.id == msg_id));
         if present {
             self.sel_msg = Some(msg_id.to_string());

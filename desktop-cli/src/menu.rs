@@ -43,6 +43,8 @@ pub enum Action {
     Compose(FormKind),
     /// Open another menu level.
     Submenu { title: String, items: Vec<MenuItem> },
+    /// A menu level with a search field: typing narrows the list.
+    SearchMenu { title: String, items: Vec<MenuItem> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +79,13 @@ impl MenuItem {
     }
 }
 
+/// The search field of a menu level: what was typed and the full list.
+#[derive(Clone, Debug, Default)]
+pub struct Search {
+    pub query: String,
+    pub all: Vec<MenuItem>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Menu {
     /// Where it opened (the click, or the target's corner).
@@ -87,7 +96,9 @@ pub struct Menu {
     /// First visible item when the list is taller than the screen.
     pub offset: usize,
     /// Levels above this one, for `Esc`/back.
-    back: Vec<(Option<String>, Vec<MenuItem>, usize)>,
+    back: Vec<(Option<String>, Vec<MenuItem>, usize, Option<Search>)>,
+    /// Set on a level with a search field.
+    pub search: Option<Search>,
     /// Screen area and first item row of the last draw, for the mouse.
     pub rect: Rect,
     pub rows: Vec<(u16, usize)>,
@@ -95,7 +106,7 @@ pub struct Menu {
 
 impl Menu {
     pub fn new(at: (u16, u16), title: Option<String>, items: Vec<MenuItem>) -> Self {
-        Self { at, title, items, sel: 0, offset: 0, back: Vec::new(), rect: Rect::default(), rows: Vec::new() }
+        Self { at, title, items, sel: 0, offset: 0, back: Vec::new(), search: None, rect: Rect::default(), rows: Vec::new() }
     }
 
     pub fn step(&mut self, delta: isize) {
@@ -111,7 +122,7 @@ impl Menu {
     }
 
     pub fn open_sub(&mut self, title: String, items: Vec<MenuItem>) {
-        let prev = (self.title.take(), std::mem::take(&mut self.items), self.sel);
+        let prev = (self.title.take(), std::mem::take(&mut self.items), self.sel, self.search.take());
         self.back.push(prev);
         self.title = Some(title);
         self.items = items;
@@ -119,12 +130,62 @@ impl Menu {
         self.offset = 0;
     }
 
+    /// Like `open_sub`, with a search field above the list.
+    pub fn open_search(&mut self, title: String, items: Vec<MenuItem>) {
+        self.open_sub(title, items.clone());
+        self.search = Some(Search { query: String::new(), all: items });
+    }
+
+    /// Edit the search text and narrow the list. `None` = clear it.
+    pub fn edit_query(&mut self, edit: Option<impl FnOnce(&mut String)>) {
+        if let Some(s) = self.search.as_mut() {
+            match edit {
+                Some(f) => f(&mut s.query),
+                None => s.query.clear(),
+            }
+        }
+        self.refilter();
+    }
+
+    pub fn query_is_empty(&self) -> bool {
+        self.search.as_ref().is_none_or(|s| s.query.is_empty())
+    }
+
+    /// The typed text changed: keep the entries that contain it, best match first.
+    pub fn refilter(&mut self) {
+        let Some(s) = self.search.as_ref() else { return };
+        let q = s.query.trim().to_lowercase();
+        let mut hits: Vec<(usize, &MenuItem)> = s
+            .all
+            .iter()
+            .filter_map(|i| {
+                let l = i.label.to_lowercase();
+                // Words starting with the text come before the text found in the middle.
+                let rank = if l.starts_with(&q) {
+                    0
+                } else if l.split_whitespace().any(|w| w.starts_with(&q)) {
+                    1
+                } else if l.contains(&q) {
+                    2
+                } else {
+                    return None;
+                };
+                Some((rank, i))
+            })
+            .collect();
+        hits.sort_by_key(|(rank, _)| *rank);
+        self.items = hits.into_iter().map(|(_, i)| i.clone()).collect();
+        self.sel = 0;
+        self.offset = 0;
+    }
+
     /// One level up. False when already at the top (the caller closes the menu).
     pub fn back(&mut self) -> bool {
         match self.back.pop() {
-            Some((title, items, sel)) => {
+            Some((title, items, sel, search)) => {
                 self.title = title;
                 self.items = items;
+                self.search = search;
                 self.sel = sel;
                 self.offset = 0;
                 true
@@ -230,7 +291,7 @@ pub fn message_items(app: &App, chat_id: &str, m: &Message) -> Vec<MenuItem> {
         items.push(MenuItem::new("Message info", Action::MsgInfo(id.clone())));
         items.push(MenuItem::new(
             "Forward",
-            Action::Submenu { title: "Forward to".into(), items: forward_targets(app, chat_id, &id) },
+            Action::SearchMenu { title: "Forward to".into(), items: forward_targets(app, chat_id, &id) },
         ));
         if app.is_pinned(chat_id, &id) {
             items.push(MenuItem::new("Unpin", Action::UnpinMsg(id.clone())));
@@ -272,17 +333,22 @@ pub fn message_items(app: &App, chat_id: &str, m: &Message) -> Vec<MenuItem> {
     items
 }
 
-/// Chats a message can be forwarded to: the visible list, newest first.
+/// Chats a message can be forwarded to: all of them, newest first (the menu searches).
 fn forward_targets(app: &App, from_chat: &str, msg_id: &str) -> Vec<MenuItem> {
     app.visible_all()
         .into_iter()
-        .take(30)
         .map(|c| {
             let item = MenuItem::new(
                 crate::text::truncate(&c.name, 30),
                 Action::ForwardTo { msg: msg_id.to_string(), chat: c.id.clone() },
             );
-            if c.id == from_chat { item.hint("this chat") } else { item }
+            if c.id == from_chat {
+                item.hint("this chat")
+            } else if c.is_group {
+                item.hint("group")
+            } else {
+                item
+            }
         })
         .collect()
 }

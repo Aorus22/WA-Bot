@@ -211,6 +211,64 @@ pub struct ChatLog {
     pub detached: bool,
 }
 
+/// Text picked with the mouse: two points among the conversation lines, as
+/// (line, column inside the message pane). Both ends are inclusive.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Selection {
+    pub a: (usize, usize),
+    pub b: (usize, usize),
+}
+
+impl Selection {
+    pub fn is_empty(&self) -> bool {
+        self.a == self.b
+    }
+
+    /// First and last point (the last one exclusive in its column), whichever way it was dragged.
+    pub fn ordered(&self) -> ((usize, usize), (usize, usize)) {
+        if self.a <= self.b {
+            (self.a, (self.b.0, self.b.1 + 1))
+        } else {
+            (self.b, (self.a.0, self.a.1 + 1))
+        }
+    }
+}
+
+/// A left button held down in the conversation: a click or the start of a selection.
+#[derive(Clone, Copy, Debug)]
+pub struct Press {
+    pub at: (usize, usize),
+    pub moved: bool,
+    /// Where it went down on screen, to find a link or quote under a plain click.
+    pub screen: (u16, u16),
+}
+
+/// How the message pane maps screen rows to conversation lines (last draw).
+#[derive(Clone, Copy, Default)]
+pub struct MsgView {
+    pub area: Rect,
+    /// First conversation line shown, and blank rows above it (short chats sit at the bottom).
+    pub start: usize,
+    pub pad: usize,
+}
+
+impl MsgView {
+    /// The conversation point under a screen cell; None outside the text.
+    pub fn point(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let a = self.area;
+        if a.height == 0 || row < a.y || row >= a.y + a.height {
+            return None;
+        }
+        let r = (row - a.y) as usize;
+        let line = (self.start + r).checked_sub(self.pad)?;
+        if r < self.pad {
+            return None;
+        }
+        let x = col.saturating_sub(a.x).min(a.width.saturating_sub(1)) as usize;
+        Some((line, x))
+    }
+}
+
 /// Screen areas of the last frame, for mouse hit-testing.
 #[derive(Default, Clone, Copy)]
 pub struct Hit {
@@ -305,6 +363,15 @@ pub struct App {
     pub reveal: Option<(String, bool)>,
     /// Bubbles on screen in the last draw: area and message id.
     pub bubble_hits: Vec<(Rect, String)>,
+    /// Links and quoted lines on screen: area and address / message id.
+    pub link_hits: Vec<(Rect, String)>,
+    pub quote_hits: Vec<(Rect, String)>,
+    pub msg_view: MsgView,
+    pub selection: Option<Selection>,
+    pub press: Option<Press>,
+    /// What was last copied / opened (also what the tests look at).
+    pub last_copied: Option<String>,
+    pub last_opened: Option<String>,
     pub reply: Option<Reply>,
     pub editing: Option<String>,
     /// Active in-chat pins by chat id.
@@ -366,6 +433,13 @@ impl App {
             sel_msg: None,
             reveal: None,
             bubble_hits: Vec::new(),
+            link_hits: Vec::new(),
+            quote_hits: Vec::new(),
+            msg_view: MsgView::default(),
+            selection: None,
+            press: None,
+            last_copied: None,
+            last_opened: None,
             reply: None,
             editing: None,
             pins: HashMap::new(),
@@ -914,6 +988,7 @@ impl App {
     // ---- input -----------------------------------------------------------
 
     fn on_key(&mut self, key: KeyEvent) {
+        self.selection = None;
         if self.menu.is_some() {
             return self.key_menu(key);
         }
@@ -1175,6 +1250,9 @@ impl App {
         if self.mouse_panel(m) {
             return;
         }
+        if self.press.is_some() && self.mouse_text(m) {
+            return;
+        }
         match m.kind {
             MouseEventKind::Down(MouseButton::Right) => {
                 if at(self.hit.sidebar_list) {
@@ -1217,6 +1295,12 @@ impl App {
                     self.mode = Mode::Insert;
                 } else if at(self.hit.messages) {
                     self.focus = Focus::Messages;
+                    // A click on text is a click (link, quote) or the start of a selection.
+                    self.selection = None;
+                    self.press = self
+                        .msg_view
+                        .point(m.column, m.row)
+                        .map(|at| Press { at, moved: false, screen: (m.column, m.row) });
                 }
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
@@ -1249,6 +1333,57 @@ pub enum Drag {
 }
 
 impl App {
+    /// The left button held or let go after it went down on text. True when used up.
+    fn mouse_text(&mut self, m: MouseEvent) -> bool {
+        let Some(press) = self.press else { return false };
+        match m.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let area = self.msg_view.area;
+                // Past the edge: keep scrolling the way the pointer went.
+                if m.row < area.y {
+                    self.scroll_by(1);
+                } else if m.row >= area.y + area.height {
+                    self.scroll_by(-1);
+                }
+                let row = m.row.clamp(area.y, (area.y + area.height).saturating_sub(1));
+                if let Some(at) = self.msg_view.point(m.column, row) {
+                    if at != press.at {
+                        self.press = Some(Press { moved: true, ..press });
+                    }
+                    self.selection = (at != press.at).then_some(Selection { a: press.at, b: at });
+                }
+                true
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.press = None;
+                if press.moved {
+                    if let Some(sel) = self.selection.filter(|s| !s.is_empty()) {
+                        let text = crate::ui::selected_text(self, sel);
+                        if !text.is_empty() {
+                            let n = text.chars().count();
+                            self.copy_out(&text);
+                            if self.last_copied.as_deref() == Some(text.as_str()) {
+                                self.notice(format!("Copied {n} characters"));
+                            }
+                        }
+                    }
+                } else {
+                    let (col, row) = press.screen;
+                    let at = |r: &Rect| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height;
+                    if let Some(url) = self.link_hits.iter().find(|(r, _)| at(r)).map(|(_, u)| u.clone()) {
+                        self.open_link(&url);
+                    } else if let Some(id) = self.quote_hits.iter().find(|(r, _)| at(r)).map(|(_, i)| i.clone()) {
+                        if let Some(chat) = self.open.clone() {
+                            self.jump_to(&chat, &id);
+                        }
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Back to the newest message: glide to the bottom, and when the view shows an old
     /// stretch around a search hit, fetch the newest messages again.
     pub fn go_latest(&mut self) {

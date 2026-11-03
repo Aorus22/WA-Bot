@@ -77,6 +77,11 @@ sticker, photo / video, document, audio, GIF, poll, location, contact, and paste
 Files are chosen in a small in-terminal browser (mouse or keyboard, `~` home, `.` hidden);
 the sticker picker has Recent and Favourites tabs and a click sends. Every attachment goes
 through a box with Send / Cancel buttons (a caption for everything but audio).
+Text is picked by dragging over it (the terminal's own selection is off while the mouse
+is captured); letting go copies it. Web addresses (`http://`, `https://`, `www.`) are
+underlined and open in the browser on click. A reply's quoted line goes to the original
+message when clicked (it is fetched when not loaded). Forward lists every chat and has a
+search field: typing narrows the list.
 Still missing against gpui/web: multi-select, starred sheet, group editing, settings, calls,
 statuses, channels, the emoji picker, voice recording, and playing or saving received
 audio, video and documents. It does not start the backend; it reads `~/.wa-bot/run/core.json`.

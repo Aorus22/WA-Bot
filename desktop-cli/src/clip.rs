@@ -139,6 +139,24 @@ pub fn write_text(text: &str) -> Result<(), String> {
     with_held(|cb| cb.set_text(text.to_string()))
 }
 
+/// Hand an address to the desktop (`xdg-open`, `open` on a Mac); does not wait for it.
+pub fn open_url(url: &str) -> Result<(), String> {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    Command::new(opener)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|mut child| {
+            // Reap it when it ends, so it does not linger as a zombie.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        })
+        .map_err(|e| format!("{opener}: {e}"))
+}
+
 pub fn write_image(img: &DynamicImage) -> Result<(), String> {
     let png = encode_png(img)?;
     if feed("wl-copy", &["--type", "image/png"], &png) || feed("xclip", &["-selection", "clipboard", "-t", "image/png", "-i"], &png) {
