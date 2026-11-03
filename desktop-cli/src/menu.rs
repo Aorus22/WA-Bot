@@ -102,11 +102,13 @@ pub struct Menu {
     /// Screen area and first item row of the last draw, for the mouse.
     pub rect: Rect,
     pub rows: Vec<(u16, usize)>,
+    /// The title row of a submenu: clicking it goes back (like `Esc`).
+    pub back_row: Rect,
 }
 
 impl Menu {
     pub fn new(at: (u16, u16), title: Option<String>, items: Vec<MenuItem>) -> Self {
-        Self { at, title, items, sel: 0, offset: 0, back: Vec::new(), search: None, rect: Rect::default(), rows: Vec::new() }
+        Self { at, title, items, sel: 0, offset: 0, back: Vec::new(), search: None, rect: Rect::default(), rows: Vec::new(), back_row: Rect::default() }
     }
 
     pub fn step(&mut self, delta: isize) {
@@ -115,6 +117,11 @@ impl Menu {
         }
         let n = self.items.len() as isize;
         self.sel = (self.sel as isize + delta).rem_euclid(n) as usize;
+    }
+
+    /// True inside a submenu.
+    pub fn can_go_back(&self) -> bool {
+        !self.back.is_empty()
     }
 
     pub fn current(&self) -> Option<&MenuItem> {

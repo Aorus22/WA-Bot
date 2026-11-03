@@ -65,6 +65,17 @@ fn main() -> Result<()> {
     let mut terminal = ratatui::init();
     let picker = images::make_picker(&image_mode);
     execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste).ok();
+    // Where the terminal can tell Ctrl+Shift+C from Ctrl+C, ask it to (kitty protocol).
+    let enhanced = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    if enhanced {
+        execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::PushKeyboardEnhancementFlags(
+                ratatui::crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+            )
+        )
+        .ok();
+    }
 
     // Terminal input thread.
     let key_tx = tx.clone();
@@ -86,6 +97,9 @@ fn main() -> Result<()> {
     app.reload_chats();
 
     let result = run(&mut terminal, &mut app, rx);
+    if enhanced {
+        execute!(std::io::stdout(), ratatui::crossterm::event::PopKeyboardEnhancementFlags).ok();
+    }
     execute!(std::io::stdout(), DisableBracketedPaste, DisableMouseCapture).ok();
     ratatui::restore();
     ws.stop();

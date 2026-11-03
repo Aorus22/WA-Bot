@@ -78,7 +78,7 @@ Files are chosen in a small in-terminal browser (mouse or keyboard, `~` home, `.
 the sticker picker has Recent and Favourites tabs and a click sends. Every attachment goes
 through a box with Send / Cancel buttons (a caption for everything but audio).
 Text is picked by dragging over it (the terminal's own selection is off while the mouse
-is captured); letting go copies it. Web addresses (`http://`, `https://`, `www.`) are
+is captured); it stays highlighted and `Ctrl+Shift+C` (or `Ctrl+C`, or `y`) copies it. Web addresses (`http://`, `https://`, `www.`) are
 underlined and open in the browser on click. A reply's quoted line goes to the original
 message when clicked (it is fetched when not loaded). Forward lists every chat and has a
 search field: typing narrows the list.

@@ -44,6 +44,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.want.clear();
     app.media_hits.clear();
     app.bubble_hits.clear();
+    app.hit.filter = Rect::default();
+    app.hit.filter_clear = Rect::default();
     app.link_hits.clear();
     app.quote_hits.clear();
     if app.viewer.is_some() {
@@ -138,7 +140,8 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     );
 
     let filtering = app.mode == Mode::Filter;
-    let filter_line = if filtering || !app.filter.text.is_empty() {
+    let has_filter = filtering || !app.filter.text.is_empty();
+    let filter_line = if has_filter {
         Line::from(vec![
             Span::styled(" / ", Style::new().fg(c::YELLOW)),
             Span::styled(app.filter.text.clone(), Style::new().fg(c::FG)),
@@ -147,6 +150,14 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         Line::styled(" / to filter", Style::new().fg(c::DIM))
     };
     f.render_widget(Paragraph::new(filter_line), filter);
+    // Clicking the row starts typing; the "✕" at its end clears the text.
+    app.hit.filter = filter;
+    app.hit.filter_clear = Rect::default();
+    if has_filter && filter.width > 8 {
+        let r = Rect::new(filter.x + filter.width - 4, filter.y, 3, 1);
+        f.render_widget(Paragraph::new(Span::styled(" ✕ ", Style::new().fg(c::FG).bg(c::SELECT))), r);
+        app.hit.filter_clear = r;
+    }
     if filtering {
         f.set_cursor_position((filter.x + 3 + app.filter.cursor_col() as u16, filter.y));
     }
@@ -620,8 +631,9 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Input.
+    app.hit.compose_cancel = Rect::default();
     if let (Some(r), Some((title, quoted))) = (compose_area, compose) {
-        let hint = "esc cancel ";
+        let hint = " ✕ cancel ";
         let room = (r.width as usize).saturating_sub(width(&title) + width(hint) + 6);
         let q = if quoted.is_empty() { String::new() } else { format!("  {}", truncate(&quoted, room)) };
         let gap = (r.width as usize).saturating_sub(width(&title) + width(&q) + width(hint) + 3);
@@ -631,10 +643,12 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(title, Style::new().fg(c::CYAN).add_modifier(Modifier::BOLD)),
                 Span::styled(q, Style::new().fg(c::DIM)),
                 Span::raw(" ".repeat(gap)),
-                Span::styled(hint, Style::new().fg(c::DIM)),
+                Span::styled(hint, Style::new().fg(c::FG).bg(c::SELECT)),
             ])),
             r,
         );
+        let hw = width(hint) as u16;
+        app.hit.compose_cancel = Rect::new(r.x + r.width.saturating_sub(hw + 1), r.y, hw, 1);
     }
     // The "+" button sits left of the message field.
     let [attach_btn, input] = Layout::horizontal([Constraint::Length(5), Constraint::Min(1)]).areas(input);
@@ -2506,8 +2520,14 @@ mod tests {
         assert!(term.backend().buffer()[(x0 + 3, y)].modifier.contains(Modifier::REVERSED));
         assert!(!term.backend().buffer()[(x0 + 20, y)].modifier.contains(Modifier::REVERSED));
         mouse(&mut app, MouseEventKind::Up(MouseButton::Left), x0 + 13, y);
+        assert_eq!(app.last_copied, None, "letting go does not copy");
+        // The highlight stays until it is copied by hand.
+        draw_once(&mut app, &mut term);
+        assert!(term.backend().buffer()[(x0 + 3, y)].modifier.contains(Modifier::REVERSED));
+        app.handle(Event::Input(CtEvent::Key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL | KeyModifiers::SHIFT))));
         assert_eq!(app.last_copied.as_deref(), Some("salin kalimat"));
         assert!(app.notice.as_ref().is_some_and(|(t, _)| t.contains("Copied 13")));
+        assert!(!app.quit);
 
         // A plain click afterwards clears the highlight and copies nothing more.
         app.last_copied = None;
@@ -2532,6 +2552,8 @@ mod tests {
         mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 109, y2);
         mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), 0, y1);
         mouse(&mut app, MouseEventKind::Up(MouseButton::Left), 0, y1);
+        assert_eq!(app.last_copied, None);
+        key(&mut app, KeyCode::Char('y'));
         let copied = app.last_copied.clone().unwrap();
         assert!(copied.contains("baris pertama") && copied.contains("baris kedua"), "{copied:?}");
         assert!(copied.find("pertama") < copied.find("kedua"));
@@ -2624,5 +2646,64 @@ mod tests {
         let x = rows[y as usize].find("Keluarga").map(|b| rows[y as usize][..b].chars().count()).unwrap() as u16;
         click(&mut app, x + 2, y);
         assert!(app.menu.is_none(), "the menu closes after picking");
+    }
+
+    #[test]
+    fn every_esc_action_has_a_button() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let mut term = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        draw_once(&mut app, &mut term);
+
+        // Editing a message: the bar has a cancel button that drops the edit and the text.
+        app.run_action(crate::menu::Action::Edit("2".into()));
+        assert!(app.editing.is_some());
+        let rows = draw_once(&mut app, &mut term);
+        assert!(rows.iter().any(|r| r.contains("✕ cancel")));
+        let b = app.hit.compose_cancel;
+        assert!(b.width > 5);
+        click(&mut app, b.x + 2, b.y);
+        assert!(app.editing.is_none() && app.input.text.is_empty());
+        draw_once(&mut app, &mut term);
+        assert_eq!(app.hit.compose_cancel, Rect::default(), "no button without a reply or edit");
+
+        // Same for a reply.
+        app.run_action(crate::menu::Action::Reply("p1".into()));
+        draw_once(&mut app, &mut term);
+        let b = app.hit.compose_cancel;
+        click(&mut app, b.x + 2, b.y);
+        assert!(app.reply.is_none());
+
+        // The chat filter: a click on the row starts typing, the ✕ clears it.
+        draw_once(&mut app, &mut term);
+        let row = app.hit.filter;
+        click(&mut app, row.x + 2, row.y);
+        assert_eq!(app.mode, Mode::Filter);
+        for ch in "aku".chars() {
+            key(&mut app, KeyCode::Char(ch));
+        }
+        draw_once(&mut app, &mut term);
+        let x = app.hit.filter_clear;
+        assert!(x.width > 0);
+        click(&mut app, x.x + 1, x.y);
+        assert!(app.filter.text.is_empty());
+        assert_eq!(app.mode, Mode::Normal);
+        draw_once(&mut app, &mut term);
+        assert_eq!(app.hit.filter_clear, Rect::default());
+
+        // A submenu has a way back at its title.
+        app.open_message_menu((10, 10), "p1");
+        while app.menu.as_ref().unwrap().current().unwrap().label != "React" {
+            key(&mut app, KeyCode::Char('j'));
+        }
+        key(&mut app, KeyCode::Enter);
+        let rows = draw_once(&mut app, &mut term);
+        assert!(rows.iter().any(|r| r.contains("‹ React")));
+        let back = app.menu.as_ref().unwrap().back_row;
+        click(&mut app, back.x + 2, back.y);
+        let m = app.menu.as_ref().expect("still open, one level up");
+        assert!(m.items.iter().any(|i| i.label == "Reply"));
+        draw_once(&mut app, &mut term);
+        assert_eq!(app.menu.as_ref().unwrap().back_row, Rect::default());
     }
 }

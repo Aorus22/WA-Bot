@@ -61,8 +61,18 @@ pub fn draw_menu(f: &mut Frame, menu: &mut Menu, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     menu.rows.clear();
     let mut row = inner.y;
+    menu.back_row = Rect::default();
     if let Some(t) = &menu.title {
-        lines.push(Line::styled(format!(" {t}"), Style::new().fg(c::DIM).add_modifier(Modifier::BOLD)));
+        if menu.can_go_back() {
+            // The way back is a button too.
+            lines.push(Line::from(vec![
+                Span::styled(" ‹ ", Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD)),
+                Span::styled(t.clone(), Style::new().fg(c::DIM).add_modifier(Modifier::BOLD)),
+            ]));
+            menu.back_row = Rect::new(inner.x, row, inner.width, 1);
+        } else {
+            lines.push(Line::styled(format!(" {t}"), Style::new().fg(c::DIM).add_modifier(Modifier::BOLD)));
+        }
         row += 1;
     }
     let iw = inner.width as usize;

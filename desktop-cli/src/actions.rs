@@ -255,6 +255,11 @@ impl App {
                         menu.sel = i;
                         self.activate_menu_item();
                     }
+                    None if m.row == menu.back_row.y && m.column >= menu.back_row.x && m.column < menu.back_row.x + menu.back_row.width
+                        && menu.back_row.height > 0 =>
+                    {
+                        menu.back();
+                    }
                     None => {
                         let r = menu.rect;
                         let inside = m.column >= r.x && m.column < r.x + r.width && m.row >= r.y && m.row < r.y + r.height;

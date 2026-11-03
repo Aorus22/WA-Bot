@@ -286,6 +286,11 @@ pub struct Hit {
     /// "Info" and "Search" buttons in the conversation header.
     pub info_btn: Rect,
     pub search_btn: Rect,
+    /// "✕ cancel" on the reply / edit bar above the message field.
+    pub compose_cancel: Rect,
+    /// The chat list's filter row, and its "✕" that clears the text.
+    pub filter: Rect,
+    pub filter_clear: Rect,
 }
 
 pub struct App {
@@ -987,7 +992,40 @@ impl App {
 
     // ---- input -----------------------------------------------------------
 
+    /// Copy the text picked with the mouse. False when nothing is picked.
+    pub fn copy_selection(&mut self) -> bool {
+        let Some(sel) = self.selection.filter(|s| !s.is_empty()) else { return false };
+        let text = crate::ui::selected_text(self, sel);
+        if text.is_empty() {
+            return false;
+        }
+        let n = text.chars().count();
+        if self.copy_out(&text) {
+            self.notice(format!("Copied {n} characters"));
+        }
+        true
+    }
+
+    /// Keys that copy a picked text: Ctrl+Shift+C, Ctrl+C, and `y` outside the text fields.
+    fn is_copy_key(&self, key: &KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Char('c' | 'C') => ctrl,
+            KeyCode::Char('y') => !ctrl && self.mode == Mode::Normal,
+            _ => false,
+        }
+    }
+
     fn on_key(&mut self, key: KeyEvent) {
+        let covered = self.menu.is_some()
+            || self.browser.is_some()
+            || self.stickers.is_some()
+            || self.form.is_some()
+            || self.viewer.is_some()
+            || self.attach.is_some();
+        if !covered && self.selection.is_some() && self.is_copy_key(&key) && self.copy_selection() {
+            return;
+        }
         self.selection = None;
         if self.menu.is_some() {
             return self.key_menu(key);
@@ -1269,6 +1307,19 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) if at(self.hit.latest_btn) => self.go_latest(),
+            MouseEventKind::Down(MouseButton::Left) if at(self.hit.compose_cancel) => {
+                self.cancel_compose();
+            }
+            MouseEventKind::Down(MouseButton::Left) if at(self.hit.filter_clear) => {
+                self.filter.clear();
+                self.mode = Mode::Normal;
+                self.cursor = self.visible().first().map(|&i| self.chats[i].id.clone());
+                self.side_offset = 0;
+            }
+            MouseEventKind::Down(MouseButton::Left) if at(self.hit.filter) => {
+                self.focus = Focus::Chats;
+                self.mode = Mode::Filter;
+            }
             MouseEventKind::Down(MouseButton::Left) if at(self.hit.toggle_btn) && self.open.is_some() => self.toggle_sidebar(),
             MouseEventKind::Down(MouseButton::Left) if at(self.hit.attach_btn) && self.open.is_some() => self.open_attach_menu(),
             MouseEventKind::Down(MouseButton::Left) if at(self.hit.info_btn) && self.open.is_some() => {
@@ -1357,15 +1408,9 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => {
                 self.press = None;
                 if press.moved {
-                    if let Some(sel) = self.selection.filter(|s| !s.is_empty()) {
-                        let text = crate::ui::selected_text(self, sel);
-                        if !text.is_empty() {
-                            let n = text.chars().count();
-                            self.copy_out(&text);
-                            if self.last_copied.as_deref() == Some(text.as_str()) {
-                                self.notice(format!("Copied {n} characters"));
-                            }
-                        }
+                    // Nothing is copied yet: the picked text stays highlighted until the user asks.
+                    if self.selection.is_some_and(|s| !s.is_empty()) {
+                        self.notice("Selected · Ctrl+Shift+C (or y) copies it");
                     }
                 } else {
                     let (col, row) = press.screen;
