@@ -221,6 +221,8 @@ pub struct Hit {
     pub msg_bar: Rect,
     /// The header button that collapses / expands the chat list.
     pub toggle_btn: Rect,
+    /// The "↓ N more lines" button that jumps to the newest message.
+    pub latest_btn: Rect,
     /// The "+" button beside the message field.
     pub attach_btn: Rect,
     /// "Info" and "Search" buttons in the conversation header.
@@ -1108,12 +1110,10 @@ impl App {
                 }
             }
             Focus::Messages | Focus::Panel => {
-                self.scroll_to(if bottom { 0 } else { self.max_scroll });
-                // Back from a search hit: fetch the newest messages again.
                 if bottom {
-                    if let Some(id) = self.open.clone().filter(|id| self.logs.get(id).is_some_and(|l| l.detached)) {
-                        self.load_messages(&id, None);
-                    }
+                    self.go_latest();
+                } else {
+                    self.scroll_to(self.max_scroll);
                 }
             }
         }
@@ -1190,6 +1190,7 @@ impl App {
                     self.open_message_menu((m.column, m.row), &id);
                 }
             }
+            MouseEventKind::Down(MouseButton::Left) if at(self.hit.latest_btn) => self.go_latest(),
             MouseEventKind::Down(MouseButton::Left) if at(self.hit.toggle_btn) && self.open.is_some() => self.toggle_sidebar(),
             MouseEventKind::Down(MouseButton::Left) if at(self.hit.attach_btn) && self.open.is_some() => self.open_attach_menu(),
             MouseEventKind::Down(MouseButton::Left) if at(self.hit.info_btn) && self.open.is_some() => {
@@ -1248,6 +1249,15 @@ pub enum Drag {
 }
 
 impl App {
+    /// Back to the newest message: glide to the bottom, and when the view shows an old
+    /// stretch around a search hit, fetch the newest messages again.
+    pub fn go_latest(&mut self) {
+        self.scroll_to(0);
+        if let Some(id) = self.open.clone().filter(|id| self.logs.get(id).is_some_and(|l| l.detached)) {
+            self.load_messages(&id, None);
+        }
+    }
+
     /// Collapse or expand the chat list. In the one-pane layout there is nothing to
     /// fold, so the same button goes back to the list.
     pub fn toggle_sidebar(&mut self) {

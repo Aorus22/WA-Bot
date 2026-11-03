@@ -549,13 +549,20 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         );
     }
 
-    // "N newer" hint while scrolled up.
-    if app.scroll > 0 {
-        let tag = format!(" ↓ {} more lines · G for latest ", app.scroll);
+    // A button back to the newest message while scrolled up (or looking at an old
+    // stretch around a search hit): click it, or press G.
+    let detached = app.logs.get(&chat_id).is_some_and(|l| l.detached);
+    if app.scroll > 0 || detached {
+        let tag = if app.scroll > 0 {
+            format!(" ↓ {} more lines · click or G for latest ", app.scroll)
+        } else {
+            " ↓ older messages · click or G for latest ".to_string()
+        };
         let w = width(&tag) as u16;
         if body.width > w + 2 {
             let r = Rect::new(body.x + body.width - w - 2, body.y + body.height - 1, w, 1);
-            f.render_widget(Paragraph::new(Span::styled(tag, Style::new().fg(c::BG).bg(c::YELLOW))), r);
+            f.render_widget(Paragraph::new(Span::styled(tag, Style::new().fg(c::BG).bg(c::YELLOW).add_modifier(Modifier::BOLD))), r);
+            app.hit.latest_btn = r;
         }
     }
 
@@ -2189,5 +2196,37 @@ mod tests {
         key(&mut app, KeyCode::Char('B'));
         assert_eq!(app.form.as_ref().unwrap().fields[0].edit.text, "B", "keys go to the form, not to the app behind it");
         assert!(!app.sidebar_collapsed);
+    }
+
+    #[test]
+    fn the_more_lines_badge_is_a_button_that_jumps_to_the_latest() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut app = app_with_picture(&rt);
+        let mut term = Terminal::new(TestBackend::new(110, 22)).unwrap();
+        draw_once(&mut app, &mut term);
+        assert_eq!(app.hit.latest_btn, Rect::default(), "no badge while already at the bottom");
+
+        // Scroll up: the badge appears and says it can be clicked.
+        app.scroll = 9.min(app.max_scroll);
+        let text = draw_once(&mut app, &mut term).join("\n");
+        assert!(text.contains("more lines") && text.contains("click or G for latest"), "{text}");
+        let btn = app.hit.latest_btn;
+        assert!(btn.width > 20 && btn.height == 1);
+
+        // A click on it glides to the newest messages.
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), btn.x + 3, btn.y);
+        assert!(app.animating(), "it glides, not jumps");
+        app.finish_scroll();
+        assert_eq!(app.scroll, 0);
+        draw_once(&mut app, &mut term);
+        assert_eq!(app.hit.latest_btn, Rect::default(), "the badge goes away once there");
+
+        // Looking at an old stretch around a search hit shows it too, even at scroll 0.
+        app.logs.get_mut("g@g.us").unwrap().detached = true;
+        let text = draw_once(&mut app, &mut term).join("\n");
+        assert!(text.contains("older messages"), "{text}");
+        let btn = app.hit.latest_btn;
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), btn.x + 3, btn.y);
+        assert!(app.logs["g@g.us"].loading, "the newest page is fetched again (the offline runtime never runs it)");
     }
 }
