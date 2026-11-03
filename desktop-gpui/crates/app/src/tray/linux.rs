@@ -7,7 +7,7 @@
 
 use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::StandardItem;
-use ksni::{Icon, MenuItem, ToolTip, Tray};
+use ksni::{Icon, MenuItem, OfflineReason, ToolTip, Tray};
 
 use crate::tray::Command;
 
@@ -47,6 +47,19 @@ impl Tray for WaBotTray {
     /// Left click.
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.tx.send(Command::Open);
+    }
+
+    /// The desktop's tray host appeared: the icon is showing now.
+    fn watcher_online(&self) {
+        let _ = self.tx.send(Command::Available(true));
+    }
+
+    /// The tray host is not there (yet). Keep waiting for it: the app autostarts at
+    /// login a few seconds before GNOME Shell's AppIndicator extension is up.
+    fn watcher_offline(&self, reason: OfflineReason) -> bool {
+        eprintln!("[tray] waiting for the tray host: {reason:?}");
+        let _ = self.tx.send(Command::Available(false));
+        true
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
@@ -89,12 +102,17 @@ fn icon_pixmap() -> Option<Icon> {
     })
 }
 
-/// Put the icon in the tray. `None` when the desktop has no tray host; the
-/// caller must then not hide the app, since nothing could bring it back.
+/// Put the icon in the tray. `None` only when D-Bus itself is unusable.
+///
+/// A missing tray host is not an error: it is waited for, and the icon appears as
+/// soon as the host does (`Command::Available` says when). Failing at once, as this
+/// used to, left an app that autostarted at login with no tray for its whole life.
+/// The caller must not hide the app until `Available(true)`, since nothing else
+/// could bring it back.
 pub fn spawn() -> Option<flume::Receiver<Command>> {
     let (tx, rx) = flume::unbounded();
     let tray = WaBotTray { tx };
-    match tray.spawn() {
+    match tray.assume_sni_available(true).spawn() {
         Ok(handle) => {
             // The icon lives as long as the process.
             let handle: Handle<WaBotTray> = handle;
@@ -111,6 +129,38 @@ pub fn spawn() -> Option<flume::Receiver<Command>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_host_is_waited_for_and_reported() {
+        let (tx, rx) = flume::unbounded();
+        let tray = WaBotTray { tx };
+        assert!(tray.watcher_offline(OfflineReason::No), "keep the service alive until the host comes");
+        assert_eq!(rx.try_recv(), Ok(Command::Available(false)));
+        tray.watcher_online();
+        assert_eq!(rx.try_recv(), Ok(Command::Available(true)));
+    }
+
+    /// End to end, on a private session bus (never run by default):
+    /// the harness starts a stand-in tray host a few seconds after this test begins.
+    ///
+    /// `dbus-run-session -- bash -c '(sleep 4; python3 fakewatcher.py) & cargo test -p wabot
+    /// registers_when_the_host_appears_late -- --ignored --nocapture'`
+    #[test]
+    #[ignore]
+    fn registers_when_the_host_appears_late() {
+        use std::time::Duration;
+        let rx = spawn().expect("D-Bus is usable");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(3)),
+            Ok(Command::Available(false)),
+            "no host yet: reported, and the app must not hide into a tray that is not there"
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(30)),
+            Ok(Command::Available(true)),
+            "the icon registers by itself once the host appears"
+        );
+    }
 
     #[test]
     fn pixmap_is_argb_of_the_bundled_icon() {

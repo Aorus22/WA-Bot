@@ -158,7 +158,9 @@ fn main() {
             // The app outlives its windows (popover: hidden; normal: closed to
             // the tray). Without a tray there would be no way back to a closed
             // window, so then the last window closing quits as usual.
-            if popover_mode || tray_rx.is_some() {
+            // Hoped-for: the tray host is normally there. If it is not, `Available(false)`
+            // follows within moments and this is taken back.
+            if wabot_app::tray::keep_running_without_window(popover_mode, tray_rx.is_some()) {
                 cx.set_quit_mode(gpui::QuitMode::Explicit);
             }
 
@@ -373,6 +375,15 @@ fn main() {
                         let _ = cx.update(|cx| match command {
                             wabot_app::tray::Command::Open => show(cx, false),
                             wabot_app::tray::Command::Quit => cx.quit(),
+                            // The icon appeared (late, at login) or went away: only hide the
+                            // app into a tray that is really there.
+                            wabot_app::tray::Command::Available(up) => {
+                                cx.set_quit_mode(if wabot_app::tray::keep_running_without_window(popover_mode, up) {
+                                    gpui::QuitMode::Explicit
+                                } else {
+                                    gpui::QuitMode::LastWindowClosed
+                                });
+                            }
                         });
                     }
                 })
