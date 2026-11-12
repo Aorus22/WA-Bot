@@ -66,6 +66,12 @@ tile until loaded or when there is none), and a full-screen viewer (`o` or click
 to step through the chat's pictures). Needs a terminal with kitty, sixel or iTerm2
 graphics for sharp images; others get a half-block approximation (`--images` picks the
 mode, `--images off` turns pictures off). Videos show their preview only, no playback.
+Colours follow the terminal theme by default: `--theme auto` asks for the background
+colour (OSC 11), leaves it unpainted, and takes the accents from the terminal's own
+ANSI palette; a terminal that does not answer, or piped output, keeps Tokyo Night.
+`--theme dark|light|tokyo|catppuccin|gruvbox|nord` pins a palette, and every palette
+draws text on a filled accent (pill, badge, avatar tile) in a colour that contrasts
+with that accent, never in the canvas colour.
 Context menus (right-click, or `J`/`K` then `.` on a message, `.` on a chat) carry the same
 items as gpui: reply, react, message info, forward, pin, star, copy, copy image, add to
 favourites, edit, delete (for me / for everyone); and for chats: mark as read, archive, mute,

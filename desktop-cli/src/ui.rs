@@ -28,7 +28,7 @@ const NARROW: u16 = 70;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    f.render_widget(Block::default().style(Style::new().bg(c::BG).fg(c::FG)), area);
+    f.render_widget(Block::default().style(Style::new().bg(c::bg()).fg(c::fg())), area);
 
     let [main, status] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
     let narrow = area.width < NARROW;
@@ -123,8 +123,8 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Chats;
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(Style::new().fg(if focused { c::BLUE } else { c::BORDER }))
-        .style(Style::new().bg(c::BG_DARK));
+        .border_style(Style::new().fg(if focused { c::blue() } else { c::border() }))
+        .style(Style::new().bg(c::bg_dark()));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -133,8 +133,8 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
 
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" WA Bot", Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD)),
-            Span::styled(if app.connected { "  ●" } else { "  ○" }, Style::new().fg(if app.connected { c::GREEN } else { c::RED })),
+            Span::styled(" WA Bot", Style::new().fg(c::blue()).add_modifier(Modifier::BOLD)),
+            Span::styled(if app.connected { "  ●" } else { "  ○" }, Style::new().fg(if app.connected { c::green() } else { c::red() })),
         ])),
         head,
     );
@@ -143,11 +143,11 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     let has_filter = filtering || !app.filter.text.is_empty();
     let filter_line = if has_filter {
         Line::from(vec![
-            Span::styled(" / ", Style::new().fg(c::YELLOW)),
-            Span::styled(app.filter.text.clone(), Style::new().fg(c::FG)),
+            Span::styled(" / ", Style::new().fg(c::yellow())),
+            Span::styled(app.filter.text.clone(), Style::new().fg(c::fg())),
         ])
     } else {
-        Line::styled(" / to filter", Style::new().fg(c::DIM))
+        Line::styled(" / to filter", Style::new().fg(c::dim()))
     };
     f.render_widget(Paragraph::new(filter_line), filter);
     // Clicking the row starts typing; the "✕" at its end clears the text.
@@ -155,7 +155,7 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
     app.hit.filter_clear = Rect::default();
     if has_filter && filter.width > 8 {
         let r = Rect::new(filter.x + filter.width - 4, filter.y, 3, 1);
-        f.render_widget(Paragraph::new(Span::styled(" ✕ ", Style::new().fg(c::FG).bg(c::SELECT))), r);
+        f.render_widget(Paragraph::new(Span::styled(" ✕ ", Style::new().fg(c::fg()).bg(c::select()))), r);
         app.hit.filter_clear = r;
     }
     if filtering {
@@ -172,7 +172,7 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         } else {
             " No match"
         };
-        f.render_widget(Paragraph::new(Line::styled(msg, Style::new().fg(c::DIM))), list);
+        f.render_widget(Paragraph::new(Line::styled(msg, Style::new().fg(c::dim()))), list);
         return;
     }
 
@@ -196,11 +196,11 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         let is_open = app.open.as_deref() == Some(chat.id.as_str());
         let is_cursor = n == pos && focused;
         let bg = if is_cursor {
-            c::SELECT
+            c::select()
         } else if is_open {
-            c::SURFACE
+            c::surface()
         } else {
-            c::BG_DARK
+            c::bg_dark()
         };
         let bar = if is_open { "▎" } else { " " };
         let muted = chat.mute_mode != "off";
@@ -214,28 +214,28 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         let pin = if chat.pinned_at.is_some() { "* " } else { "" };
         let right_w = width(&time).max(width(&badge));
         let (initial, tile_color) = avatar_tile(&chat.name);
-        let tile = Style::new().fg(c::BG_DARK).bg(tile_color).add_modifier(Modifier::BOLD);
+        let tile = Style::new().fg(c::on_accent()).bg(tile_color).add_modifier(Modifier::BOLD);
         if !chat.avatar.is_empty() {
             avatar_rows.push((n - app.side_offset, chat.avatar.clone()));
         }
         let name_w = w.saturating_sub(AV_PREFIX + width(pin) + right_w + 1);
         let name = truncate(&chat.name, name_w);
         let name_style = if chat.unread > 0 {
-            Style::new().fg(c::FG).add_modifier(Modifier::BOLD)
+            Style::new().fg(c::fg()).add_modifier(Modifier::BOLD)
         } else {
-            Style::new().fg(c::FG)
+            Style::new().fg(c::fg())
         };
         let gap = w.saturating_sub(AV_PREFIX + width(pin) + width(&name) + width(&time) + 1);
         lines.push(
             Line::from(vec![
-                Span::styled(bar, Style::new().fg(c::BLUE)),
+                Span::styled(bar, Style::new().fg(c::blue())),
                 Span::raw(" "),
                 Span::styled(format!(" {initial}  "), tile),
                 Span::raw(" "),
-                Span::styled(pin, Style::new().fg(c::YELLOW)),
+                Span::styled(pin, Style::new().fg(c::yellow())),
                 Span::styled(name, name_style),
                 Span::raw(" ".repeat(gap)),
-                Span::styled(time, Style::new().fg(if chat.unread > 0 { c::BLUE } else { c::DIM })),
+                Span::styled(time, Style::new().fg(if chat.unread > 0 { c::blue() } else { c::dim() })),
                 Span::raw(" "),
             ])
             .style(Style::new().bg(bg)),
@@ -244,11 +244,11 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         // Second row: preview (or typing) on the left, unread badge on the right.
         let typing = app.typing_line(&chat.id);
         let (text, style) = match typing {
-            Some(t) => (t, Style::new().fg(c::GREEN)),
+            Some(t) => (t, Style::new().fg(c::green())),
             None => {
                 let tick = if chat.last_message_from_me { tick_for(&chat.last_message_status) } else { String::new() };
                 let sender = if chat.last_message_from_me { "" } else { "" };
-                (format!("{tick}{sender}{}", chat.last_msg), Style::new().fg(c::DIM))
+                (format!("{tick}{sender}{}", chat.last_msg), Style::new().fg(c::dim()))
             }
         };
         let badge_w = width(&badge);
@@ -256,15 +256,15 @@ fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
         let preview = truncate(&text, prev_w);
         let gap = w.saturating_sub(AV_PREFIX + width(&preview) + badge_w + 1);
         let badge_style = if muted {
-            Style::new().fg(c::BG).bg(c::DIM)
+            Style::new().fg(c::on_accent()).bg(c::dim())
         } else if chat.has_unread_mention {
-            Style::new().fg(c::BG).bg(c::RED)
+            Style::new().fg(c::on_accent()).bg(c::red())
         } else {
-            Style::new().fg(c::BG).bg(c::BLUE)
+            Style::new().fg(c::on_accent()).bg(c::blue())
         };
         lines.push(
             Line::from(vec![
-                Span::styled(bar, Style::new().fg(c::BLUE)),
+                Span::styled(bar, Style::new().fg(c::blue())),
                 Span::raw(" "),
                 Span::styled("    ", tile),
                 Span::raw(" "),
@@ -374,7 +374,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let name = chat.as_ref().map_or(chat_id.clone(), |c| c.name.clone());
     let is_group = chat.as_ref().is_some_and(|c| c.is_group);
     let avatar_url = chat.as_ref().map(|c| c.avatar.clone()).unwrap_or_default();
-    let btn = Style::new().fg(c::FG).bg(c::SURFACE);
+    let btn = Style::new().fg(c::fg()).bg(c::surface());
 
     // Folds / unfolds the chat list; in the one-pane layout it goes back to the list.
     // One row high so the glyph sits in the middle of its box; the click area is two rows.
@@ -385,7 +385,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Profile photo: an initial tile until the picture is loaded.
     let (initial, tile_color) = avatar_tile(&name);
-    let tile = Style::new().fg(c::BG_DARK).bg(tile_color).add_modifier(Modifier::BOLD);
+    let tile = Style::new().fg(c::on_accent()).bg(tile_color).add_modifier(Modifier::BOLD);
     let av = Rect::new(head.x + 5, head.y, AV_W, 2);
     f.render_widget(Paragraph::new(vec![Line::styled(format!(" {initial}  "), tile), Line::styled("    ", tile)]), av);
     if !avatar_url.is_empty() && !app.hide_images {
@@ -409,19 +409,19 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let btn_room = if area.width >= 50 { 16 } else { 0 };
     let text_w = (head.width as usize).saturating_sub((text_x - head.x) as usize + btn_room + 1);
     let sub = match (app.typing_line(&chat_id), is_group) {
-        (Some(t), _) => Span::styled(truncate(&t, text_w), Style::new().fg(c::GREEN)),
-        (None, true) => Span::styled("group", Style::new().fg(c::DIM)),
+        (Some(t), _) => Span::styled(truncate(&t, text_w), Style::new().fg(c::green())),
+        (None, true) => Span::styled("group", Style::new().fg(c::dim())),
         (None, false) => Span::raw(""),
     };
     f.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled(truncate(&name, text_w), Style::new().fg(c::FG).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(truncate(&name, text_w), Style::new().fg(c::fg()).add_modifier(Modifier::BOLD))),
             Line::from(sub),
         ]),
         Rect::new(text_x, head.y, text_w as u16, 2),
     );
     f.render_widget(
-        Paragraph::new(Line::styled("─".repeat(area.width as usize), Style::new().fg(if focused { c::BLUE } else { c::BORDER }))),
+        Paragraph::new(Line::styled("─".repeat(area.width as usize), Style::new().fg(if focused { c::blue() } else { c::border() }))),
         Rect::new(head.x, head.y + 2, head.width, 1),
     );
     // Info / Search buttons at the right end of the header.
@@ -453,7 +453,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
             let b = match app.logs.get(&chat_id) {
                 Some(log) if log.loaded || !log.msgs.is_empty() => build_lines(app, &chat_id, log, text_w),
                 Some(_) | None => Built {
-                    lines: vec![Line::styled("  Loading messages…", Style::new().fg(c::DIM))],
+                    lines: vec![Line::styled("  Loading messages…", Style::new().fg(c::dim()))],
                     placements: Vec::new(),
                     spans: Vec::new(),
                     links: Vec::new(),
@@ -524,7 +524,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         );
         app.bubble_hits.push((rect, sp.msg_id.clone()));
         if app.sel_msg.as_deref() == Some(sp.msg_id.as_str()) {
-            let marks: Vec<Line> = (0..b - a).map(|_| Line::styled("▌", Style::new().fg(c::YELLOW))).collect();
+            let marks: Vec<Line> = (0..b - a).map(|_| Line::styled("▌", Style::new().fg(c::yellow()))).collect();
             f.render_widget(Paragraph::new(marks), Rect::new(text_area.x, y, 1, (b - a) as u16));
         }
     }
@@ -606,8 +606,8 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
                 .end_symbol(None)
                 .track_symbol(Some("│"))
                 .thumb_symbol("┃")
-                .track_style(Style::new().fg(c::BORDER))
-                .thumb_style(Style::new().fg(c::BLUE)),
+                .track_style(Style::new().fg(c::border()))
+                .thumb_style(Style::new().fg(c::blue())),
             bar_area,
             &mut bar,
         );
@@ -625,7 +625,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         let w = width(&tag) as u16;
         if body.width > w + 2 {
             let r = Rect::new(body.x + body.width - w - 2, body.y + body.height - 1, w, 1);
-            f.render_widget(Paragraph::new(Span::styled(tag, Style::new().fg(c::BG).bg(c::YELLOW).add_modifier(Modifier::BOLD))), r);
+            f.render_widget(Paragraph::new(Span::styled(tag, Style::new().fg(c::on_accent()).bg(c::yellow()).add_modifier(Modifier::BOLD))), r);
             app.hit.latest_btn = r;
         }
     }
@@ -639,11 +639,11 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
         let gap = (r.width as usize).saturating_sub(width(&title) + width(&q) + width(hint) + 3);
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" ↪ ", Style::new().fg(c::CYAN)),
-                Span::styled(title, Style::new().fg(c::CYAN).add_modifier(Modifier::BOLD)),
-                Span::styled(q, Style::new().fg(c::DIM)),
+                Span::styled(" ↪ ", Style::new().fg(c::cyan())),
+                Span::styled(title, Style::new().fg(c::cyan()).add_modifier(Modifier::BOLD)),
+                Span::styled(q, Style::new().fg(c::dim())),
                 Span::raw(" ".repeat(gap)),
-                Span::styled(hint, Style::new().fg(c::FG).bg(c::SELECT)),
+                Span::styled(hint, Style::new().fg(c::fg()).bg(c::select())),
             ])),
             r,
         );
@@ -652,11 +652,11 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     }
     // The "+" button sits left of the message field.
     let [attach_btn, input] = Layout::horizontal([Constraint::Length(5), Constraint::Min(1)]).areas(input);
-    let plus = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(c::BORDER));
+    let plus = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(c::border()));
     let plus_inner = plus.inner(attach_btn);
     f.render_widget(plus, attach_btn);
     f.render_widget(
-        Paragraph::new(Line::styled(" + ", Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD))),
+        Paragraph::new(Line::styled(" + ", Style::new().fg(c::blue()).add_modifier(Modifier::BOLD))),
         plus_inner,
     );
     app.hit.attach_btn = attach_btn;
@@ -664,13 +664,13 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let inserting = app.mode == Mode::Insert;
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(if inserting { c::GREEN } else { c::BORDER }));
+        .border_style(Style::new().fg(if inserting { c::green() } else { c::border() }));
     let inner = block.inner(input);
     f.render_widget(block, input);
     let iw = inner.width as usize;
     if app.input.text.is_empty() {
         let hint = if inserting { "Type a message…" } else { "Press i to write a message" };
-        f.render_widget(Paragraph::new(Span::styled(format!(" {hint}"), Style::new().fg(c::DIM))), inner);
+        f.render_widget(Paragraph::new(Span::styled(format!(" {hint}"), Style::new().fg(c::dim()))), inner);
     } else {
         // Scroll horizontally so the cursor stays in view.
         let col = app.input.cursor_col();
@@ -684,7 +684,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
             }
             cells += w;
         }
-        f.render_widget(Paragraph::new(Span::styled(format!(" {shown}"), Style::new().fg(c::FG))), inner);
+        f.render_widget(Paragraph::new(Span::styled(format!(" {shown}"), Style::new().fg(c::fg()))), inner);
         if inserting {
             f.set_cursor_position((inner.x + 1 + (col - skip) as u16, inner.y));
         }
@@ -697,12 +697,12 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn draw_welcome(f: &mut Frame, area: Rect) {
     let lines = vec![
-        Line::styled("WA Bot", Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD)),
+        Line::styled("WA Bot", Style::new().fg(c::blue()).add_modifier(Modifier::BOLD)),
         Line::raw(""),
-        Line::styled("j / k   move through chats", Style::new().fg(c::DIM)),
-        Line::styled("Enter   open the chat", Style::new().fg(c::DIM)),
-        Line::styled("/       filter chats", Style::new().fg(c::DIM)),
-        Line::styled("q       quit", Style::new().fg(c::DIM)),
+        Line::styled("j / k   move through chats", Style::new().fg(c::dim())),
+        Line::styled("Enter   open the chat", Style::new().fg(c::dim())),
+        Line::styled("/       filter chats", Style::new().fg(c::dim())),
+        Line::styled("q       quit", Style::new().fg(c::dim())),
     ];
     // One left-aligned block, centered as a whole.
     let h = lines.len() as u16;
@@ -747,12 +747,12 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
     let mut quotes: Vec<QuoteSpan> = Vec::new();
     let centered = |text: &str, style: Style| Line::from(Span::styled(text.to_string(), style)).centered();
     if log.loading && !log.msgs.is_empty() {
-        out.push(centered("loading older messages…", Style::new().fg(c::DIM)));
+        out.push(centered("loading older messages…", Style::new().fg(c::dim())));
     } else if log.exhausted {
-        out.push(centered("— start of the conversation —", Style::new().fg(c::DIM)));
+        out.push(centered("— start of the conversation —", Style::new().fg(c::dim())));
     }
     if log.msgs.is_empty() {
-        out.push(centered("No messages yet", Style::new().fg(c::DIM)));
+        out.push(centered("No messages yet", Style::new().fg(c::dim())));
     }
 
     let mut last_day = String::new();
@@ -762,7 +762,7 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
         let day = day_label(m.timestamp);
         if day != last_day {
             out.push(Line::raw(""));
-            out.push(centered(&format!(" {day} "), Style::new().fg(c::DIM).bg(c::SURFACE)));
+            out.push(centered(&format!(" {day} "), Style::new().fg(c::dim()).bg(c::surface())));
             last_day = day;
             last_sender.clear();
         }
@@ -787,11 +787,11 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
             }
         }
 
-        let bg = if mine { c::SELECT } else { c::SURFACE };
+        let bg = if mine { c::select() } else { c::surface() };
         let body_style = if m.revoked_at.is_some() {
-            Style::new().fg(c::DIM).add_modifier(Modifier::ITALIC)
+            Style::new().fg(c::dim()).add_modifier(Modifier::ITALIC)
         } else {
-            Style::new().fg(c::FG)
+            Style::new().fg(c::fg())
         };
         let mut body: Vec<Row> = wrap_rows(&message_text(m), inner_max)
             .into_iter()
@@ -804,18 +804,18 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
             .and_then(|lp| lp.title.as_deref())
             .filter(|t| !t.is_empty())
         {
-            body.push(Row::plain(format!("↳ {}", truncate(title, inner_max.saturating_sub(2))), Style::new().fg(c::CYAN)));
+            body.push(Row::plain(format!("↳ {}", truncate(title, inner_max.saturating_sub(2))), Style::new().fg(c::cyan())));
         }
 
         let time = local(m.timestamp).map(|t| t.format("%H:%M").to_string()).unwrap_or_default();
-        let mut meta = vec![Span::styled(time, Style::new().fg(c::DIM))];
+        let mut meta = vec![Span::styled(time, Style::new().fg(c::dim()))];
         if mine {
             let (tick, color) = match m.status.as_str() {
-                "read" => (format!(" {}", crate::ticks::double()), c::CYAN),
-                "delivered" => (format!(" {}", crate::ticks::double()), c::DIM),
-                "failed" => (" !".to_string(), c::RED),
-                "pending" => (" …".to_string(), c::DIM),
-                _ => (format!(" {}", crate::ticks::single()), c::DIM),
+                "read" => (format!(" {}", crate::ticks::double()), c::cyan()),
+                "delivered" => (format!(" {}", crate::ticks::double()), c::dim()),
+                "failed" => (" !".to_string(), c::red()),
+                "pending" => (" …".to_string(), c::dim()),
+                _ => (format!(" {}", crate::ticks::single()), c::dim()),
             };
             meta.push(Span::styled(tick, Style::new().fg(color)));
         }
@@ -838,7 +838,7 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
                 let mut rows_text: Vec<Row> =
                     (0..rows).map(|_| Row::plain(" ".repeat(cols as usize), Style::new())).collect();
                 if !note.is_empty() {
-                    rows_text[0] = Row::plain(pad_to(note, cols as usize), Style::new().fg(c::DIM));
+                    rows_text[0] = Row::plain(pad_to(note, cols as usize), Style::new().fg(c::dim()));
                 }
                 body.splice(0..0, rows_text);
                 // The picture says "image" already: drop the tag from the caption.
@@ -861,7 +861,7 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
                 thumb = Some((url, cols, rows));
             }
         }
-        let bg = if m.message_type == "sticker" && thumb.is_some() { c::BG } else { bg };
+        let bg = if m.message_type == "sticker" && thumb.is_some() { c::bg() } else { bg };
         // A reply quotes what it answers, above everything else.
         let mut quote_rows = 0;
         if let Some(rid) = m.reply_to_id.as_deref().filter(|r| !r.is_empty()) {
@@ -869,7 +869,7 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
                 Some(orig) => format!("↪ {}: {}", app.sender_label(chat_id, orig), crate::app::preview(orig)),
                 None => "↪ Reply".to_string(),
             };
-            body.insert(0, Row::plain(truncate(&q, inner_max), Style::new().fg(c::CYAN)));
+            body.insert(0, Row::plain(truncate(&q, inner_max), Style::new().fg(c::cyan())));
             quote_rows = 1;
         }
         let first_line = out.len();
@@ -897,7 +897,7 @@ fn build_lines(app: &App, chat_id: &str, log: &ChatLog, pane_w: usize) -> Built 
             let margin = if mine { pane_w.saturating_sub(width(&line) + 2) } else { 2 };
             out.push(Line::from(vec![
                 Span::raw(" ".repeat(margin)),
-                Span::styled(line, Style::new().fg(c::YELLOW)),
+                Span::styled(line, Style::new().fg(c::yellow())),
             ]));
         }
         spans.push(BubbleSpan { msg_id: m.id.clone(), line0: first_line, line1: out.len(), x0: margin, x1: margin + outer });
@@ -1036,7 +1036,7 @@ fn push_bubble(
         spans.into_iter().map(|s| Span { style: s.style.bg(bg), content: s.content }).collect()
     };
 
-    let link_style = Style::new().fg(c::BLUE).add_modifier(Modifier::UNDERLINED);
+    let link_style = Style::new().fg(c::blue()).add_modifier(Modifier::UNDERLINED);
     let mut found = Vec::new();
     let count = body.len();
     for (i, r) in body.iter().enumerate() {
@@ -1142,16 +1142,16 @@ fn draw_viewer(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    f.render_widget(Block::default().style(Style::new().bg(c::BG_DARK)), area);
+    f.render_widget(Block::default().style(Style::new().bg(c::bg_dark())), area);
     let [top, body, bottom] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(area);
     let title = format!(" {}  {}/{}", app.chat(&v.chat_id).map_or("", |c| c.name.as_str()), idx + 1, n);
     f.render_widget(
-        Paragraph::new(Span::styled(title, Style::new().fg(c::FG).add_modifier(Modifier::BOLD))),
+        Paragraph::new(Span::styled(title, Style::new().fg(c::fg()).add_modifier(Modifier::BOLD))),
         top,
     );
     f.render_widget(
-        Paragraph::new(Span::styled(format!(" {}", truncate(&caption, area.width as usize - 2)), Style::new().fg(c::DIM))),
+        Paragraph::new(Span::styled(format!(" {}", truncate(&caption, area.width as usize - 2)), Style::new().fg(c::dim()))),
         bottom,
     );
 
@@ -1174,8 +1174,8 @@ fn draw_viewer(f: &mut Frame, app: &mut App, area: Rect) {
                 );
             }
         }
-        (Some(Img::Failed), _) => centered_note(f, inner, "Could not load this picture (r to retry)", c::RED),
-        _ => centered_note(f, inner, "Loading…", c::DIM),
+        (Some(Img::Failed), _) => centered_note(f, inner, "Could not load this picture (r to retry)", c::red()),
+        _ => centered_note(f, inner, "Loading…", c::dim()),
     }
 }
 
@@ -1191,34 +1191,34 @@ fn centered_note(f: &mut Frame, area: Rect, text: &str, color: Color) {
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let (label0, color0) = match app.mode {
-        Mode::Normal => (" NORMAL ", c::BLUE),
-        Mode::Insert => (" INSERT ", c::GREEN),
-        Mode::Filter => (" FILTER ", c::YELLOW),
-        Mode::Search => (" SEARCH ", c::YELLOW),
-        Mode::Caption => (" PICTURE ", c::GREEN),
+        Mode::Normal => (" NORMAL ", c::blue()),
+        Mode::Insert => (" INSERT ", c::green()),
+        Mode::Filter => (" FILTER ", c::yellow()),
+        Mode::Search => (" SEARCH ", c::yellow()),
+        Mode::Caption => (" PICTURE ", c::green()),
     };
     let (label, color) = if app.menu.is_some() {
-        (" MENU ", c::MAGENTA)
+        (" MENU ", c::magenta())
     } else if app.browser.is_some() {
-        (" FILES ", c::BLUE)
+        (" FILES ", c::blue())
     } else if app.stickers.is_some() {
-        (" STICKERS ", c::MAGENTA)
+        (" STICKERS ", c::magenta())
     } else if app.form.is_some() {
-        (" FORM ", c::GREEN)
+        (" FORM ", c::green())
     } else if app.viewer.is_some() {
-        (" IMAGE ", c::MAGENTA)
+        (" IMAGE ", c::magenta())
     } else {
         (label0, color0)
     };
     let mut left = vec![
-        Span::styled(label, Style::new().fg(c::BG).bg(color).add_modifier(Modifier::BOLD)),
-        Span::styled(" ", Style::new().bg(c::SURFACE)),
+        Span::styled(label, Style::new().fg(c::on_accent()).bg(color).add_modifier(Modifier::BOLD)),
+        Span::styled(" ", Style::new().bg(c::surface())),
     ];
     let place = match &app.open {
         Some(id) => app.chat(id).map_or(id.as_str(), |c| c.name.as_str()).to_string(),
         None => "no chat open".to_string(),
     };
-    left.push(Span::styled(place, Style::new().fg(c::FG).bg(c::SURFACE)));
+    left.push(Span::styled(place, Style::new().fg(c::fg()).bg(c::surface())));
 
     let mut right_text = String::new();
     if let Some(n) = app.live_notice() {
@@ -1258,13 +1258,13 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     }
     let hint = if width(hints) + used + 2 <= room { hints } else { "" };
     used += width(hint);
-    spans.push(Span::styled(" ".repeat(room.saturating_sub(used)), Style::new().bg(c::SURFACE)));
+    spans.push(Span::styled(" ".repeat(room.saturating_sub(used)), Style::new().bg(c::surface())));
     if !right_text.is_empty() {
-        spans.push(Span::styled(right_text, Style::new().fg(c::YELLOW).bg(c::SURFACE)));
+        spans.push(Span::styled(right_text, Style::new().fg(c::yellow()).bg(c::surface())));
     }
-    spans.push(Span::styled(hint, Style::new().fg(c::DIM).bg(c::SURFACE)));
-    spans.push(Span::styled("  ", Style::new().bg(c::SURFACE)));
-    f.render_widget(Paragraph::new(Line::from(spans)).style(Style::new().bg(c::SURFACE)), area);
+    spans.push(Span::styled(hint, Style::new().fg(c::dim()).bg(c::surface())));
+    spans.push(Span::styled("  ", Style::new().bg(c::surface())));
+    f.render_widget(Paragraph::new(Line::from(spans)).style(Style::new().bg(c::surface())), area);
 }
 
 #[cfg(test)]

@@ -572,8 +572,8 @@ pub fn draw_panel(f: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Panel;
     let block = Block::default()
         .borders(Borders::LEFT)
-        .border_style(Style::new().fg(if focused { c::BLUE } else { c::BORDER }))
-        .style(Style::new().bg(c::BG_DARK));
+        .border_style(Style::new().fg(if focused { c::blue() } else { c::border() }))
+        .style(Style::new().bg(c::bg_dark()));
     let inner = block.inner(area);
     f.render_widget(block, area);
     if let Some(p) = app.panel.as_mut() {
@@ -595,9 +595,9 @@ fn draw_title(f: &mut Frame, app: &mut App, area: Rect, text: &str) {
     let gap = (area.width as usize).saturating_sub(width(text) + 1 + hw as usize);
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!(" {text}"), Style::new().fg(c::FG).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {text}"), Style::new().fg(c::fg()).add_modifier(Modifier::BOLD)),
             Span::raw(" ".repeat(gap)),
-            Span::styled(hint, Style::new().fg(c::DIM).bg(c::SURFACE)),
+            Span::styled(hint, Style::new().fg(c::dim()).bg(c::surface())),
         ])),
         area,
     );
@@ -642,7 +642,7 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
     let bar_area = Rect { x: view_full.x + view_full.width.saturating_sub(1), width: 1, ..view_full };
 
     let w = view.width as usize;
-    let dim = Style::new().fg(c::DIM);
+    let dim = Style::new().fg(c::dim());
 
     // ---- the document ----------------------------------------------------------------
     let mut lines: Vec<Line<'static>> = vec![Line::raw("")];
@@ -650,7 +650,7 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
     let av_h = 6u16;
     let avatar_y = lines.len();
     let initial = name.chars().find(|c| c.is_alphanumeric()).map_or('#', |c| c.to_uppercase().next().unwrap_or(c));
-    let tile = Style::new().fg(c::BG_DARK).bg(name_color(&name)).add_modifier(Modifier::BOLD);
+    let tile = Style::new().fg(c::on_accent()).bg(name_color(&name)).add_modifier(Modifier::BOLD);
     for r in 0..av_h {
         let text = if r == av_h / 2 {
             let left = av_w as usize / 2;
@@ -661,7 +661,7 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(Span::styled(text, tile)).centered());
     }
     lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(truncate(&name, w.saturating_sub(2)), Style::new().fg(c::FG).add_modifier(Modifier::BOLD))).centered());
+    lines.push(Line::from(Span::styled(truncate(&name, w.saturating_sub(2)), Style::new().fg(c::fg()).add_modifier(Modifier::BOLD))).centered());
     if !subtitle.is_empty() {
         lines.push(Line::from(Span::styled(subtitle, dim)).centered());
     }
@@ -682,7 +682,7 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
     for tab in panel.tab_list(is_group) {
         let label = format!(" {} ", tab.label());
         let lw = width(&label) as u16;
-        let style = if tab == panel.tab { Style::new().fg(c::BG).bg(c::BLUE).add_modifier(Modifier::BOLD) } else { dim };
+        let style = if tab == panel.tab { Style::new().fg(c::on_accent()).bg(c::blue()).add_modifier(Modifier::BOLD) } else { dim };
         tab_spans.push(Span::styled(label, style));
         tab_x.push((x, lw, tab));
         x += lw;
@@ -717,7 +717,7 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
     }
     let mut thumbs: Vec<(usize, String)> = Vec::new();
     for i in 0..len {
-        let bg = if i == sel && focused { c::SELECT } else if i == sel { c::SURFACE } else { c::BG_DARK };
+        let bg = if i == sel && focused { c::select() } else if i == sel { c::surface() } else { c::bg_dark() };
         match tab {
             Tab::Members => {
                 let Some(m) = panel.group.as_ref().and_then(|g| g.participants.get(i)) else { continue };
@@ -730,7 +730,7 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
                         Span::raw("  "),
                         Span::styled(who.clone(), Style::new().fg(name_color(&who))),
                         Span::raw(" ".repeat(gap)),
-                        Span::styled(role.to_string(), Style::new().fg(c::GREEN)),
+                        Span::styled(role.to_string(), Style::new().fg(c::green())),
                     ],
                     w,
                     bg,
@@ -742,9 +742,9 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
                 let kind = if m.message_type == "video" { "video" } else { "image" };
                 let text_w = w.saturating_sub(10);
                 let pad = || Span::raw(" ".repeat(10));
-                lines.push(row_line(vec![pad(), Span::styled(truncate(kind, text_w), Style::new().fg(c::FG))], w, bg));
+                lines.push(row_line(vec![pad(), Span::styled(truncate(kind, text_w), Style::new().fg(c::fg()))], w, bg));
                 lines.push(row_line(vec![pad(), Span::styled(truncate(&when, text_w), dim)], w, bg));
-                lines.push(row_line(vec![pad(), Span::styled(truncate(m.content.trim(), text_w), Style::new().fg(c::FG))], w, bg));
+                lines.push(row_line(vec![pad(), Span::styled(truncate(m.content.trim(), text_w), Style::new().fg(c::fg()))], w, bg));
                 lines.push(row_line(vec![], w, bg));
                 if let Some(url) = images::media_url(m) {
                     thumbs.push((list_y + i * rh, url));
@@ -765,7 +765,7 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
                     m.content.trim().to_string()
                 };
                 let who = app.sender_label(&chat_id, m);
-                lines.push(row_line(vec![Span::raw(" "), Span::styled(truncate(&main, w.saturating_sub(2)), Style::new().fg(c::FG))], w, bg));
+                lines.push(row_line(vec![Span::raw(" "), Span::styled(truncate(&main, w.saturating_sub(2)), Style::new().fg(c::fg()))], w, bg));
                 lines.push(row_line(vec![Span::raw(" "), Span::styled(truncate(&format!("{who} · {when}"), w.saturating_sub(2)), dim)], w, bg));
             }
         }
@@ -828,8 +828,8 @@ fn draw_info(f: &mut Frame, app: &mut App, area: Rect) {
                 .end_symbol(None)
                 .track_symbol(Some("│"))
                 .thumb_symbol("┃")
-                .track_style(Style::new().fg(c::BORDER))
-                .thumb_style(Style::new().fg(c::BLUE)),
+                .track_style(Style::new().fg(c::border()))
+                .thumb_style(Style::new().fg(c::blue())),
             bar_area,
             &mut state,
         );
@@ -904,8 +904,8 @@ fn render_scrolling(f: &mut Frame, app: &mut App, lines: Vec<Line<'static>>, vie
                 .end_symbol(None)
                 .track_symbol(Some("│"))
                 .thumb_symbol("┃")
-                .track_style(Style::new().fg(c::BORDER))
-                .thumb_style(Style::new().fg(c::BLUE)),
+                .track_style(Style::new().fg(c::border()))
+                .thumb_style(Style::new().fg(c::blue())),
             bar_area,
             &mut state,
         );
@@ -928,8 +928,8 @@ fn draw_msg_info(f: &mut Frame, app: &mut App, area: Rect) {
     let view = Rect { width: view_full.width.saturating_sub(1), ..view_full };
     let bar_area = Rect { x: view_full.x + view_full.width.saturating_sub(1), width: 1, ..view_full };
     let w = view.width as usize;
-    let dim = Style::new().fg(c::DIM);
-    let fg = Style::new().fg(c::FG);
+    let dim = Style::new().fg(c::dim());
+    let fg = Style::new().fg(c::fg());
 
     // Who is a jid: group members by name, the contact in a private chat, else the number.
     let who = |jid: &str| -> String {
@@ -953,11 +953,11 @@ fn draw_msg_info(f: &mut Frame, app: &mut App, area: Rect) {
 
     // The message, as in the conversation.
     let sender = app.sender_label(&chat_id, &m);
-    lines.push(row_line(vec![Span::raw(" "), Span::styled(sender.clone(), Style::new().fg(name_color(&sender)).add_modifier(Modifier::BOLD))], w, c::SURFACE));
+    lines.push(row_line(vec![Span::raw(" "), Span::styled(sender.clone(), Style::new().fg(name_color(&sender)).add_modifier(Modifier::BOLD))], w, c::surface()));
     for l in wrap(&crate::app::preview(&m), w.saturating_sub(2)).into_iter().take(14) {
-        lines.push(row_line(vec![Span::raw(" "), Span::styled(l, fg)], w, c::SURFACE));
+        lines.push(row_line(vec![Span::raw(" "), Span::styled(l, fg)], w, c::surface()));
     }
-    lines.push(row_line(vec![Span::raw(" "), Span::styled(when(m.timestamp), dim)], w, c::SURFACE));
+    lines.push(row_line(vec![Span::raw(" "), Span::styled(when(m.timestamp), dim)], w, c::surface()));
     lines.push(Line::raw(""));
 
     let row = |label: &str, value: String| {
@@ -971,10 +971,10 @@ fn draw_msg_info(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::raw(""));
         match &receipts {
             None => lines.push(Line::styled(" Loading receipts…", dim)),
-            Some(Err(e)) => lines.push(Line::styled(truncate(&format!(" Receipts: {e}"), w), Style::new().fg(c::RED))),
+            Some(Err(e)) => lines.push(Line::styled(truncate(&format!(" Receipts: {e}"), w), Style::new().fg(c::red()))),
             Some(Ok(r)) => {
                 let section = |lines: &mut Vec<Line<'static>>, title: String, rows: Vec<(String, i64)>| {
-                    lines.push(Line::styled(format!(" {title}"), Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD)));
+                    lines.push(Line::styled(format!(" {title}"), Style::new().fg(c::blue()).add_modifier(Modifier::BOLD)));
                     if rows.is_empty() {
                         lines.push(Line::styled("   —", dim));
                     }
@@ -1029,13 +1029,13 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let Some(panel) = app.panel.as_mut() else { return };
     let block = Block::bordered()
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::new().fg(if typing { c::YELLOW } else { c::BORDER }));
+        .border_style(Style::new().fg(if typing { c::yellow() } else { c::border() }));
     let inner = block.inner(input);
     f.render_widget(block, input);
     let text = if panel.query.text.is_empty() && !typing {
-        Span::styled(" / to search this chat", Style::new().fg(c::DIM))
+        Span::styled(" / to search this chat", Style::new().fg(c::dim()))
     } else {
-        Span::styled(format!(" {}", panel.query.text), Style::new().fg(c::FG))
+        Span::styled(format!(" {}", panel.query.text), Style::new().fg(c::fg()))
     };
     f.render_widget(Paragraph::new(text), inner);
     if typing {
@@ -1047,7 +1047,7 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         (Some(_), true) => " Searching…".to_string(),
         (Some(q), false) => format!(" {} result{} for \"{}\"", panel.results.len(), if panel.results.len() == 1 { "" } else { "s" }, truncate(q, 20)),
     };
-    f.render_widget(Paragraph::new(Line::styled(status_text, Style::new().fg(c::DIM))), status);
+    f.render_widget(Paragraph::new(Line::styled(status_text, Style::new().fg(c::dim()))), status);
 
     panel.list = list;
     let visible = (list.height / 2).max(1) as usize;
@@ -1063,21 +1063,21 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let mut rows: Vec<Line> = Vec::new();
     for i in (offset..len).take(visible) {
         let m = &app.panel.as_ref().expect("open").results[i];
-        let bg = if i == sel && focused { c::SELECT } else if i == sel { c::SURFACE } else { c::BG_DARK };
+        let bg = if i == sel && focused { c::select() } else if i == sel { c::surface() } else { c::bg_dark() };
         let when = local(m.timestamp).map(|t| t.format("%-d %b %Y, %H:%M").to_string()).unwrap_or_default();
         let who = app.sender_label(&chat_id, m);
         rows.push(
             Line::from(vec![
                 Span::raw(" "),
                 Span::styled(truncate(&who, w / 2), Style::new().fg(name_color(&who)).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("  {when}"), Style::new().fg(c::DIM)),
+                Span::styled(format!("  {when}"), Style::new().fg(c::dim())),
             ])
             .style(Style::new().bg(bg)),
         );
         rows.push(highlight_line(&m.content, &needle, w.saturating_sub(2), bg));
     }
     f.render_widget(Paragraph::new(rows), list);
-    f.render_widget(Paragraph::new(Line::styled(" / edit  j/k move  ⏎ show in chat", Style::new().fg(c::DIM))), hints);
+    f.render_widget(Paragraph::new(Line::styled(" / edit  j/k move  ⏎ show in chat", Style::new().fg(c::dim()))), hints);
 }
 
 /// One snippet line with the match in colour; starts at the match when it would be cut off.
@@ -1101,11 +1101,11 @@ fn highlight_line(content: &str, needle_lower: &str, max: usize, bg: ratatui::st
     match (!needle_lower.is_empty()).then(|| low.find(needle_lower)).flatten() {
         Some(p) if shown.is_char_boundary(p) && shown.is_char_boundary(p + needle_lower.len().min(shown.len() - p)) => {
             let end = p + needle_lower.len().min(shown.len() - p);
-            spans.push(Span::styled(shown[..p].to_string(), Style::new().fg(c::FG)));
-            spans.push(Span::styled(shown[p..end].to_string(), Style::new().fg(c::BG).bg(c::YELLOW)));
-            spans.push(Span::styled(shown[end..].to_string(), Style::new().fg(c::FG)));
+            spans.push(Span::styled(shown[..p].to_string(), Style::new().fg(c::fg())));
+            spans.push(Span::styled(shown[p..end].to_string(), Style::new().fg(c::on_accent()).bg(c::yellow())));
+            spans.push(Span::styled(shown[end..].to_string(), Style::new().fg(c::fg())));
         }
-        _ => spans.push(Span::styled(shown, Style::new().fg(c::FG))),
+        _ => spans.push(Span::styled(shown, Style::new().fg(c::fg()))),
     }
     Line::from(spans).style(Style::new().bg(bg))
 }
@@ -1116,7 +1116,7 @@ mod tests {
 
     #[test]
     fn highlight_marks_the_match_and_keeps_it_in_view() {
-        let line = highlight_line("kita ketemu besok di kampus jam tujuh pagi sama Budi", "budi", 20, c::BG);
+        let line = highlight_line("kita ketemu besok di kampus jam tujuh pagi sama Budi", "budi", 20, c::bg());
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.to_lowercase().contains("budi"), "match scrolled out of view: {text:?}");
         assert!(line.spans.iter().any(|s| s.content.eq_ignore_ascii_case("budi")));

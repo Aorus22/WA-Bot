@@ -32,7 +32,7 @@ pub fn resolve_api_url(args: impl Iterator<Item = String>) -> Result<String> {
         args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
     };
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("wabot-cli [--url http://host:port] [--port N] [--images auto|off|halfblocks|kitty|sixel|iterm2] [--ticks auto|nerd|unicode|ascii] [--scroll LINES]\n\nWithout flags it uses the backend recorded in ~/.wa-bot/run/core.json.");
+        println!("wabot-cli [--url http://host:port] [--port N] [--images auto|off|halfblocks|kitty|sixel|iterm2] [--ticks auto|nerd|unicode|ascii] [--scroll LINES] [--theme {}]\n\nWithout --theme the terminal's own background and palette are used (`auto`).\nWithout flags it uses the backend recorded in ~/.wa-bot/run/core.json.", crate::theme::names());
         std::process::exit(0);
     }
     if let Some(url) = value("--url") {

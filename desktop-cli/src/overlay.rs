@@ -53,8 +53,8 @@ pub fn draw_menu(f: &mut Frame, menu: &mut Menu, area: Rect) {
     f.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(c::BLUE))
-        .style(Style::new().bg(c::SURFACE));
+        .border_style(Style::new().fg(c::blue()))
+        .style(Style::new().bg(c::surface()));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
@@ -66,41 +66,41 @@ pub fn draw_menu(f: &mut Frame, menu: &mut Menu, area: Rect) {
         if menu.can_go_back() {
             // The way back is a button too.
             lines.push(Line::from(vec![
-                Span::styled(" ‹ ", Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD)),
-                Span::styled(t.clone(), Style::new().fg(c::DIM).add_modifier(Modifier::BOLD)),
+                Span::styled(" ‹ ", Style::new().fg(c::blue()).add_modifier(Modifier::BOLD)),
+                Span::styled(t.clone(), Style::new().fg(c::dim()).add_modifier(Modifier::BOLD)),
             ]));
             menu.back_row = Rect::new(inner.x, row, inner.width, 1);
         } else {
-            lines.push(Line::styled(format!(" {t}"), Style::new().fg(c::DIM).add_modifier(Modifier::BOLD)));
+            lines.push(Line::styled(format!(" {t}"), Style::new().fg(c::dim()).add_modifier(Modifier::BOLD)));
         }
         row += 1;
     }
     let iw = inner.width as usize;
     if let Some(s) = &menu.search {
         let line = if s.query.is_empty() {
-            Line::from(vec![Span::styled(" ⌕ ", Style::new().fg(c::BLUE)), Span::styled("type to search", Style::new().fg(c::DIM))])
+            Line::from(vec![Span::styled(" ⌕ ", Style::new().fg(c::blue())), Span::styled("type to search", Style::new().fg(c::dim()))])
         } else {
             Line::from(vec![
-                Span::styled(" ⌕ ", Style::new().fg(c::BLUE)),
-                Span::styled(truncate(&s.query, iw.saturating_sub(5)), Style::new().fg(c::FG)),
-                Span::styled("▏", Style::new().fg(c::BLUE)),
+                Span::styled(" ⌕ ", Style::new().fg(c::blue())),
+                Span::styled(truncate(&s.query, iw.saturating_sub(5)), Style::new().fg(c::fg())),
+                Span::styled("▏", Style::new().fg(c::blue())),
             ])
         };
         lines.push(line);
         row += 1;
         if menu.items.is_empty() {
-            lines.push(Line::styled(" No match", Style::new().fg(c::DIM)));
+            lines.push(Line::styled(" No match", Style::new().fg(c::dim())));
             row += 1;
         }
     }
     for (k, item) in window.iter().enumerate() {
         let idx = menu.offset + k;
         if item.rule_above {
-            lines.push(Line::styled("─".repeat(iw), Style::new().fg(c::BORDER)));
+            lines.push(Line::styled("─".repeat(iw), Style::new().fg(c::border())));
             row += 1;
         }
         let selected = idx == menu.sel;
-        let fg = if item.danger { c::RED } else { c::FG };
+        let fg = if item.danger { c::red() } else { c::fg() };
         let arrow = if matches!(item.action, Action::Submenu { .. } | Action::SearchMenu { .. }) { "›" } else { "" };
         let right = if item.hint.is_empty() { arrow.to_string() } else { item.hint.clone() };
         let label = truncate(&item.label, iw.saturating_sub(width(&right) + 3));
@@ -110,12 +110,12 @@ pub fn draw_menu(f: &mut Frame, menu: &mut Menu, area: Rect) {
             Span::raw(" "),
             Span::styled(label, style),
             Span::raw(" ".repeat(gap)),
-            Span::styled(right, Style::new().fg(c::DIM)),
+            Span::styled(right, Style::new().fg(c::dim())),
             Span::raw(" "),
         ]);
         if selected {
-            style = style.bg(c::SELECT).add_modifier(Modifier::BOLD);
-            line = line.style(Style::new().bg(c::SELECT));
+            style = style.bg(c::select()).add_modifier(Modifier::BOLD);
+            line = line.style(Style::new().bg(c::select()));
             // Re-style the label so bold applies to it only.
             line.spans[1].style = style;
         }
@@ -134,12 +134,12 @@ pub fn draw_attach(f: &mut Frame, a: &mut Attach, chat_name: &str, font: Option<
     f.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(c::GREEN))
+        .border_style(Style::new().fg(c::green()))
         .title(Span::styled(
             format!(" Send {} to {} ", a.picked.kind.label(), truncate(chat_name, w as usize - 24)),
-            Style::new().fg(c::FG).add_modifier(Modifier::BOLD),
+            Style::new().fg(c::fg()).add_modifier(Modifier::BOLD),
         ))
-        .style(Style::new().bg(c::SURFACE));
+        .style(Style::new().bg(c::surface()));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
@@ -156,7 +156,7 @@ pub fn draw_attach(f: &mut Frame, a: &mut Attach, chat_name: &str, font: Option<
         (Some(_), _, _) => {
             let y = pic.y + pic.height / 2;
             f.render_widget(
-                Paragraph::new(Line::styled("(preview needs a graphics terminal)", Style::new().fg(c::DIM))).centered(),
+                Paragraph::new(Line::styled("(preview needs a graphics terminal)", Style::new().fg(c::dim()))).centered(),
                 Rect::new(pic.x, y, pic.width, 1),
             );
         }
@@ -166,12 +166,12 @@ pub fn draw_attach(f: &mut Frame, a: &mut Attach, chat_name: &str, font: Option<
             let label = if ext.is_empty() { a.picked.kind.label().to_uppercase() } else { truncate(&ext, 6) };
             let (tw, th) = (24.min(pic.width), 7.min(pic.height));
             let tile = Rect::new(pic.x + (pic.width - tw) / 2, pic.y + (pic.height.saturating_sub(th)) / 2, tw, th);
-            let tb = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(c::BLUE)).style(Style::new().bg(c::BG_DARK));
+            let tb = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(c::blue())).style(Style::new().bg(c::bg_dark()));
             let ti = tb.inner(tile);
             f.render_widget(tb, tile);
             let mut lines = vec![Line::raw(""); (ti.height / 2) as usize];
-            lines.push(Line::styled(label, Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD)).centered());
-            lines.push(Line::styled(a.picked.kind.label(), Style::new().fg(c::DIM)).centered());
+            lines.push(Line::styled(label, Style::new().fg(c::blue()).add_modifier(Modifier::BOLD)).centered());
+            lines.push(Line::styled(a.picked.kind.label(), Style::new().fg(c::dim())).centered());
             f.render_widget(Paragraph::new(lines), ti);
         }
     }
@@ -183,19 +183,19 @@ pub fn draw_attach(f: &mut Frame, a: &mut Attach, chat_name: &str, font: Option<
         None => a.picked.mime.to_string(),
     };
     f.render_widget(
-        Paragraph::new(Line::styled(format!(" {} · {detail} · {size}", truncate(&a.picked.name, 30)), Style::new().fg(c::DIM))),
+        Paragraph::new(Line::styled(format!(" {} · {detail} · {size}", truncate(&a.picked.name, 30)), Style::new().fg(c::dim()))),
         info,
     );
 
-    let cb = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(if a.sending { c::DIM } else { c::GREEN }));
+    let cb = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(if a.sending { c::dim() } else { c::green() }));
     let ci = cb.inner(caption);
     f.render_widget(cb, caption);
     let text = if !a.picked.kind.allows_caption() {
-        Span::styled(" Audio has no caption", Style::new().fg(c::DIM))
+        Span::styled(" Audio has no caption", Style::new().fg(c::dim()))
     } else if a.caption.text.is_empty() {
-        Span::styled(" Add a caption…", Style::new().fg(c::DIM))
+        Span::styled(" Add a caption…", Style::new().fg(c::dim()))
     } else {
-        Span::styled(format!(" {}", a.caption.text), Style::new().fg(c::FG))
+        Span::styled(format!(" {}", a.caption.text), Style::new().fg(c::fg()))
     };
     f.render_widget(Paragraph::new(text), ci);
     if !a.sending && a.picked.kind.allows_caption() {
@@ -204,17 +204,17 @@ pub fn draw_attach(f: &mut Frame, a: &mut Attach, chat_name: &str, font: Option<
     if a.sending {
         a.send_btn = Rect::default();
         a.cancel_btn = Rect::default();
-        f.render_widget(Paragraph::new(Line::styled(" Sending…", Style::new().fg(c::YELLOW))), hints);
+        f.render_widget(Paragraph::new(Line::styled(" Sending…", Style::new().fg(c::yellow()))), hints);
     } else {
         // Two buttons, so the whole box works with the mouse; Enter / Esc still do the same.
         let (send, cancel) = (" ⏎ Send ", " Cancel ");
         let (sw, cw) = (width(send) as u16, width(cancel) as u16);
         let send_r = Rect::new(hints.x + 1, hints.y, sw, 1);
         let cancel_r = Rect::new(send_r.x + sw + 2, hints.y, cw, 1);
-        f.render_widget(Paragraph::new(Span::styled(send, Style::new().fg(c::BG).bg(c::GREEN).add_modifier(Modifier::BOLD))), send_r);
-        f.render_widget(Paragraph::new(Span::styled(cancel, Style::new().fg(c::FG).bg(c::SELECT))), cancel_r);
+        f.render_widget(Paragraph::new(Span::styled(send, Style::new().fg(c::on_accent()).bg(c::green()).add_modifier(Modifier::BOLD))), send_r);
+        f.render_widget(Paragraph::new(Span::styled(cancel, Style::new().fg(c::fg()).bg(c::select()))), cancel_r);
         let note = Rect::new(cancel_r.x + cw + 2, hints.y, hints.width.saturating_sub(sw + cw + 5), 1);
-        f.render_widget(Paragraph::new(Span::styled("or Enter / Esc", Style::new().fg(c::DIM))), note);
+        f.render_widget(Paragraph::new(Span::styled("or Enter / Esc", Style::new().fg(c::dim()))), note);
         a.send_btn = send_r;
         a.cancel_btn = cancel_r;
     }

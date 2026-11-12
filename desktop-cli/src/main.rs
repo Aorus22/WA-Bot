@@ -35,6 +35,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let api = backend::resolve_api_url(args.iter().cloned())?;
     let image_mode = backend::flag_value(&args, "--images").unwrap_or_else(|| "auto".to_string());
+    let theme = backend::flag_value(&args, "--theme").unwrap_or_else(|| "auto".to_string());
     ticks::init(&backend::flag_value(&args, "--ticks").unwrap_or_else(|| "auto".to_string()));
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -63,6 +64,9 @@ fn main() -> Result<()> {
     // The picker talks to the terminal, so it runs after the alternate screen is
     // up and before the input thread starts reading events.
     let mut terminal = ratatui::init();
+    // Raw mode is on, so the terminal can be asked for its background colour here,
+    // before the input thread starts reading. Then the palette is fixed for the run.
+    theme::init(&theme);
     let picker = images::make_picker(&image_mode);
     execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste).ok();
     // Where the terminal can tell Ctrl+Shift+C from Ctrl+C, ask it to (kitty protocol).

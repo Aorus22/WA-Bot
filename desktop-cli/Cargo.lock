@@ -3612,6 +3612,7 @@ dependencies = [
  "chrono",
  "flume",
  "image",
+ "libc",
  "ratatui",
  "ratatui-image",
  "serde",

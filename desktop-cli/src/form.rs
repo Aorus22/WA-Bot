@@ -255,9 +255,9 @@ pub fn draw_form(f: &mut Frame, form: &mut Form, area: Rect) {
     f.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(c::GREEN))
-        .title(Span::styled(format!(" {} ", form.kind.title()), Style::new().fg(c::FG).add_modifier(Modifier::BOLD)))
-        .style(Style::new().bg(c::SURFACE));
+        .border_style(Style::new().fg(c::green()))
+        .title(Span::styled(format!(" {} ", form.kind.title()), Style::new().fg(c::fg()).add_modifier(Modifier::BOLD)))
+        .style(Style::new().bg(c::surface()));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
@@ -271,11 +271,11 @@ pub fn draw_form(f: &mut Frame, form: &mut Form, area: Rect) {
         let focused = i == form.focus && !form.sending;
         let input_x = inner.x + 1 + label_w;
         let input_w = inner.width.saturating_sub(label_w + 2);
-        let bg = if focused { c::SELECT } else { c::BG_DARK };
+        let bg = if focused { c::select() } else { c::bg_dark() };
         let (text, style) = if fld.edit.text.is_empty() {
-            (fld.hint.clone(), Style::new().fg(c::DIM))
+            (fld.hint.clone(), Style::new().fg(c::dim()))
         } else {
-            (fld.edit.text.clone(), Style::new().fg(c::FG))
+            (fld.edit.text.clone(), Style::new().fg(c::fg()))
         };
         // Keep the end of long text in view while typing.
         let shown = if focused && !fld.edit.text.is_empty() && width(&text) + 2 > input_w as usize {
@@ -285,7 +285,7 @@ pub fn draw_form(f: &mut Frame, form: &mut Form, area: Rect) {
             truncate(&text, input_w.saturating_sub(1) as usize)
         };
         f.render_widget(
-            Paragraph::new(Line::styled(format!(" {:<width$}", fld.label, width = label_w as usize - 1), Style::new().fg(c::DIM))),
+            Paragraph::new(Line::styled(format!(" {:<width$}", fld.label, width = label_w as usize - 1), Style::new().fg(c::dim()))),
             Rect::new(inner.x, y, label_w + 1, 1),
         );
         let pad = (input_w as usize).saturating_sub(width(&shown) + 1);
@@ -303,7 +303,7 @@ pub fn draw_form(f: &mut Frame, form: &mut Form, area: Rect) {
 
     if form.kind == FormKind::Poll && y < inner.y + inner.height {
         let line = format!(" [{}] Allow several answers", if form.multi { "x" } else { " " });
-        f.render_widget(Paragraph::new(Line::styled(line.clone(), Style::new().fg(c::FG))), Rect::new(inner.x, y + 1, inner.width, 1));
+        f.render_widget(Paragraph::new(Line::styled(line.clone(), Style::new().fg(c::fg()))), Rect::new(inner.x, y + 1, inner.width, 1));
         form.multi_btn = Rect::new(inner.x, y + 1, width(&line) as u16 + 1, 1);
     } else {
         form.multi_btn = Rect::default();
@@ -312,22 +312,22 @@ pub fn draw_form(f: &mut Frame, form: &mut Form, area: Rect) {
     // Error line, then the buttons.
     let bottom = inner.y + inner.height;
     if let Some(e) = &form.error {
-        f.render_widget(Paragraph::new(Line::styled(format!(" {}", truncate(e, inner.width as usize - 2)), Style::new().fg(c::RED))), Rect::new(inner.x, bottom - 2, inner.width, 1));
+        f.render_widget(Paragraph::new(Line::styled(format!(" {}", truncate(e, inner.width as usize - 2)), Style::new().fg(c::red()))), Rect::new(inner.x, bottom - 2, inner.width, 1));
     }
     let by = bottom - 1;
     if form.sending {
         form.send_btn = Rect::default();
         form.cancel_btn = Rect::default();
-        f.render_widget(Paragraph::new(Line::styled(" Sending…", Style::new().fg(c::YELLOW))), Rect::new(inner.x, by, inner.width, 1));
+        f.render_widget(Paragraph::new(Line::styled(" Sending…", Style::new().fg(c::yellow()))), Rect::new(inner.x, by, inner.width, 1));
     } else {
         let (send, cancel) = (" ⏎ Send ", " Cancel ");
         let (sw, cw) = (width(send) as u16, width(cancel) as u16);
         let send_r = Rect::new(inner.x + 1, by, sw, 1);
         let cancel_r = Rect::new(send_r.x + sw + 2, by, cw, 1);
-        f.render_widget(Paragraph::new(Span::styled(send, Style::new().fg(c::BG).bg(c::GREEN).add_modifier(Modifier::BOLD))), send_r);
-        f.render_widget(Paragraph::new(Span::styled(cancel, Style::new().fg(c::FG).bg(c::SELECT))), cancel_r);
+        f.render_widget(Paragraph::new(Span::styled(send, Style::new().fg(c::on_accent()).bg(c::green()).add_modifier(Modifier::BOLD))), send_r);
+        f.render_widget(Paragraph::new(Span::styled(cancel, Style::new().fg(c::fg()).bg(c::select()))), cancel_r);
         f.render_widget(
-            Paragraph::new(Span::styled("Tab next field · Enter on the last one sends", Style::new().fg(c::DIM))),
+            Paragraph::new(Span::styled("Tab next field · Enter on the last one sends", Style::new().fg(c::dim()))),
             Rect::new(cancel_r.x + cw + 2, by, inner.width.saturating_sub(sw + cw + 5), 1),
         );
         form.send_btn = send_r;

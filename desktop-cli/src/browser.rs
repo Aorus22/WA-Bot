@@ -254,9 +254,9 @@ pub fn draw_browser(f: &mut Frame, b: &mut Browser, area: Rect) {
     f.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(c::BLUE))
-        .title(Span::styled(format!(" Choose {} ", b.mode.prompt()), Style::new().fg(c::FG).add_modifier(Modifier::BOLD)))
-        .style(Style::new().bg(c::SURFACE));
+        .border_style(Style::new().fg(c::blue()))
+        .title(Span::styled(format!(" Choose {} ", b.mode.prompt()), Style::new().fg(c::fg()).add_modifier(Modifier::BOLD)))
+        .style(Style::new().bg(c::surface()));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
@@ -272,7 +272,7 @@ pub fn draw_browser(f: &mut Frame, b: &mut Browser, area: Rect) {
     } else {
         shown
     };
-    f.render_widget(Paragraph::new(Line::styled(format!(" {shown}"), Style::new().fg(c::YELLOW))), path);
+    f.render_widget(Paragraph::new(Line::styled(format!(" {shown}"), Style::new().fg(c::yellow()))), path);
 
     // Toolbar.
     let labels = [
@@ -289,7 +289,7 @@ pub fn draw_browser(f: &mut Frame, b: &mut Browser, area: Rect) {
         if x + lw > tools.x + tools.width {
             break;
         }
-        spans.push(Span::styled(label, Style::new().fg(c::FG).bg(c::SELECT)));
+        spans.push(Span::styled(label, Style::new().fg(c::fg()).bg(c::select())));
         spans.push(Span::raw(" "));
         b.buttons.push((Rect::new(x, tools.y, lw, 1), btn));
         x += lw + 1;
@@ -308,11 +308,11 @@ pub fn draw_browser(f: &mut Frame, b: &mut Browser, area: Rect) {
     let w = list.width as usize;
     let mut lines: Vec<Line> = Vec::new();
     for (i, e) in b.entries.iter().enumerate().skip(b.offset).take(rows) {
-        let bg = if i == b.sel { c::SELECT } else { c::SURFACE };
+        let bg = if i == b.sel { c::select() } else { c::surface() };
         let (name, style) = if e.is_dir {
-            (format!("{}/", e.name), Style::new().fg(c::BLUE).add_modifier(Modifier::BOLD))
+            (format!("{}/", e.name), Style::new().fg(c::blue()).add_modifier(Modifier::BOLD))
         } else {
-            (e.name.clone(), Style::new().fg(c::FG))
+            (e.name.clone(), Style::new().fg(c::fg()))
         };
         let right = if e.is_dir || e.name == ".." {
             String::new()
@@ -327,20 +327,20 @@ pub fn draw_browser(f: &mut Frame, b: &mut Browser, area: Rect) {
                 Span::raw(" "),
                 Span::styled(name, style),
                 Span::raw(" ".repeat(gap)),
-                Span::styled(right, Style::new().fg(c::DIM)),
+                Span::styled(right, Style::new().fg(c::dim())),
                 Span::raw(" "),
             ])
             .style(Style::new().bg(bg)),
         );
     }
     if b.entries.is_empty() {
-        lines.push(Line::styled(" Nothing here you can send", Style::new().fg(c::DIM)));
+        lines.push(Line::styled(" Nothing here you can send", Style::new().fg(c::dim())));
     }
     f.render_widget(Paragraph::new(lines), list);
 
     let hint_text = match &b.error {
-        Some(e) => Span::styled(format!(" {}", truncate(e, hint.width as usize - 2)), Style::new().fg(c::RED)),
-        None => Span::styled(" click a folder to open it, a file to pick it · h back · esc close", Style::new().fg(c::DIM)),
+        Some(e) => Span::styled(format!(" {}", truncate(e, hint.width as usize - 2)), Style::new().fg(c::red())),
+        None => Span::styled(" click a folder to open it, a file to pick it · h back · esc close", Style::new().fg(c::dim())),
     };
     f.render_widget(Paragraph::new(Line::from(hint_text)), hint);
 }

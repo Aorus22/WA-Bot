@@ -197,9 +197,9 @@ pub fn draw_stickers(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(c::MAGENTA))
-        .title(Span::styled(" Stickers ", Style::new().fg(c::FG).add_modifier(Modifier::BOLD)))
-        .style(Style::new().bg(c::SURFACE));
+        .border_style(Style::new().fg(c::magenta()))
+        .title(Span::styled(" Stickers ", Style::new().fg(c::fg()).add_modifier(Modifier::BOLD)))
+        .style(Style::new().bg(c::surface()));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
     let [tabs, grid, hint] = Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(inner);
@@ -210,7 +210,7 @@ pub fn draw_stickers(f: &mut Frame, app: &mut App, area: Rect) {
     s.tab_hits.clear();
     for (tab, label) in [(StickerTab::Recent, " Recent "), (StickerTab::Favourites, " Favourites ")] {
         let lw = width(label) as u16;
-        let style = if tab == s.tab { Style::new().fg(c::BG).bg(c::MAGENTA).add_modifier(Modifier::BOLD) } else { Style::new().fg(c::DIM) };
+        let style = if tab == s.tab { Style::new().fg(c::on_accent()).bg(c::magenta()).add_modifier(Modifier::BOLD) } else { Style::new().fg(c::dim()) };
         spans.push(Span::styled(label, style));
         s.tab_hits.push((Rect::new(x, tabs.y, lw, 1), tab));
         x += lw;
@@ -219,7 +219,7 @@ pub fn draw_stickers(f: &mut Frame, app: &mut App, area: Rect) {
     let cw = width(close) as u16;
     let gap = (tabs.width as usize).saturating_sub(1 + (x - tabs.x - 1) as usize + cw as usize);
     spans.push(Span::raw(" ".repeat(gap)));
-    spans.push(Span::styled(close, Style::new().fg(c::DIM).bg(c::BG_DARK)));
+    spans.push(Span::styled(close, Style::new().fg(c::dim()).bg(c::bg_dark())));
     f.render_widget(Paragraph::new(Line::from(spans)), tabs);
     s.close_btn = Rect::new(tabs.x + tabs.width - cw, tabs.y, cw, 1);
 
@@ -247,7 +247,7 @@ pub fn draw_stickers(f: &mut Frame, app: &mut App, area: Rect) {
         } else {
             " No favourites yet. Right-click a sticker in a chat and choose \"Add to favourites\".".to_string()
         };
-        f.render_widget(Paragraph::new(Line::styled(truncate(&msg, grid.width as usize), Style::new().fg(c::DIM))), grid);
+        f.render_widget(Paragraph::new(Line::styled(truncate(&msg, grid.width as usize), Style::new().fg(c::dim()))), grid);
     }
 
     // Draw cells, then pictures (kept apart so the cache can be borrowed mutably).
@@ -259,9 +259,9 @@ pub fn draw_stickers(f: &mut Frame, app: &mut App, area: Rect) {
         cells.push((cell, s.items()[i].media_url.clone(), i == s.sel));
     }
     let hint_text = if s.items().is_empty() { "" } else { " click a sticker to send it · arrows move · ⏎ send" };
-    f.render_widget(Paragraph::new(Line::styled(hint_text, Style::new().fg(c::DIM))), hint);
+    f.render_widget(Paragraph::new(Line::styled(hint_text, Style::new().fg(c::dim()))), hint);
     for (cell, url, selected) in &cells {
-        let bg = if *selected { c::SELECT } else { c::SURFACE };
+        let bg = if *selected { c::select() } else { c::surface() };
         f.render_widget(Block::default().style(Style::new().bg(bg)), Rect::new(cell.x, cell.y, cell.width.saturating_sub(1), cell.height.saturating_sub(1)));
         let img_rect = Rect::new(cell.x + 1, cell.y, 8.min(cell.width), 4.min(cell.height));
         match app.sticker_imgs.get_mut(url) {
