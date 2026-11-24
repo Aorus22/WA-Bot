@@ -3,17 +3,27 @@ use crate::views::chat::*;
 
 /// Fixed virtual height per row used to compute a stable scrollbar thumb size
 /// that does not grow and shrink as GPUI lazily measures mixed text and media rows.
-const VIRTUAL_ROW_PX: f32 = 72.0;
+const VIRTUAL_ROW_PX: f32 = 64.0;
 
-/// Index-proportional scrollbar handle over `gpui::ListState`.
+/// Index-proportional scrollbar handle over .
 ///
-/// `ListState`'s default `content_size` fluctuates whenever the user scrolls
-/// between short text rows and tall media rows because off-screen items are
-/// estimated from the running average of measured items. Basing the virtual
-/// content height solely on `item_count()` keeps the thumb size steady while
-/// mapping drag/scroll progress smoothly onto the real list offset.
+/// 's pixel-based scrollbar APIs (,
+/// , ) rely on running
+/// estimates of unmeasured rows, causing non-linear drag velocity (slow at the
+/// top, then jumping to the bottom) and a fluctuating thumb size.
+///
+/// This wrapper maps both thumb position () and thumb drag ()
+/// directly through  /  so scrolling
+/// and dragging stay linear and smooth from first message to newest.
 #[derive(Clone)]
 pub(crate) struct StableListScrollbar(pub ListState);
+
+impl StableListScrollbar {
+    fn max_top_index(&self, count: usize, vp_h: f32) -> f32 {
+        let visible_rows = (vp_h / VIRTUAL_ROW_PX).max(1.0);
+        (count as f32 - visible_rows).max(1.0)
+    }
+}
 
 impl ScrollbarHandle for StableListScrollbar {
     fn viewport_bounds(&self) -> Bounds<Pixels> {
@@ -34,31 +44,61 @@ impl ScrollbarHandle for StableListScrollbar {
     fn offset(&self) -> Point<Pixels> {
         let vp_h = f32::from(self.0.viewport_bounds().size.height);
         let virtual_max = (f32::from(self.content_size().height) - vp_h).max(0.0);
-        if virtual_max <= 0.0 {
+        let count = self.0.item_count();
+        if virtual_max <= 0.0 || count <= 1 {
             return Point::default();
-        }
-        if self.0.is_following_tail() {
-            return point(px(0.0), px(-virtual_max));
         }
         let real_max = f32::from(self.0.max_offset_for_scrollbar().y);
-        if real_max <= 0.0 {
-            return Point::default();
-        }
         let real_y = -f32::from(self.0.scroll_px_offset_for_scrollbar().y);
-        let progress = (real_y / real_max).clamp(0.0, 1.0);
+        if self.0.is_following_tail() || (real_max > 0.0 && real_y >= real_max - 1.0) {
+            return point(px(0.0), px(-virtual_max));
+        }
+
+        let top = self.0.logical_scroll_top();
+        let sub = self
+            .0
+            .bounds_for_item(top.item_ix)
+            .map(|b| {
+                let h = f32::from(b.size.height);
+                if h > 0.0 {
+                    (f32::from(top.offset_in_item) / h).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            })
+            .unwrap_or(0.0);
+        let cur_ix = top.item_ix as f32 + sub;
+        let max_top = self.max_top_index(count, vp_h);
+        let progress = (cur_ix / max_top).clamp(0.0, 1.0);
         point(px(0.0), px(-progress * virtual_max))
     }
 
     fn set_offset(&self, offset: Point<Pixels>) {
         let vp_h = f32::from(self.0.viewport_bounds().size.height);
         let virtual_max = (f32::from(self.content_size().height) - vp_h).max(0.0);
-        let real_max = f32::from(self.0.max_offset_for_scrollbar().y);
-        if virtual_max <= 0.0 || real_max <= 0.0 {
+        let count = self.0.item_count();
+        if virtual_max <= 0.0 || count <= 1 {
             return;
         }
         let progress = (-f32::from(offset.y) / virtual_max).clamp(0.0, 1.0);
-        self.0
-            .set_offset_from_scrollbar(point(px(0.0), px(-progress * real_max)));
+        if progress >= 0.999 {
+            self.0.scroll_to_end();
+            return;
+        }
+        let max_top = self.max_top_index(count, vp_h);
+        let target_f = progress * max_top;
+        let item_ix = (target_f.floor() as usize).min(count.saturating_sub(1));
+        let frac = (target_f - target_f.floor()).clamp(0.0, 1.0);
+        let row_h = self
+            .0
+            .bounds_for_item(item_ix)
+            .map(|b| f32::from(b.size.height))
+            .filter(|h| *h > 0.0)
+            .unwrap_or(VIRTUAL_ROW_PX);
+        self.0.scroll_to(ListOffset {
+            item_ix,
+            offset_in_item: px(frac * row_h),
+        });
     }
 
     fn start_drag(&self) {
