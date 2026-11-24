@@ -475,10 +475,6 @@ impl ChatView {
                                     }
                                     all_msgs.sort_by_key(|m| m.timestamp);
                                     all_msgs.dedup_by(|a, b| a.id == b.id);
-                                    if all_msgs.len() > crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES {
-                                        all_msgs.truncate(crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES);
-                                        this.has_more_next = true;
-                                    }
                                     this.rebuild_message_cache_preserve_scroll(&cid_fetch, &all_msgs);
                                     if cx.has_global::<ChatStore>() {
                                         ChatStore::global_mut(cx).set_messages(&cid_fetch, all_msgs, this.has_more);
@@ -539,11 +535,6 @@ impl ChatView {
                                     all_msgs.extend(newer_msgs);
                                     all_msgs.sort_by_key(|m| m.timestamp);
                                     all_msgs.dedup_by(|a, b| a.id == b.id);
-                                    if all_msgs.len() > crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES {
-                                        let drop_n = all_msgs.len() - crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES;
-                                        all_msgs.drain(..drop_n);
-                                        this.has_more = true;
-                                    }
                                     this.rebuild_message_cache_preserve_scroll(&cid_fetch, &all_msgs);
                                     if cx.has_global::<ChatStore>() {
                                         ChatStore::global_mut(cx).set_messages(&cid_fetch, all_msgs, this.has_more);

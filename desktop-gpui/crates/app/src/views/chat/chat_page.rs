@@ -60,6 +60,7 @@ pub struct ChatView {
     // Scroll handles for visual scrollbars (uniform_list and virtual list)
     pub chat_list_scroll_handle: UniformListScrollHandle,
     pub messages_list_state: ListState,
+    pub(crate) messages_scrollbar: super::conversation::scroll::StableListScrollbar,
     /// Text scales (interface, chat) the list's cached row heights were measured at.
     pub measured_text_scale: (u8, u8),
     /// Cached natural pixel dimensions `(w, h)` of images/GIFs/video thumbs by URL.
@@ -239,6 +240,12 @@ impl ChatView {
         if cx.has_global::<ChatStore>() {
             ChatStore::global_mut(cx).active_chat_id = None;
         }
+        let messages_list_state = {
+            let state = ListState::new(0, ListAlignment::Top, px(200.0));
+            state.set_follow_mode(FollowMode::Tail);
+            state
+        };
+        let messages_scrollbar = super::conversation::scroll::StableListScrollbar::new(messages_list_state.clone());
         let mut view = Self {
             search_field: None,
             sheet_search_field: None,
@@ -285,11 +292,8 @@ impl ChatView {
             chat_list_scroll_handle: UniformListScrollHandle::new(),
             // At the bottom the list follows new messages by itself; scrolling
             // up pauses that until the user returns to the bottom.
-            messages_list_state: {
-                let state = ListState::new(0, ListAlignment::Top, px(200.0));
-                state.set_follow_mode(FollowMode::Tail);
-                state
-            },
+            messages_list_state,
+            messages_scrollbar,
             measured_text_scale: (100, 100),
             image_dims_cache: std::collections::HashMap::new(),
             fresh_msgs: std::collections::HashMap::new(),
