@@ -37,21 +37,19 @@ sleep 1
 rm -f "$BIN_DIR"/wa-bot-beta_*_x86_64.AppImage
 install -Dm755 "$SRC" "$OUT"
 
-# Launcher: stop stable (and every backend) unless beta already runs, then start beta.
+# Launcher: stop stable (and every backend) unless beta already runs, then start beta as a normal window.
 LAUNCHER="$BIN_DIR/wa-bot-beta"
 cat > "$LAUNCHER" <<LAUNCH
 #!/bin/sh
 APP="\$(ls "$BIN_DIR"/wa-bot-beta_*_x86_64.AppImage | tail -n 1)"
 if ! pgrep -f '^[^ ]*/wa-bot-beta_[^ ]*\\.AppImage' >/dev/null; then
     for p in \$(pgrep -f '^[^ ]*/wa-bot_[0-9][^ ]*\\.AppImage'); do kill "\$p" 2>/dev/null; done
-    sleep 2
+    sleep 1
     # The backends belong to the apps just stopped; beta starts its own.
     pkill -x wa-bot-backend 2>/dev/null
     sleep 1
-    "\$APP" --popover >/dev/null 2>&1 &
-    sleep 3
 fi
-exec "\$APP" --toggle
+exec "\$APP" "\$@"
 LAUNCH
 chmod 755 "$LAUNCHER"
 
