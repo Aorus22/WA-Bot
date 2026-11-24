@@ -260,7 +260,8 @@ impl ChatView {
     /// Rebuild cached render messages without jumping to bottom (preserves scroll position)
     pub(crate) fn rebuild_message_cache_preserve_scroll(&mut self, chat_id: &str, msgs: &[Message]) {
         self.mark_fresh_messages(chat_id, msgs);
-        let old_ids: Vec<String> = self.cached_render_messages.iter().map(|m| m.msg.id.clone()).collect();
+        let old_msgs = std::mem::take(&mut self.cached_render_messages);
+        let old_ids: Vec<String> = old_msgs.iter().map(|m| m.msg.id.clone()).collect();
         let new_ids: Vec<String> = msgs.iter().map(|m| m.id.clone()).collect();
         let mut lookup = std::collections::HashMap::new();
         for m in msgs {
@@ -326,9 +327,25 @@ impl ChatView {
             if old_start != old_end || new_count != 0 {
                 self.messages_list_state.splice(old_start..old_end, new_count);
             }
-        }
-        if total_items > 0 {
-            self.messages_list_state.remeasure_items(0..total_items);
+
+            // Only remeasure surviving rows whose content/metadata actually changed
+            // instead of wiping measured heights across the whole list.
+            for i in 0..prefix {
+                if old_msgs[i].msg != self.cached_render_messages[i].msg
+                    || old_msgs[i].quoted != self.cached_render_messages[i].quoted
+                {
+                    self.messages_list_state.remeasure_items((i + 1)..(i + 2));
+                }
+            }
+            for s in 0..suffix {
+                let old_ix = old_msgs.len() - 1 - s;
+                let new_ix = self.cached_render_messages.len() - 1 - s;
+                if old_msgs[old_ix].msg != self.cached_render_messages[new_ix].msg
+                    || old_msgs[old_ix].quoted != self.cached_render_messages[new_ix].quoted
+                {
+                    self.messages_list_state.remeasure_items((new_ix + 1)..(new_ix + 2));
+                }
+            }
         }
     }
 

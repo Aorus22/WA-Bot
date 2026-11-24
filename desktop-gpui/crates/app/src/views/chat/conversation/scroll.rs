@@ -1,4 +1,74 @@
+use crate::components::ui::scroll_area::ScrollbarHandle;
 use crate::views::chat::*;
+
+/// Fixed virtual height per row used to compute a stable scrollbar thumb size
+/// that does not grow and shrink as GPUI lazily measures mixed text and media rows.
+const VIRTUAL_ROW_PX: f32 = 72.0;
+
+/// Index-proportional scrollbar handle over `gpui::ListState`.
+///
+/// `ListState`'s default `content_size` fluctuates whenever the user scrolls
+/// between short text rows and tall media rows because off-screen items are
+/// estimated from the running average of measured items. Basing the virtual
+/// content height solely on `item_count()` keeps the thumb size steady while
+/// mapping drag/scroll progress smoothly onto the real list offset.
+#[derive(Clone)]
+pub(crate) struct StableListScrollbar(pub ListState);
+
+impl ScrollbarHandle for StableListScrollbar {
+    fn viewport_bounds(&self) -> Bounds<Pixels> {
+        self.0.viewport_bounds()
+    }
+
+    fn content_size(&self) -> Size<Pixels> {
+        let vp = self.0.viewport_bounds().size;
+        let count = self.0.item_count();
+        let real_max = f32::from(self.0.max_offset_for_scrollbar().y);
+        if real_max <= 0.0 || count <= 1 {
+            return vp;
+        }
+        let virtual_h = (count as f32 * VIRTUAL_ROW_PX).max(f32::from(vp.height) + 1.0);
+        size(vp.width, px(virtual_h))
+    }
+
+    fn offset(&self) -> Point<Pixels> {
+        let vp_h = f32::from(self.0.viewport_bounds().size.height);
+        let virtual_max = (f32::from(self.content_size().height) - vp_h).max(0.0);
+        if virtual_max <= 0.0 {
+            return Point::default();
+        }
+        if self.0.is_following_tail() {
+            return point(px(0.0), px(-virtual_max));
+        }
+        let real_max = f32::from(self.0.max_offset_for_scrollbar().y);
+        if real_max <= 0.0 {
+            return Point::default();
+        }
+        let real_y = -f32::from(self.0.scroll_px_offset_for_scrollbar().y);
+        let progress = (real_y / real_max).clamp(0.0, 1.0);
+        point(px(0.0), px(-progress * virtual_max))
+    }
+
+    fn set_offset(&self, offset: Point<Pixels>) {
+        let vp_h = f32::from(self.0.viewport_bounds().size.height);
+        let virtual_max = (f32::from(self.content_size().height) - vp_h).max(0.0);
+        let real_max = f32::from(self.0.max_offset_for_scrollbar().y);
+        if virtual_max <= 0.0 || real_max <= 0.0 {
+            return;
+        }
+        let progress = (-f32::from(offset.y) / virtual_max).clamp(0.0, 1.0);
+        self.0
+            .set_offset_from_scrollbar(point(px(0.0), px(-progress * real_max)));
+    }
+
+    fn start_drag(&self) {
+        self.0.scrollbar_drag_started();
+    }
+
+    fn end_drag(&self) {
+        self.0.scrollbar_drag_ended();
+    }
+}
 
 impl ChatView {
     /// Centered date pill, shared by the in-flow day separators and the

@@ -235,9 +235,23 @@ impl ChatView {
             };
             let image_dims: Option<(f32, f32)> = {
                 dims_source.map(|source| {
-                    let state = source.map(|full_url| preview_load_state(&full_url, window, cx));
-                    match state.unwrap_or(PreviewLoad::Loading) {
-                        PreviewLoad::Ready(nw, nh) if nw > 0.0 && nh > 0.0 => {
+                    let natural = source.and_then(|full_url| {
+                        if let Some(dims) = this.image_dims_cache.get(&full_url).copied() {
+                            return Some(dims);
+                        }
+                        match preview_load_state(&full_url, window, cx) {
+                            PreviewLoad::Ready(nw, nh) if nw > 0.0 && nh > 0.0 => {
+                                if this.image_dims_cache.len() >= 4096 {
+                                    this.image_dims_cache.clear();
+                                }
+                                this.image_dims_cache.insert(full_url, (nw, nh));
+                                Some((nw, nh))
+                            }
+                            _ => None,
+                        }
+                    });
+                    match natural {
+                        Some((nw, nh)) => {
                             let scale = (MESSAGE_IMAGE_MAX_WIDTH / nw)
                                 .min(MESSAGE_IMAGE_MAX_HEIGHT / nh);
                             (
@@ -245,7 +259,7 @@ impl ChatView {
                                 (nh * scale).clamp(MESSAGE_IMAGE_MIN_HEIGHT, MESSAGE_IMAGE_MAX_HEIGHT),
                             )
                         }
-                        _ => (MESSAGE_IMAGE_MIN_WIDTH, MESSAGE_IMAGE_MIN_HEIGHT),
+                        None => (MESSAGE_IMAGE_MIN_WIDTH, MESSAGE_IMAGE_MIN_HEIGHT),
                     }
                 })
             };

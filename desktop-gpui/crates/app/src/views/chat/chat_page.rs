@@ -62,6 +62,9 @@ pub struct ChatView {
     pub messages_list_state: ListState,
     /// Text scales (interface, chat) the list's cached row heights were measured at.
     pub measured_text_scale: (u8, u8),
+    /// Cached natural pixel dimensions `(w, h)` of images/GIFs/video thumbs by URL.
+    /// Keeps bubble heights stable even after GPUI assets are evicted from RAM.
+    pub(crate) image_dims_cache: std::collections::HashMap<String, (f32, f32)>,
     /// Messages that just arrived live (id -> arrival). They play a short
     /// entrance; history, scroll-back and chat switches never do.
     pub(crate) fresh_msgs: std::collections::HashMap<String, std::time::Instant>,
@@ -288,6 +291,7 @@ impl ChatView {
                 state
             },
             measured_text_scale: (100, 100),
+            image_dims_cache: std::collections::HashMap::new(),
             fresh_msgs: std::collections::HashMap::new(),
             typing_shown: None,
             typing_left_at: None,

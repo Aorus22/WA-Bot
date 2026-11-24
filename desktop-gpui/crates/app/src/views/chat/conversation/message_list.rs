@@ -79,7 +79,9 @@ impl ChatView {
                 .into_any_element()
             })
             .child(
-                Scrollbar::vertical(&self.messages_list_state)
+                Scrollbar::vertical(&super::scroll::StableListScrollbar(
+                    self.messages_list_state.clone(),
+                ))
                     .mode(ScrollbarMode::Always)
                     .styles(|s| {
                         s.track(|t| t.bg(transparent_black()))
