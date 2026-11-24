@@ -47,6 +47,15 @@ pub struct ChatView {
     /// Downscaled copies of the pictures the bubbles draw, so gpui never has to
     /// shrink a full-size one itself; see `media::thumbnail`.
     pub(crate) bubble_pictures: ThumbnailCache,
+    /// Byte-budgeted LRU for raw `ImageAssetLoader` assets (GIFs, animated
+    /// stickers, small images, thumbnails) so they are evicted instead of
+    /// accumulating in RAM and the GPU sprite atlas.
+    pub(crate) image_assets: ImageAssetBudget,
+    /// Media URLs rendered in the active chat; released when switching chats.
+    pub(crate) active_chat_media_urls: HashSet<String>,
+    /// Tracks panel transitions so sticker/info assets are released on close.
+    pub(crate) was_sticker_panel_open: bool,
+    pub(crate) was_info_sheet_open: bool,
 
     // Scroll handles for visual scrollbars (uniform_list and virtual list)
     pub chat_list_scroll_handle: UniformListScrollHandle,
@@ -265,6 +274,10 @@ impl ChatView {
             cached_chat_id: None,
             cached_render_messages: Vec::new(),
             bubble_pictures: ThumbnailCache::new(),
+            image_assets: ImageAssetBudget::default(),
+            active_chat_media_urls: HashSet::new(),
+            was_sticker_panel_open: false,
+            was_info_sheet_open: false,
 
             chat_list_scroll_handle: UniformListScrollHandle::new(),
             // At the bottom the list follows new messages by itself; scrolling
@@ -533,6 +546,25 @@ impl Render for ChatView {
                 }
             }
         }
+
+        // Release decoded assets when the sticker picker or info media drawer
+        // finishes closing so their images/animated stickers do not stay pinned.
+        let sticker_open = self.attach_panel == AttachPanel::Sticker;
+        if self.was_sticker_panel_open && !sticker_open {
+            let urls = self.collect_sticker_panel_urls(cx);
+            self.image_assets.release_urls(urls, Some(window), cx);
+        }
+        self.was_sticker_panel_open = sticker_open;
+
+        let info_open = self.is_info_sheet_open || self.info_sheet_closing;
+        if self.was_info_sheet_open && !info_open {
+            let urls = self.collect_info_media_urls(cx);
+            self.image_assets.release_urls(urls, Some(window), cx);
+            self.info_media.clear();
+            self.info_docs.clear();
+            self.info_links.clear();
+        }
+        self.was_info_sheet_open = info_open;
 
         // Ensure cached messages match currently selected chat, and rebuild
         // when the store reports any change (new/edited/deleted messages,

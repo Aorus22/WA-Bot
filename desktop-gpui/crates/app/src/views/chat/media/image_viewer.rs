@@ -3,6 +3,13 @@ use crate::views::chat::*;
 impl ChatView {
     /// Open the full-screen image viewer, fitted to the window.
     pub fn open_preview(&mut self, url: String, msg: Option<(String, Message)>, cx: &mut Context<Self>) {
+        // Stepping through the gallery replaces the open photo; drop the old
+        // full-resolution copy so previous photos do not stay pinned in RAM.
+        if let Some(prev) = self.preview_image_url.as_ref() {
+            if prev != &url {
+                release_picture(prev, None, cx);
+            }
+        }
         self.preview_image_url = Some(url);
         self.preview_msg = msg;
         self.preview_zoom = 1.0;

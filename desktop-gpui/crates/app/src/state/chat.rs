@@ -1,5 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use wabot_backend_client::dto::{Chat, ChatState, Message};
+
+/// Maximum number of chats kept in `ChatStore::messages_by_chat` at once.
+pub const MAX_CACHED_CHATS: usize = 6;
+/// Messages retained for recently-visited inactive chats so switching back is instant.
+pub const INACTIVE_CHAT_KEEP_MESSAGES: usize = 40;
+/// Sliding-window cap for the active conversation when paginating up/down.
+pub const MAX_ACTIVE_CHAT_MESSAGES: usize = 350;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatMessagesEntry {
@@ -64,6 +71,9 @@ pub struct ChatStore {
     pub names_changed: bool,
     pub chats_version: u64,
     pub messages_by_chat: HashMap<String, ChatMessagesEntry>,
+    /// Most-recently-active chat IDs (front = newest), used to evict stale
+    /// chats from `messages_by_chat` so memory stays bounded across sessions.
+    pub chat_lru: VecDeque<String>,
     pub active_chat_id: Option<String>,
     /// Who is typing where: chat id → sender → entry. Entries go stale after
     /// [`TYPING_TTL`] unless renewed (WhatsApp repeats "composing" every few seconds).
@@ -181,6 +191,51 @@ impl ChatStore {
         self.messages_by_chat
             .entry(chat_id.to_string())
             .or_insert_with(ChatMessagesEntry::default)
+    }
+
+    /// Mark `chat_id` as the open conversation, refresh its LRU position, and
+    /// trim/evict inactive chats so `messages_by_chat` stays bounded in RAM.
+    pub fn set_active_chat(&mut self, chat_id: &str) {
+        self.active_chat_id = Some(chat_id.to_string());
+        if let Some(pos) = self.chat_lru.iter().position(|id| id == chat_id) {
+            self.chat_lru.remove(pos);
+        }
+        self.chat_lru.push_front(chat_id.to_string());
+        self.trim_inactive_chats();
+    }
+
+    /// Evict chats beyond `MAX_CACHED_CHATS` and trim remaining inactive chats
+    /// down to their newest `INACTIVE_CHAT_KEEP_MESSAGES` entries.
+    pub fn trim_inactive_chats(&mut self) {
+        let active = self.active_chat_id.clone();
+
+        while self.chat_lru.len() > MAX_CACHED_CHATS {
+            let Some(evicted) = self.chat_lru.pop_back() else {
+                break;
+            };
+            if active.as_deref() == Some(evicted.as_str()) {
+                self.chat_lru.push_front(evicted);
+                break;
+            }
+            self.messages_by_chat.remove(&evicted);
+        }
+
+        let keep: HashSet<&str> = self.chat_lru.iter().map(String::as_str).collect();
+        self.messages_by_chat.retain(|id, _| {
+            active.as_deref() == Some(id.as_str()) || keep.contains(id.as_str())
+        });
+
+        for (id, entry) in self.messages_by_chat.iter_mut() {
+            if active.as_deref() == Some(id.as_str()) {
+                continue;
+            }
+            if entry.messages.len() > INACTIVE_CHAT_KEEP_MESSAGES {
+                let drop_n = entry.messages.len() - INACTIVE_CHAT_KEEP_MESSAGES;
+                entry.messages.drain(..drop_n);
+                entry.has_more = true;
+                entry.has_more_next = false;
+            }
+        }
     }
 
     pub fn set_messages(&mut self, chat_id: &str, msgs: Vec<Message>, has_more: bool) {
@@ -514,6 +569,7 @@ impl ChatStore {
                 let before = self.chats.len();
                 self.chats.retain(|c| c.id != *chat_id);
                 self.messages_by_chat.remove(chat_id);
+                self.chat_lru.retain(|id| id != chat_id);
                 if self.active_chat_id.as_deref() == Some(chat_id.as_str()) {
                     self.active_chat_id = None;
                 }
@@ -987,5 +1043,37 @@ mod tests {
         assert_eq!(store.chats[0].disappearing_secs, 86_400);
         store.set_disappearing("a@s.whatsapp.net", 0);
         assert_eq!(store.chats[0].disappearing_secs, 0);
+    }
+
+    #[test]
+    fn set_active_chat_trims_inactive_and_evicts_lru() {
+        let mut store = ChatStore::new();
+        for idx in 0..(MAX_CACHED_CHATS + 3) {
+            let cid = format!("chat-{idx}");
+            let msgs: Vec<Message> = (0..(INACTIVE_CHAT_KEEP_MESSAGES + 20))
+                .map(|m| make_test_msg(&format!("{cid}-m{m}"), m as i64, "hi", "read"))
+                .collect();
+            store.set_messages(&cid, msgs, false);
+            store.set_active_chat(&cid);
+        }
+
+        // Only MAX_CACHED_CHATS most recent chats remain.
+        assert_eq!(store.messages_by_chat.len(), MAX_CACHED_CHATS);
+        assert!(!store.messages_by_chat.contains_key("chat-0"));
+        assert!(!store.messages_by_chat.contains_key("chat-1"));
+        assert!(!store.messages_by_chat.contains_key("chat-2"));
+
+        // Active chat keeps all its messages; inactive cached chats are trimmed.
+        let active_id = format!("chat-{}", MAX_CACHED_CHATS + 2);
+        assert_eq!(
+            store.messages_by_chat[&active_id].messages.len(),
+            INACTIVE_CHAT_KEEP_MESSAGES + 20
+        );
+        let prev_id = format!("chat-{}", MAX_CACHED_CHATS + 1);
+        assert_eq!(
+            store.messages_by_chat[&prev_id].messages.len(),
+            INACTIVE_CHAT_KEEP_MESSAGES
+        );
+        assert!(store.messages_by_chat[&prev_id].has_more);
     }
 }

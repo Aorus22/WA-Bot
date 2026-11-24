@@ -31,6 +31,109 @@ pub(crate) type ThumbnailCache = VecDeque<(ThumbnailKey, Arc<RenderImage>)>;
 /// entry is a big picture.
 pub(crate) const THUMBNAIL_CACHE_LIMIT: usize = 24;
 
+/// Decoded-pixel RAM budget for raw `ImageAssetLoader` assets (GIFs, animated
+/// stickers, small images, thumbnails) that bypass `ThumbnailCache`.
+pub(crate) const IMAGE_ASSET_BUDGET_BYTES: usize = 96 * 1024 * 1024;
+
+/// Estimated decoded BGRA memory footprint of a `RenderImage` (all frames).
+pub(crate) fn estimate_render_image_bytes(img: &RenderImage) -> usize {
+    let size = img.size(0);
+    let w = size.width.0.max(1) as usize;
+    let h = size.height.0.max(1) as usize;
+    let frames = img.frame_count().max(1);
+    w.saturating_mul(h).saturating_mul(4).saturating_mul(frames)
+}
+
+/// Byte-budgeted LRU tracker for URLs loaded directly through GPUI's
+/// `ImageAssetLoader` (GIFs, animated WebP, stickers, thumbnails) so they are
+/// evicted from RAM and the GPU sprite atlas instead of accumulating forever.
+pub(crate) struct ImageAssetBudget {
+    max_bytes: usize,
+    total_bytes: usize,
+    entries: VecDeque<(String, usize)>,
+}
+
+impl Default for ImageAssetBudget {
+    fn default() -> Self {
+        Self::new(IMAGE_ASSET_BUDGET_BYTES)
+    }
+}
+
+impl ImageAssetBudget {
+    pub(crate) fn new(max_bytes: usize) -> Self {
+        Self {
+            max_bytes,
+            total_bytes: 0,
+            entries: VecDeque::new(),
+        }
+    }
+
+    /// Record `url` as most recently used with `bytes` footprint, returning any
+    /// least-recently-used URLs evicted to stay within `max_bytes`.
+    pub(crate) fn touch(&mut self, url: &str, bytes: usize) -> Vec<String> {
+        if let Some(pos) = self.entries.iter().position(|(u, _)| u == url) {
+            if let Some((_, old_bytes)) = self.entries.remove(pos) {
+                self.total_bytes = self.total_bytes.saturating_sub(old_bytes);
+            }
+        }
+        self.entries.push_front((url.to_string(), bytes));
+        self.total_bytes = self.total_bytes.saturating_add(bytes);
+
+        let mut evicted = Vec::new();
+        while self.total_bytes > self.max_bytes && self.entries.len() > 1 {
+            if let Some((old_url, old_bytes)) = self.entries.pop_back() {
+                self.total_bytes = self.total_bytes.saturating_sub(old_bytes);
+                evicted.push(old_url);
+            }
+        }
+        evicted
+    }
+
+    pub(crate) fn remove(&mut self, url: &str) {
+        if let Some(pos) = self.entries.iter().position(|(u, _)| u == url) {
+            if let Some((_, old_bytes)) = self.entries.remove(pos) {
+                self.total_bytes = self.total_bytes.saturating_sub(old_bytes);
+            }
+        }
+    }
+
+    /// Track a URL rendered via `img(url)` and evict over-budget assets.
+    pub(crate) fn track_loaded(&mut self, url: &str, window: &mut Window, cx: &mut App) {
+        let bytes = match cx.fetch_asset::<ImageAssetLoader>(&preview_resource(url)) {
+            Some(Ok(img)) => estimate_render_image_bytes(&img),
+            _ => 0,
+        };
+        let evicted = self.touch(url, bytes);
+        for old_url in evicted {
+            release_picture(&old_url, Some(window), cx);
+        }
+    }
+
+    /// Drop a batch of tracked URLs from GPUI's asset cache and GPU atlas.
+    pub(crate) fn release_urls(
+        &mut self,
+        urls: impl IntoIterator<Item = String>,
+        mut window: Option<&mut Window>,
+        cx: &mut App,
+    ) {
+        for url in urls {
+            self.remove(&url);
+            release_picture(&url, window.as_deref_mut(), cx);
+        }
+    }
+}
+
+/// Drop every cached bubble thumbnail from the GPU sprite atlas.
+pub(crate) fn clear_thumbnails(
+    cache: &mut ThumbnailCache,
+    mut window: Option<&mut Window>,
+    cx: &mut App,
+) {
+    while let Some((_, dropped)) = cache.pop_back() {
+        cx.drop_image(dropped, window.as_deref_mut());
+    }
+}
+
 /// Below this linear shrink the GPU's own filtering is good enough and a copy
 /// would only cost memory.
 const MIN_SHRINK: f32 = 1.5;
@@ -192,5 +295,27 @@ mod tests {
         // enlarge it: there is nothing to shrink.
         let source = picture(1000, 100, 1);
         assert!(downscale(&source, (425, 225)).is_none());
+    }
+
+    #[test]
+    fn estimate_bytes_scales_with_frame_count() {
+        let single = picture(100, 50, 1);
+        let animated = picture(100, 50, 20);
+        assert_eq!(estimate_render_image_bytes(&single), 100 * 50 * 4);
+        assert_eq!(estimate_render_image_bytes(&animated), 100 * 50 * 4 * 20);
+    }
+
+    #[test]
+    fn asset_budget_evicts_least_recently_used_entries() {
+        let mut budget = ImageAssetBudget::new(1000);
+        assert!(budget.touch("a", 400).is_empty());
+        assert!(budget.touch("b", 400).is_empty());
+        // Touching "a" refreshes it so "b" is evicted when "c" arrives.
+        assert!(budget.touch("a", 400).is_empty());
+        let evicted = budget.touch("c", 500);
+        assert_eq!(evicted, vec!["b".to_string()]);
+        // A single entry larger than the budget is kept until another arrives.
+        let evicted = budget.touch("huge-gif", 5000);
+        assert_eq!(evicted, vec!["a".to_string(), "c".to_string()]);
     }
 }

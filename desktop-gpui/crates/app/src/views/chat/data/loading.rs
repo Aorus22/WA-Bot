@@ -1,6 +1,37 @@
 use crate::views::chat::*;
 
 impl ChatView {
+    /// Resolved image URLs currently held by the Info Sheet media grid.
+    pub(crate) fn collect_info_media_urls(&self, cx: &App) -> Vec<String> {
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        self.info_media
+            .iter()
+            .filter(|m| m.message_type == "image" || m.message_type == "gif" || m.message_type == "sticker")
+            .filter_map(|m| m.media_url.as_deref())
+            .filter(|u| !u.is_empty())
+            .map(|u| resolve_media_url(u, &base_url))
+            .collect()
+    }
+
+    /// Resolved sticker URLs currently loaded in the sticker picker.
+    pub(crate) fn collect_sticker_panel_urls(&self, cx: &App) -> Vec<String> {
+        let base_url = if cx.has_global::<AuthState>() {
+            AuthState::global(cx).base_url.clone()
+        } else {
+            "http://127.0.0.1:3000/api".to_string()
+        };
+        self.sticker_picker
+            .recent
+            .iter()
+            .chain(self.sticker_picker.favorites.iter())
+            .map(|s| resolve_media_url(&s.media_url, &base_url))
+            .collect()
+    }
+
     /// Fetch all chats from GET /api/chats and populate ChatStore
     pub fn load_chats(&mut self, cx: &mut Context<Self>) {
         if self.is_loading_chats {
@@ -108,9 +139,20 @@ impl ChatView {
         self.highlighted_message_id = None;
         self.messages_list_state.scroll_to_end();
 
+        // Release decoded images, GIFs, stickers and thumbnails from the chat
+        // we are leaving so GPUI's asset cache and GPU atlas do not grow forever.
+        let prev_media = std::mem::take(&mut self.active_chat_media_urls);
+        self.image_assets.release_urls(prev_media, Some(window), cx);
+        let prev_info_urls = self.collect_info_media_urls(cx);
+        self.image_assets.release_urls(prev_info_urls, Some(window), cx);
+        self.info_media.clear();
+        self.info_docs.clear();
+        self.info_links.clear();
+        clear_thumbnails(&mut self.bubble_pictures, Some(window), cx);
+
         if cx.has_global::<ChatStore>() {
             let store = ChatStore::global_mut(cx);
-            store.active_chat_id = Some(chat_id.clone());
+            store.set_active_chat(&chat_id);
         }
 
         // Mark as read in the backend; its chat_update clears the badge, unless
@@ -416,6 +458,10 @@ impl ChatView {
                                     }
                                     all_msgs.sort_by_key(|m| m.timestamp);
                                     all_msgs.dedup_by(|a, b| a.id == b.id);
+                                    if all_msgs.len() > crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES {
+                                        all_msgs.truncate(crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES);
+                                        this.has_more_next = true;
+                                    }
                                     this.rebuild_message_cache_preserve_scroll(&cid_fetch, &all_msgs);
                                     if cx.has_global::<ChatStore>() {
                                         ChatStore::global_mut(cx).set_messages(&cid_fetch, all_msgs, this.has_more);
@@ -476,6 +522,11 @@ impl ChatView {
                                     all_msgs.extend(newer_msgs);
                                     all_msgs.sort_by_key(|m| m.timestamp);
                                     all_msgs.dedup_by(|a, b| a.id == b.id);
+                                    if all_msgs.len() > crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES {
+                                        let drop_n = all_msgs.len() - crate::state::chat::MAX_ACTIVE_CHAT_MESSAGES;
+                                        all_msgs.drain(..drop_n);
+                                        this.has_more = true;
+                                    }
                                     this.rebuild_message_cache_preserve_scroll(&cid_fetch, &all_msgs);
                                     if cx.has_global::<ChatStore>() {
                                         ChatStore::global_mut(cx).set_messages(&cid_fetch, all_msgs, this.has_more);

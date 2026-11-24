@@ -351,6 +351,8 @@ impl ChatView {
                                     ),
                             )
                             .children(quoted_thumb.map(|url| {
+                                this.image_assets.track_loaded(&url, window, cx);
+                                this.active_chat_media_urls.insert(url.clone());
                                 img(url)
                                     .id(format!("quote-thumb-{}", r_msg.msg.id))
                                     .w(px(40.0))
@@ -395,6 +397,12 @@ impl ChatView {
                             window,
                             cx,
                         );
+                        if picture.is_none() {
+                            // Animated GIF/WebP or small images stay in GPUI's
+                            // asset cache directly; track them under the byte budget.
+                            this.image_assets.track_loaded(&full_url, window, cx);
+                            this.active_chat_media_urls.insert(full_url.clone());
+                        }
                         let frame = div()
                                 .w(px(image_w))
                                 .h(px(image_h))
@@ -437,6 +445,8 @@ impl ChatView {
                     if let Some(ref m_url) = r_msg.msg.media_url {
                         let full_url = resolve_media_url(m_url, &base_url);
                         let click_url = full_url.clone();
+                        this.image_assets.track_loaded(&full_url, window, cx);
+                        this.active_chat_media_urls.insert(full_url.clone());
                         Some(
                             div()
                                 .w(px(160.0))
@@ -465,6 +475,10 @@ impl ChatView {
                     }
                 } else if is_video {
                     let video_url = r_msg.msg.media_url.as_ref().map(|url| resolve_media_url(url, &base_url));
+                    if let Some(ref thumb_url) = video_thumbnail {
+                        this.image_assets.track_loaded(thumb_url, window, cx);
+                        this.active_chat_media_urls.insert(thumb_url.clone());
+                    }
                     let (video_w, video_h) = image_dims.unwrap_or((MESSAGE_IMAGE_MIN_WIDTH, MESSAGE_IMAGE_MIN_HEIGHT));
                     Some(
                         video_preview(format!("msg-video-{}", r_msg.msg.id), video_thumbnail.clone(), video_w, video_h)
